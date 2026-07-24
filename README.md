@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/LazyForza.App/Assets/LazyForzaWordmark.png" alt="LazyForza" width="620">
+  <img src="docs/assets/LazyForzaReadmeBanner.png" alt="LazyForza" width="720">
 </p>
 
 <p align="center">
