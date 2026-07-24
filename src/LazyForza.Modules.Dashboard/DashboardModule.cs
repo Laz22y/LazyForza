@@ -18,6 +18,7 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
     private string? activeVehicleProfileId;
     private bool shiftRecommendationsEnabled = true;
     private readonly ConcurrentDictionary<string, byte> profilesPendingForget = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> profileAliases = new(StringComparer.Ordinal);
 
     public DashboardModule(ShiftLearner? learner = null)
         : base(new ModuleDescriptor(
@@ -57,6 +58,14 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
     public void ForgetVehicleProfile(string vehicleProfileId)
     {
         profilesPendingForget[vehicleProfileId] = 0;
+        foreach (var alias in profileAliases
+                     .Where(pair => string.Equals(
+                         pair.Value,
+                         vehicleProfileId,
+                         StringComparison.Ordinal))
+                     .Select(pair => pair.Key)
+                     .ToArray())
+            profileAliases.TryRemove(alias, out _);
         if (string.Equals(ActiveVehicleProfileId, vehicleProfileId, StringComparison.Ordinal))
             Volatile.Write(ref shiftRecommendationsEnabled, true);
     }
@@ -68,6 +77,7 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
         Volatile.Write(ref activeVehicleProfileId, null);
         Volatile.Write(ref shiftRecommendationsEnabled, true);
         profilesPendingForget.Clear();
+        profileAliases.Clear();
         runCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         subscription = await Context.Telemetry.SubscribeAsync(ModuleId, runCancellation.Token).ConfigureAwait(false);
         await Context.Hud.AttachAsync(this, cancellationToken).ConfigureAwait(false);
@@ -92,6 +102,7 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
         Volatile.Write(ref activeVehicleProfileId, null);
         Volatile.Write(ref shiftRecommendationsEnabled, true);
         profilesPendingForget.Clear();
+        profileAliases.Clear();
         Volatile.Write(ref snapshot, null);
     }
 
@@ -105,9 +116,13 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
             if (previousLearning.Fingerprint is not null &&
                 previousLearning.ConfigurationRevision != currentLearning.ConfigurationRevision)
             {
-                await Context.AnalysisStore
+                var savedProfileId = await Context.AnalysisStore
                     .SaveShiftLearningAsync(previousLearning, cancellationToken)
                     .ConfigureAwait(false);
+                var previousFingerprintId =
+                    VehicleProfileIdentity.TryCreate(previousLearning.Fingerprint);
+                if (previousFingerprintId is not null && savedProfileId is not null)
+                    profileAliases[previousFingerprintId] = savedProfileId;
                 Context.Log(
                     $"Vehicle configuration changed from {previousLearning.Fingerprint.CarOrdinal}/" +
                     $"{previousLearning.Fingerprint.PerformanceIndex} to " +
@@ -115,21 +130,26 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
                     "saved the previous shift profile and started a new profile.");
             }
 
-            var previousProfileId = VehicleProfileIdentity.TryCreate(previousLearning.Fingerprint);
-            var currentProfileId = VehicleProfileIdentity.TryCreate(currentLearning.Fingerprint);
+            var currentFingerprintId =
+                VehicleProfileIdentity.TryCreate(currentLearning.Fingerprint);
+            string? currentProfileId = null;
+            if (currentFingerprintId is not null)
+            {
+                if (!profileAliases.TryGetValue(currentFingerprintId, out currentProfileId))
+                {
+                    currentProfileId = await Context.AnalysisStore
+                        .SaveShiftLearningAsync(currentLearning, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (currentProfileId is not null)
+                        profileAliases[currentFingerprintId] = currentProfileId;
+                }
+            }
             if (currentProfileId is not null &&
                 profilesPendingForget.TryRemove(currentProfileId, out _))
             {
                 learner.Reset();
                 currentLearning = learner.Snapshot;
                 currentProfileId = null;
-            }
-
-            if (previousProfileId is null && currentProfileId is not null)
-            {
-                await Context.AnalysisStore
-                    .SaveShiftLearningAsync(currentLearning, cancellationToken)
-                    .ConfigureAwait(false);
             }
 
             if (!string.Equals(ActiveVehicleProfileId, currentProfileId, StringComparison.Ordinal))
@@ -184,7 +204,13 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
             Volatile.Write(ref snapshot, hud);
             if (framesObserved % 300 == 0 && hud.ShiftLearning.Fingerprint is not null)
             {
-                await Context.AnalysisStore.SaveShiftLearningAsync(hud.ShiftLearning, cancellationToken).ConfigureAwait(false);
+                var savedProfileId = await Context.AnalysisStore
+                    .SaveShiftLearningAsync(hud.ShiftLearning, cancellationToken)
+                    .ConfigureAwait(false);
+                var fingerprintId =
+                    VehicleProfileIdentity.TryCreate(hud.ShiftLearning.Fingerprint);
+                if (fingerprintId is not null && savedProfileId is not null)
+                    profileAliases[fingerprintId] = savedProfileId;
             }
         }
     }

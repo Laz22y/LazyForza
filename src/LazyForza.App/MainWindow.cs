@@ -19,6 +19,7 @@ using LazyForza.Modules.Dashboard;
 using LazyForza.Modules.LapAnalysis;
 using LazyForza.Overlay;
 using LazyForza.Storage;
+using LazyForza.Update;
 
 namespace LazyForza.App;
 
@@ -43,9 +44,11 @@ internal sealed class MainWindow : Window
     private readonly DataDirectoryService directories;
     private readonly TelemetryRecorderController recorder;
     private readonly TelemetrySourceKind sourceKind;
+    private readonly ApplicationUpdateManager updateManager;
     private readonly ContentControl content = new();
     private readonly ListBox navigation = new();
     private readonly DispatcherTimer refreshTimer;
+    private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly HashSet<Guid> selectedLapIds = [];
     private readonly Dictionary<Guid, HashSet<int>> selectedLapPerformanceClasses = [];
     private readonly Dictionary<Guid, TrackTemplate> trackPreviewCache = [];
@@ -60,7 +63,8 @@ internal sealed class MainWindow : Window
         LazyForzaStore store,
         DataDirectoryService directories,
         TelemetryRecorderController recorder,
-        TelemetrySourceKind sourceKind)
+        TelemetrySourceKind sourceKind,
+        ApplicationUpdateManager updateManager)
     {
         this.moduleManager = moduleManager;
         this.telemetry = telemetry;
@@ -69,6 +73,7 @@ internal sealed class MainWindow : Window
         this.directories = directories;
         this.recorder = recorder;
         this.sourceKind = sourceKind;
+        this.updateManager = updateManager;
         Title = "LazyForza";
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForza.png", UriKind.Absolute));
         Width = 1280;
@@ -89,7 +94,30 @@ internal sealed class MainWindow : Window
             refreshVisiblePage?.Invoke();
         }, Dispatcher);
         refreshTimer.Start();
-        Closed += (_, _) => refreshTimer.Stop();
+        Closed += (_, _) =>
+        {
+            refreshTimer.Stop();
+            lifetimeCancellation.Cancel();
+            lifetimeCancellation.Dispose();
+        };
+    }
+
+    public async Task CheckForUpdatesOnStartupAsync()
+    {
+        if (!updateManager.CheckOnStartup) return;
+        try
+        {
+            await Task.Delay(650, lifetimeCancellation.Token);
+            var release = await updateManager.CheckAsync(lifetimeCancellation.Token);
+            if (release is not null) await OfferUpdateAsync(release);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            updateManager.ReportFailure("Startup update check failed", exception);
+        }
     }
 
     private UIElement BuildShell()
@@ -1413,7 +1441,7 @@ internal sealed class MainWindow : Window
         var profilesSection = new StackPanel();
         profilesSection.Children.Add(Label("已存车辆配置", 18, FontWeights.SemiBold));
         var profilesNote = Label(
-            "同一车型会按 PI、发动机与传动的可观察特征分开保存。仅改变悬架、胎压等官方 UDP 不可见参数时，无法保证识别为独立调校。",
+            "车辆按车型折叠整理；展开后可管理各调校。不同 PI 必定分开，同 PI 只有在多个稳定特征持续不一致时才建立新调校。",
             12,
             FontWeights.Normal,
             "MutedBrush");
@@ -1455,29 +1483,43 @@ internal sealed class MainWindow : Window
                 return;
             }
 
-            var tuneNumbers = profiles
-                .GroupBy(profile => profile.Fingerprint.CarOrdinal)
-                .SelectMany(group => group
-                    .OrderBy(profile => profile.UpdatedAt)
-                    .Select((profile, index) => (profile.Id, Number: index + 1, Count: group.Count())))
-                .ToDictionary(item => item.Id, item => (item.Number, item.Count), StringComparer.Ordinal);
-
-            foreach (var profile in profiles)
+            foreach (var vehicleGroup in profiles
+                         .GroupBy(profile => profile.Fingerprint.CarOrdinal)
+                         .OrderByDescending(group => group.Max(profile => profile.UpdatedAt)))
             {
-                var tune = tuneNumbers[profile.Id];
-                var displayName = profile.CustomName ??
-                                  (tune.Count > 1
-                                      ? $"车辆 {profile.Fingerprint.CarOrdinal} · 调校 {tune.Number}"
-                                      : $"车辆 {profile.Fingerprint.CarOrdinal}");
-                profilesPanel.Children.Add(VehicleProfileCard(
-                    profile,
-                    displayName,
-                    module,
-                    () =>
-                    {
-                        profileListSignature = null;
-                        RefreshProfiles(true);
-                    }));
+                var orderedTunes = vehicleGroup
+                    .OrderBy(profile => profile.UpdatedAt)
+                    .ToArray();
+                var tunePanel = new StackPanel();
+                for (var index = 0; index < orderedTunes.Length; index++)
+                {
+                    var profile = orderedTunes[index];
+                    var displayName = profile.CustomName ??
+                                      (orderedTunes.Length > 1
+                                          ? $"调校 {index + 1}"
+                                          : "车辆配置");
+                    tunePanel.Children.Add(VehicleProfileCard(
+                        profile,
+                        displayName,
+                        module,
+                        () =>
+                        {
+                            profileListSignature = null;
+                            RefreshProfiles(true);
+                        }));
+                }
+
+                profilesPanel.Children.Add(new Expander
+                {
+                    Header = VehicleProfileGroupHeader(
+                        VehicleNameCatalog.DisplayName(vehicleGroup.Key),
+                        vehicleGroup.Key,
+                        orderedTunes,
+                        activeProfileId),
+                    Content = tunePanel,
+                    IsExpanded = false,
+                    Style = (Style)FindResource("VehicleGroupExpander")
+                });
             }
         }
 
@@ -1494,7 +1536,7 @@ internal sealed class MainWindow : Window
             summaryLabel.Text = $"{LearningStateText(learning.State)} · 完成度 {learning.Progress:P0} · 置信度 {learning.Confidence:P0}\n有效样本 {learning.AcceptedSamples} · 转速区间 {learning.ReadyBins}/{learning.RequiredBins} · 挡位 {learning.ReadyGears}\n预计：{eta} · 推荐挡位{(recommendationsEnabled ? "已启用" : "已关闭")}\n{learning.StatusMessage}";
             guidanceLabel.Text = $"学习方法\n{learning.Guidance}";
             fingerprintLabel.Text = learning.Fingerprint is { } fingerprint
-                ? $"当前配置：{PerformanceClassName(fingerprint.CarClass)} {fingerprint.PerformanceIndex} · 车型编号 {fingerprint.CarOrdinal} · {DrivetrainText(fingerprint.DrivetrainType)} · {fingerprint.NumCylinders} 缸 · 最高 {fingerprint.RoundedMaxRpm:N0} RPM"
+                ? $"当前配置：{VehicleNameCatalog.DisplayName(fingerprint.CarOrdinal)} · {PerformanceClassName(fingerprint.CarClass)} {fingerprint.PerformanceIndex} · 车型编号 {fingerprint.CarOrdinal} · {DrivetrainText(fingerprint.DrivetrainType)} · {fingerprint.NumCylinders} 缸 · 最高 {fingerprint.RoundedMaxRpm:N0} RPM"
                 : "等待车辆数据。";
             var nextSignature = string.Join("|", learning.Targets.Select(target => $"{target.FromGear}:{target.ToGear}:{target.TargetRpm:0}:{target.CueRpm:0}:{target.Confidence:0.000}"));
             if (!string.Equals(targetSignature, nextSignature, StringComparison.Ordinal))
@@ -1515,6 +1557,69 @@ internal sealed class MainWindow : Window
         RefreshProfiles(true);
         refreshVisiblePage();
         return Scroll(stack);
+    }
+
+    private UIElement VehicleProfileGroupHeader(
+        string vehicleName,
+        int carOrdinal,
+        IReadOnlyList<VehicleProfileSummary> profiles,
+        string? activeProfileId)
+    {
+        var root = new Grid();
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var text = new StackPanel();
+        text.Children.Add(Label(vehicleName, 16, FontWeights.SemiBold));
+        var classes = string.Join(
+            " · ",
+            profiles
+                .Select(profile =>
+                    $"{PerformanceClassName(profile.Fingerprint.CarClass)} {profile.Fingerprint.PerformanceIndex}")
+                .Distinct(StringComparer.Ordinal));
+        var subtitle = Label(
+            $"车型编号 {carOrdinal} · {classes}",
+            12,
+            FontWeights.Normal,
+            "MutedBrush");
+        subtitle.Margin = new Thickness(0, 3, 0, 0);
+        text.Children.Add(subtitle);
+        root.Children.Add(text);
+
+        var badges = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        if (profiles.Any(profile =>
+                string.Equals(profile.Id, activeProfileId, StringComparison.Ordinal)))
+        {
+            badges.Children.Add(new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(38, 49, 214, 231)),
+                BorderBrush = Brush("AccentBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(7, 2, 7, 2),
+                Margin = new Thickness(0, 0, 8, 0),
+                Child = Label("当前", 10, FontWeights.SemiBold, "AccentBrush")
+            });
+        }
+        badges.Children.Add(new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(30, 42, 55)),
+            BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(8, 3, 8, 3),
+            Child = Label(
+                profiles.Count > 1 ? $"{profiles.Count} 个调校" : "1 个配置",
+                11,
+                FontWeights.SemiBold,
+                "MutedBrush")
+        });
+        Grid.SetColumn(badges, 1);
+        root.Children.Add(badges);
+        return root;
     }
 
     private Border VehicleProfileCard(
@@ -1657,6 +1762,65 @@ internal sealed class MainWindow : Window
         2 => "四驱",
         _ => "驱动未知"
     };
+
+    private async Task OfferUpdateAsync(GitHubReleaseInfo release, TextBlock? status = null)
+    {
+        status?.SetCurrentValue(
+            TextBlock.TextProperty,
+            $"发现 {release.Tag}，等待你的确认。");
+
+        if (!updateManager.CanInstallAutomatically)
+        {
+            MessageBox.Show(
+                $"发现 LazyForza {release.Version.ToString(3)}。\n\n" +
+                "当前运行的是开发构建。为避免发行包覆盖源码输出目录，本次只检查版本，不执行自动安装。",
+                "发现新版本",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        if (MessageBox.Show(
+                $"发现 LazyForza {release.Version.ToString(3)}。\n\n" +
+                "是否现在下载并安装？下载完成后会校验文件，随后自动关闭、替换并重启 LazyForza。" +
+                "如果安装失败，程序会恢复原文件。\n\n本次更新可以跳过，不会强制安装。",
+                "发现新版本",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information) != MessageBoxResult.Yes)
+        {
+            status?.SetCurrentValue(TextBlock.TextProperty, $"已跳过 {release.Tag}。");
+            return;
+        }
+
+        var progressWindow = new UpdateProgressWindow(this, release.Version.ToString(3));
+        progressWindow.Show();
+        try
+        {
+            var prepared = await updateManager.DownloadAsync(
+                release,
+                progressWindow.Progress,
+                progressWindow.CancellationToken);
+            progressWindow.Finish();
+            status?.SetCurrentValue(TextBlock.TextProperty, "更新已校验，正在重启安装…");
+            updateManager.InstallAndRestart(prepared);
+        }
+        catch (OperationCanceledException)
+        {
+            progressWindow.Finish();
+            status?.SetCurrentValue(TextBlock.TextProperty, "已取消下载。");
+        }
+        catch (Exception exception)
+        {
+            progressWindow.Finish();
+            updateManager.ReportFailure("Update download or install failed", exception);
+            status?.SetCurrentValue(TextBlock.TextProperty, "更新失败，可稍后重试。");
+            MessageBox.Show(
+                $"更新未安装，当前版本没有被更改。\n\n{exception.Message}",
+                "更新失败",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
 
     private UIElement SettingsPage()
     {
@@ -1878,14 +2042,86 @@ internal sealed class MainWindow : Window
         controls.Children.Add(footer);
         stack.Children.Add(Card(controls));
 
-        var versionLabel = Label(
-            $"LazyForza · 当前版本 {CurrentApplicationVersion()}",
+        var updatePanel = new Grid();
+        updatePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        updatePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        updatePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        updatePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        updatePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var updateHeading = Label("应用更新", 17, FontWeights.SemiBold);
+        updatePanel.Children.Add(updateHeading);
+        var updateToggle = new ToggleButton
+        {
+            IsChecked = updateManager.CheckOnStartup,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Padding = new Thickness(12, 7, 12, 7)
+        };
+        void RefreshUpdateToggle() =>
+            updateToggle.Content = updateToggle.IsChecked == true ? "启动检查：开" : "启动检查：关";
+        RefreshUpdateToggle();
+        updateToggle.Click += (_, _) =>
+        {
+            updateManager.CheckOnStartup = updateToggle.IsChecked == true;
+            RefreshUpdateToggle();
+        };
+        Grid.SetColumn(updateToggle, 1);
+        updatePanel.Children.Add(updateToggle);
+
+        var updateStatus = Label(
+            $"当前版本 {CurrentApplicationVersion()} · " +
+            (updateManager.CanInstallAutomatically
+                ? "发现新版后由你确认，程序不会强制更新。"
+                : "开发构建仅检查版本，不覆盖开发目录。"),
             12,
             FontWeights.Normal,
             "MutedBrush");
-        versionLabel.HorizontalAlignment = HorizontalAlignment.Right;
-        versionLabel.Margin = new Thickness(4, 4, 4, 0);
-        stack.Children.Add(versionLabel);
+        updateStatus.Margin = new Thickness(0, 8, 18, 12);
+        Grid.SetRow(updateStatus, 1);
+        Grid.SetColumnSpan(updateStatus, 2);
+        updatePanel.Children.Add(updateStatus);
+
+        var checkNow = new Button
+        {
+            Content = "立即检查",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(16, 8, 16, 8)
+        };
+        checkNow.Click += async (_, _) =>
+        {
+            checkNow.IsEnabled = false;
+            updateStatus.Text = "正在连接 GitHub…";
+            try
+            {
+                var release = await updateManager.CheckAsync(lifetimeCancellation.Token);
+                if (release is null)
+                {
+                    updateStatus.Text = $"已是最新版本 {CurrentApplicationVersion()}。";
+                }
+                else
+                {
+                    await OfferUpdateAsync(release, updateStatus);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                updateStatus.Text = "已取消检查。";
+            }
+            catch (Exception exception)
+            {
+                updateManager.ReportFailure("Manual update check failed", exception);
+                updateStatus.Text = $"检查失败：{exception.Message}";
+            }
+            finally
+            {
+                checkNow.IsEnabled = true;
+            }
+        };
+        Grid.SetRow(checkNow, 2);
+        Grid.SetColumnSpan(checkNow, 2);
+        updatePanel.Children.Add(checkNow);
+        stack.Children.Add(Card(updatePanel));
+
         return Scroll(stack);
 
         Slider AddValueSlider(

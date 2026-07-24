@@ -71,7 +71,9 @@ public interface IModuleSettingsStore
 
 public interface IAnalysisStore
 {
-    ValueTask SaveShiftLearningAsync(ShiftLearningSnapshot snapshot, CancellationToken cancellationToken);
+    ValueTask<string?> SaveShiftLearningAsync(
+        ShiftLearningSnapshot snapshot,
+        CancellationToken cancellationToken);
     ValueTask<bool> GetShiftRecommendationsEnabledAsync(string vehicleProfileId, CancellationToken cancellationToken);
 }
 

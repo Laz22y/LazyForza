@@ -29,7 +29,7 @@ public sealed record VehicleProfileSummary(
 
 public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisposable
 {
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 8;
     public const int MaxLapsPerTrack = 50;
     private readonly WinSqliteDatabase database;
     private bool disposed;
@@ -66,33 +66,55 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
 
     public string? GetAppSetting(string key) => database.QueryText($"SELECT Value FROM AppSettings WHERE Key={Quote(key)} LIMIT 1;");
 
-    public ValueTask SaveShiftLearningAsync(ShiftLearningSnapshot snapshot, CancellationToken cancellationToken)
+    public ValueTask<string?> SaveShiftLearningAsync(
+        ShiftLearningSnapshot snapshot,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (snapshot.Fingerprint is null) return ValueTask.CompletedTask;
-        var fingerprint = snapshot.Fingerprint;
-        if (!VehicleProfileIdentity.IsResolved(fingerprint)) return ValueTask.CompletedTask;
-        var idValue = VehicleProfileIdentity.Create(fingerprint);
+        if (snapshot.Fingerprint is null) return ValueTask.FromResult<string?>(null);
+        if (!VehicleProfileIdentity.IsResolved(snapshot.Fingerprint))
+            return ValueTask.FromResult<string?>(null);
+        var fingerprint = FingerprintFromObservedModels(snapshot);
+
+        var compatible = ListVehicleProfiles()
+            .Where(profile =>
+                VehicleTuneCompatibility.AreCompatible(profile.Fingerprint, fingerprint))
+            .OrderByDescending(profile => !string.IsNullOrWhiteSpace(profile.CustomName))
+            .ThenByDescending(profile => profile.CurveBins + profile.Gears + profile.ShiftTargets)
+            .ThenByDescending(profile => profile.Confidence)
+            .ThenByDescending(profile => profile.UpdatedAt)
+            .FirstOrDefault();
+        var idValue = compatible?.Id ?? VehicleProfileIdentity.Create(fingerprint);
+        var storedFingerprint = compatible?.Fingerprint ?? fingerprint;
         var id = Quote(idValue);
         var sql = "BEGIN IMMEDIATE;\n" +
             $"INSERT INTO VehicleProfiles(Id,CarOrdinal,CarClass,PI,Drivetrain,Cylinders,MaxRpm,CurveSignature,GearSignature,State,Confidence,UpdatedAt,DisplayName,RecommendationsEnabled) VALUES(" +
-            $"{id},{fingerprint.CarOrdinal},{fingerprint.CarClass},{fingerprint.PerformanceIndex},{fingerprint.DrivetrainType},{fingerprint.NumCylinders},{fingerprint.RoundedMaxRpm},{Quote(fingerprint.CurveSignature)},{Quote(fingerprint.GearSlopeSignature)},{Quote(snapshot.State.ToString())},{N(snapshot.Confidence)},{Quote(DateTimeOffset.UtcNow.ToString("O"))},NULL,1) " +
-            "ON CONFLICT(Id) DO UPDATE SET State=excluded.State,Confidence=excluded.Confidence,UpdatedAt=excluded.UpdatedAt;\n" +
-            $"DELETE FROM EngineCurveBins WHERE VehicleProfileId={id}; DELETE FROM GearModels WHERE VehicleProfileId={id}; DELETE FROM ShiftTargets WHERE VehicleProfileId={id};\n";
+            $"{id},{storedFingerprint.CarOrdinal},{storedFingerprint.CarClass},{storedFingerprint.PerformanceIndex},{storedFingerprint.DrivetrainType},{storedFingerprint.NumCylinders},{storedFingerprint.RoundedMaxRpm},{Quote(storedFingerprint.CurveSignature)},{Quote(storedFingerprint.GearSlopeSignature)},{Quote(snapshot.State.ToString())},{N(snapshot.Confidence)},{Quote(DateTimeOffset.UtcNow.ToString("O"))},NULL,1) " +
+            "ON CONFLICT(Id) DO UPDATE SET State=excluded.State,Confidence=MAX(VehicleProfiles.Confidence,excluded.Confidence),UpdatedAt=excluded.UpdatedAt;\n";
         foreach (var bin in snapshot.Curve)
         {
-            sql += $"INSERT INTO EngineCurveBins(VehicleProfileId,RpmCenter,SampleCount,MedianPower,MedianTorque,MedianBoost,Deviation,Confidence) VALUES({id},{bin.RpmCenter},{bin.SampleCount},{N(bin.MedianPowerWatts)},{N(bin.MedianTorqueNm)},{N(bin.MedianBoostPsi)},{N(bin.MedianAbsoluteDeviation)},{N(bin.Confidence)});\n";
+            sql +=
+                $"INSERT INTO EngineCurveBins(VehicleProfileId,RpmCenter,SampleCount,MedianPower,MedianTorque,MedianBoost,Deviation,Confidence) VALUES({id},{bin.RpmCenter},{bin.SampleCount},{N(bin.MedianPowerWatts)},{N(bin.MedianTorqueNm)},{N(bin.MedianBoostPsi)},{N(bin.MedianAbsoluteDeviation)},{N(bin.Confidence)}) " +
+                "ON CONFLICT(VehicleProfileId,RpmCenter) DO UPDATE SET SampleCount=excluded.SampleCount,MedianPower=excluded.MedianPower,MedianTorque=excluded.MedianTorque,MedianBoost=excluded.MedianBoost,Deviation=excluded.Deviation,Confidence=excluded.Confidence " +
+                "WHERE excluded.SampleCount>=EngineCurveBins.SampleCount;\n";
         }
         foreach (var gear in snapshot.Gears)
         {
-            sql += $"INSERT INTO GearModels(VehicleProfileId,Gear,Slope,SampleCount,Confidence) VALUES({id},{gear.Gear},{N(gear.RpmPerMeterPerSecond)},{gear.SampleCount},{N(gear.Confidence)});\n";
+            sql +=
+                $"INSERT INTO GearModels(VehicleProfileId,Gear,Slope,SampleCount,Confidence) VALUES({id},{gear.Gear},{N(gear.RpmPerMeterPerSecond)},{gear.SampleCount},{N(gear.Confidence)}) " +
+                "ON CONFLICT(VehicleProfileId,Gear) DO UPDATE SET Slope=excluded.Slope,SampleCount=excluded.SampleCount,Confidence=excluded.Confidence " +
+                "WHERE excluded.SampleCount>=GearModels.SampleCount;\n";
         }
         foreach (var target in snapshot.Targets)
         {
-            sql += $"INSERT INTO ShiftTargets(VehicleProfileId,FromGear,ToGear,TargetRpm,CueRpm,AfterRpm,Confidence,AlgorithmVersion) VALUES({id},{target.FromGear},{target.ToGear},{N(target.TargetRpm)},{N(target.CueRpm)},{N(target.AfterShiftRpm)},{N(target.Confidence)},'shift-v1.0.0');\n";
+            sql +=
+                $"INSERT INTO ShiftTargets(VehicleProfileId,FromGear,ToGear,TargetRpm,CueRpm,AfterRpm,Confidence,AlgorithmVersion) VALUES({id},{target.FromGear},{target.ToGear},{N(target.TargetRpm)},{N(target.CueRpm)},{N(target.AfterShiftRpm)},{N(target.Confidence)},'shift-v1.0.0') " +
+                "ON CONFLICT(VehicleProfileId,FromGear,ToGear) DO UPDATE SET TargetRpm=excluded.TargetRpm,CueRpm=excluded.CueRpm,AfterRpm=excluded.AfterRpm,Confidence=excluded.Confidence,AlgorithmVersion=excluded.AlgorithmVersion " +
+                "WHERE excluded.Confidence>=ShiftTargets.Confidence;\n";
         }
         database.Execute(sql + "COMMIT;");
-        return ValueTask.CompletedTask;
+        RefreshVehicleProfileGearSignature(idValue);
+        return ValueTask.FromResult<string?>(idValue);
     }
 
     public ValueTask<bool> GetShiftRecommendationsEnabledAsync(
@@ -538,9 +560,133 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
                 "ALTER TABLE VehicleProfiles ADD COLUMN RecommendationsEnabled INTEGER NOT NULL DEFAULT 1;\n" +
                 "CREATE INDEX IX_VehicleProfiles_CarOrdinal ON VehicleProfiles(CarOrdinal,UpdatedAt);\n" +
                 "UPDATE SchemaVersion SET Version=7;\nCOMMIT;");
+            version = 7;
+        }
+
+        if (version < 8)
+        {
+            ConsolidateCompatibleVehicleProfiles();
+            database.Execute(
+                "BEGIN IMMEDIATE;\n" +
+                "UPDATE SchemaVersion SET Version=8;\n" +
+                "COMMIT;");
+            version = 8;
         }
 
         if (SchemaVersion != CurrentSchemaVersion) throw new InvalidOperationException("Database schema version is newer than this LazyForza build.");
+    }
+
+    private void ConsolidateCompatibleVehicleProfiles()
+    {
+        var remaining = ListVehicleProfiles().ToList();
+        while (remaining.Count > 0)
+        {
+            var survivor = remaining
+                .OrderByDescending(profile => !string.IsNullOrWhiteSpace(profile.CustomName))
+                .ThenByDescending(profile =>
+                    profile.CurveBins + profile.Gears + profile.ShiftTargets)
+                .ThenByDescending(profile => profile.Confidence)
+                .ThenByDescending(profile => profile.UpdatedAt)
+                .First();
+            remaining.Remove(survivor);
+            var currentSurvivor = survivor;
+            while (true)
+            {
+                var duplicate = remaining
+                    .Where(profile =>
+                        VehicleTuneCompatibility.AreCompatible(
+                            currentSurvivor.Fingerprint,
+                            profile.Fingerprint))
+                    .OrderByDescending(profile =>
+                        profile.CurveBins + profile.Gears + profile.ShiftTargets)
+                    .ThenByDescending(profile => profile.Confidence)
+                    .FirstOrDefault();
+                if (duplicate is null) break;
+
+                MergeVehicleProfile(survivor.Id, duplicate.Id);
+                remaining.Remove(duplicate);
+                RefreshVehicleProfileGearSignature(survivor.Id);
+                currentSurvivor = ListVehicleProfiles()
+                    .Single(profile =>
+                        string.Equals(
+                            profile.Id,
+                            survivor.Id,
+                            StringComparison.Ordinal));
+            }
+        }
+    }
+
+    private void MergeVehicleProfile(string survivorId, string duplicateId)
+    {
+        var survivor = Quote(survivorId);
+        var duplicate = Quote(duplicateId);
+        database.Execute(
+            "BEGIN IMMEDIATE;\n" +
+            "INSERT INTO EngineCurveBins(VehicleProfileId,RpmCenter,SampleCount,MedianPower,MedianTorque,MedianBoost,Deviation,Confidence) " +
+            $"SELECT {survivor},RpmCenter,SampleCount,MedianPower,MedianTorque,MedianBoost,Deviation,Confidence FROM EngineCurveBins WHERE VehicleProfileId={duplicate} AND 1 " +
+            "ON CONFLICT(VehicleProfileId,RpmCenter) DO UPDATE SET SampleCount=excluded.SampleCount,MedianPower=excluded.MedianPower,MedianTorque=excluded.MedianTorque,MedianBoost=excluded.MedianBoost,Deviation=excluded.Deviation,Confidence=excluded.Confidence " +
+            "WHERE excluded.SampleCount>=EngineCurveBins.SampleCount;\n" +
+            "INSERT INTO GearModels(VehicleProfileId,Gear,Slope,SampleCount,Confidence) " +
+            $"SELECT {survivor},Gear,Slope,SampleCount,Confidence FROM GearModels WHERE VehicleProfileId={duplicate} AND 1 " +
+            "ON CONFLICT(VehicleProfileId,Gear) DO UPDATE SET Slope=excluded.Slope,SampleCount=excluded.SampleCount,Confidence=excluded.Confidence " +
+            "WHERE excluded.SampleCount>=GearModels.SampleCount;\n" +
+            "INSERT INTO ShiftTargets(VehicleProfileId,FromGear,ToGear,TargetRpm,CueRpm,AfterRpm,Confidence,AlgorithmVersion) " +
+            $"SELECT {survivor},FromGear,ToGear,TargetRpm,CueRpm,AfterRpm,Confidence,AlgorithmVersion FROM ShiftTargets WHERE VehicleProfileId={duplicate} AND 1 " +
+            "ON CONFLICT(VehicleProfileId,FromGear,ToGear) DO UPDATE SET TargetRpm=excluded.TargetRpm,CueRpm=excluded.CueRpm,AfterRpm=excluded.AfterRpm,Confidence=excluded.Confidence,AlgorithmVersion=excluded.AlgorithmVersion " +
+            "WHERE excluded.Confidence>=ShiftTargets.Confidence;\n" +
+            $"UPDATE VehicleProfiles SET DisplayName=COALESCE(DisplayName,(SELECT DisplayName FROM VehicleProfiles WHERE Id={duplicate}))," +
+            $"RecommendationsEnabled=MIN(RecommendationsEnabled,(SELECT RecommendationsEnabled FROM VehicleProfiles WHERE Id={duplicate}))," +
+            $"Confidence=MAX(Confidence,(SELECT Confidence FROM VehicleProfiles WHERE Id={duplicate}))," +
+            $"UpdatedAt=MAX(UpdatedAt,(SELECT UpdatedAt FROM VehicleProfiles WHERE Id={duplicate})) WHERE Id={survivor};\n" +
+            $"DELETE FROM VehicleProfiles WHERE Id={duplicate};\n" +
+            "COMMIT;");
+    }
+
+    private void RefreshVehicleProfileGearSignature(string profileId)
+    {
+        var rows = database.QueryRows(
+            "SELECT Gear,Slope FROM GearModels " +
+            $"WHERE VehicleProfileId={Quote(profileId)} AND Gear>0 AND Slope>0 ORDER BY Gear;");
+        if (rows.Count < 2) return;
+        var signature = string.Join(
+            '-',
+            rows.Select(row =>
+            {
+                var gear = ParseInt(row[0]);
+                var slope = ParseDouble(row[1]);
+                var rounded = Math.Round(
+                    slope / 2d,
+                    MidpointRounding.AwayFromZero) * 2;
+                return $"g{gear}_{rounded:0}";
+            }));
+        database.Execute(
+            $"UPDATE VehicleProfiles SET GearSignature={Quote(signature)} " +
+            $"WHERE Id={Quote(profileId)};");
+    }
+
+    private static VehicleProfileFingerprint FingerprintFromObservedModels(
+        ShiftLearningSnapshot snapshot)
+    {
+        var fingerprint = snapshot.Fingerprint!;
+        if (snapshot.Gears.Count < 2) return fingerprint;
+        var gearSignature = string.Join(
+            '-',
+            snapshot.Gears
+                .Where(gear =>
+                    gear.Gear > 0 &&
+                    double.IsFinite(gear.RpmPerMeterPerSecond) &&
+                    gear.RpmPerMeterPerSecond > 0)
+                .OrderBy(gear => gear.Gear)
+                .Select(gear =>
+                {
+                    var rounded = Math.Round(
+                        gear.RpmPerMeterPerSecond / 2d,
+                        MidpointRounding.AwayFromZero) * 2;
+                    return $"g{gear.Gear}_{rounded:0}";
+                }));
+        return string.IsNullOrWhiteSpace(gearSignature)
+            ? fingerprint
+            : fingerprint with { GearSlopeSignature = gearSignature };
     }
 
     private static string Quote(string? value) => value is null ? "NULL" : "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";

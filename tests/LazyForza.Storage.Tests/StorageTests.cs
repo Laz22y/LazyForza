@@ -16,8 +16,8 @@ public sealed class StorageTests
         {
             using var first = new LazyForzaStore(firstPath);
             using var second = new LazyForzaStore(secondPath);
-            Assert.AreEqual(7, first.SchemaVersion);
-            Assert.AreEqual(7, second.SchemaVersion);
+            Assert.AreEqual(8, first.SchemaVersion);
+            Assert.AreEqual(8, second.SchemaVersion);
             await first.SetAsync("dashboard", "enabled", "True", CancellationToken.None);
             Assert.AreEqual("True", await first.GetAsync("dashboard", "enabled", CancellationToken.None));
             Assert.IsNull(await second.GetAsync("dashboard", "enabled", CancellationToken.None));
@@ -47,12 +47,20 @@ public sealed class StorageTests
             using var store = new LazyForzaStore(path);
             var streetTune = new VehicleProfileFingerprint(6001, 5, 850, 2, 6, 8_000, "g2_210-g3_150", "p60_t48_r7000");
             var raceTune = streetTune with { GearSlopeSignature = "g2_224-g3_160", CurveSignature = "p68_t52_r7200" };
-            static ShiftLearningSnapshot Snapshot(VehicleProfileFingerprint fingerprint) => new(
-                LearningState.Ready, 1, 0.88, fingerprint,
-                [new EngineCurveBin(7_000, 20, 300_000, 480, 10, 3, 0.9)],
-                [new GearModel(2, 210, 30, 0.9), new GearModel(3, 150, 30, 0.9)],
-                [new ShiftTarget(2, 3, 7_600, 7_200, 5_400, 0.85, false)],
-                new Dictionary<string, int>(), "ready");
+            static ShiftLearningSnapshot Snapshot(VehicleProfileFingerprint fingerprint)
+            {
+                var gears = VehicleTuneCompatibility
+                    .ParseGearSignature(fingerprint.GearSlopeSignature)
+                    .Select(pair => new GearModel(pair.Key, pair.Value, 30, 0.9))
+                    .ToArray();
+                return new ShiftLearningSnapshot(
+                    LearningState.Ready, 1, 0.88, fingerprint,
+                    [new EngineCurveBin(7_000, 20, 300_000, 480, 10, 3, 0.9)],
+                    gears,
+                    [new ShiftTarget(2, 3, 7_600, 7_200, 5_400, 0.85, false)],
+                    new Dictionary<string, int>(),
+                    "ready");
+            }
 
             await store.SaveShiftLearningAsync(Snapshot(streetTune), CancellationToken.None);
             await store.SaveShiftLearningAsync(Snapshot(raceTune), CancellationToken.None);
@@ -82,6 +90,133 @@ public sealed class StorageTests
         {
             DeleteDatabase(path);
         }
+    }
+
+    [TestMethod]
+    public async Task CompatiblePartialGearProfilesReuseOneCanonicalVehicleProfile()
+    {
+        var path = TempDatabasePath();
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var first = new VehicleProfileFingerprint(
+                2038, 4, 800, 2, 8, 9_000,
+                "g2_264-g3_198",
+                "p77_t53_r7200");
+            var second = first with { GearSlopeSignature = "g3_198-g4_156" };
+            var third = first with { GearSlopeSignature = "g4_156-g5_126" };
+
+            var firstId = await store.SaveShiftLearningAsync(
+                VehicleSnapshot(first, (2, 264d), (3, 198d)),
+                CancellationToken.None);
+            var secondId = await store.SaveShiftLearningAsync(
+                VehicleSnapshot(second, (3, 198.4d), (4, 156d)),
+                CancellationToken.None);
+            var thirdId = await store.SaveShiftLearningAsync(
+                VehicleSnapshot(third, (4, 155.8d), (5, 126d)),
+                CancellationToken.None);
+
+            Assert.IsNotNull(firstId);
+            Assert.AreEqual(firstId, secondId);
+            Assert.AreEqual(firstId, thirdId);
+            Assert.AreEqual(1, store.CountVehicleProfiles());
+            var profile = store.ListVehicleProfiles().Single();
+            Assert.AreEqual(4, profile.Gears);
+            StringAssert.Contains(profile.Fingerprint.GearSlopeSignature, "g2_264");
+            StringAssert.Contains(profile.Fingerprint.GearSlopeSignature, "g5_126");
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task LaterObservedGearDifferenceSeparatesSamePiTunes()
+    {
+        var path = TempDatabasePath();
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var initiallyIdentical = new VehicleProfileFingerprint(
+                2038, 4, 800, 2, 8, 9_000,
+                "g2_264-g3_198",
+                "p77_t53_r7200");
+
+            var roadId = await store.SaveShiftLearningAsync(
+                VehicleSnapshot(
+                    initiallyIdentical,
+                    (2, 264d),
+                    (3, 198d),
+                    (5, 126d)),
+                CancellationToken.None);
+            var raceId = await store.SaveShiftLearningAsync(
+                VehicleSnapshot(
+                    initiallyIdentical,
+                    (2, 264d),
+                    (3, 198d),
+                    (5, 140d)),
+                CancellationToken.None);
+
+            Assert.IsNotNull(roadId);
+            Assert.IsNotNull(raceId);
+            Assert.AreNotEqual(roadId, raceId,
+                "相同 PI 的调校在后续挡位出现稳定显著差异时必须分开。");
+            Assert.AreEqual(2, store.CountVehicleProfiles());
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public void SchemaEightConsolidatesConnectedPartialProfilesWithoutLosingUserSettings()
+    {
+        var path = TempDatabasePath();
+        try
+        {
+            using (var initialized = new LazyForzaStore(path))
+                Assert.AreEqual(8, initialized.SchemaVersion);
+
+            using (var raw = new WinSqliteDatabase(path))
+            {
+                raw.Execute(
+                    "BEGIN IMMEDIATE;" +
+                    "INSERT INTO VehicleProfiles VALUES('a',2038,4,800,2,8,9000,'p77_t53_r7200','g3_198-g4_156','Ready',0.70,'2026-07-20T00:00:00Z',NULL,1);" +
+                    "INSERT INTO VehicleProfiles VALUES('b',2038,4,800,2,8,9000,'p77_t53_r7200','g4_156-g5_126','Ready',0.75,'2026-07-21T00:00:00Z',NULL,0);" +
+                    "INSERT INTO VehicleProfiles VALUES('c',2038,4,800,2,8,9000,'p77_t53_r7200','g2_262-g3_198-g7_90','Ready',0.80,'2026-07-22T00:00:00Z',NULL,1);" +
+                    "INSERT INTO VehicleProfiles VALUES('d',2038,4,800,2,8,9000,'p77_t53_r7200','g2_264-g3_198','Ready',0.85,'2026-07-23T00:00:00Z','2014 Alfa Romeo 4C',1);" +
+                    "INSERT INTO GearModels VALUES('a',3,198,20,0.8),('a',4,156,20,0.8);" +
+                    "INSERT INTO GearModels VALUES('b',4,156,22,0.9),('b',5,126,22,0.9);" +
+                    "INSERT INTO GearModels VALUES('c',2,262,18,0.7),('c',3,198,18,0.7),('c',7,90,18,0.7);" +
+                    "INSERT INTO GearModels VALUES('d',2,264,30,0.95),('d',3,198,30,0.95);" +
+                    "UPDATE SchemaVersion SET Version=7;" +
+                    "COMMIT;");
+            }
+
+            using var migrated = new LazyForzaStore(path);
+            Assert.AreEqual(8, migrated.SchemaVersion);
+            var profile = migrated.ListVehicleProfiles().Single();
+            Assert.AreEqual("2014 Alfa Romeo 4C", profile.CustomName);
+            Assert.IsFalse(profile.ShiftRecommendationsEnabled);
+            Assert.AreEqual(5, profile.Gears);
+            StringAssert.Contains(profile.Fingerprint.GearSlopeSignature, "g5_126");
+            StringAssert.Contains(profile.Fingerprint.GearSlopeSignature, "g7_90");
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public void EmbeddedVehicleNameCatalogWorksWithoutNetwork()
+    {
+        Assert.AreEqual("2014 Alfa Romeo 4C", VehicleNameCatalog.TryGetName(2038));
+        Assert.AreEqual("车辆 999999", VehicleNameCatalog.DisplayName(999999));
+        Assert.IsNotNull(VehicleNameCatalog.Info);
+        Assert.IsTrue(VehicleNameCatalog.Info!.VehicleCount >= 600);
     }
 
     [TestMethod]
@@ -129,6 +264,14 @@ public sealed class StorageTests
                     "PI INTEGER NOT NULL,Drivetrain INTEGER NOT NULL,Cylinders INTEGER NOT NULL,MaxRpm INTEGER NOT NULL," +
                     "CurveSignature TEXT NOT NULL,GearSignature TEXT NOT NULL,State TEXT NOT NULL,Confidence REAL NOT NULL,UpdatedAt TEXT NOT NULL);" +
                     "INSERT INTO VehicleProfiles VALUES('legacy-profile',6001,5,850,2,6,8000,'learning','learning','Ready',0.8,'2026-01-01T00:00:00Z');" +
+                    "CREATE TABLE EngineCurveBins(VehicleProfileId TEXT NOT NULL,RpmCenter INTEGER NOT NULL,SampleCount INTEGER NOT NULL," +
+                    "MedianPower REAL NOT NULL,MedianTorque REAL NOT NULL,MedianBoost REAL NOT NULL,Deviation REAL NOT NULL,Confidence REAL NOT NULL," +
+                    "PRIMARY KEY(VehicleProfileId,RpmCenter));" +
+                    "CREATE TABLE GearModels(VehicleProfileId TEXT NOT NULL,Gear INTEGER NOT NULL,Slope REAL NOT NULL,SampleCount INTEGER NOT NULL," +
+                    "Confidence REAL NOT NULL,PRIMARY KEY(VehicleProfileId,Gear));" +
+                    "CREATE TABLE ShiftTargets(VehicleProfileId TEXT NOT NULL,FromGear INTEGER NOT NULL,ToGear INTEGER NOT NULL,TargetRpm REAL NOT NULL," +
+                    "CueRpm REAL NOT NULL,AfterRpm REAL NOT NULL,Confidence REAL NOT NULL,AlgorithmVersion TEXT NOT NULL," +
+                    "PRIMARY KEY(VehicleProfileId,FromGear,ToGear));" +
                     "CREATE TABLE TrackTemplates(Id TEXT PRIMARY KEY,Name TEXT NOT NULL,Direction INTEGER NOT NULL," +
                     "Source TEXT NOT NULL,GameBuild TEXT,LengthMeters REAL NOT NULL,ToleranceMeters REAL NOT NULL," +
                     "Confidence REAL NOT NULL,CaptureLapCount INTEGER NOT NULL,CreatedAt TEXT NOT NULL,UpdatedAt TEXT NOT NULL);" +
@@ -139,22 +282,29 @@ public sealed class StorageTests
             }
 
             using (var store = new LazyForzaStore(path))
-                Assert.AreEqual(7, store.SchemaVersion);
-
-            using var migrated = new WinSqliteDatabase(path);
-            var rows = migrated.QueryRows("SELECT Id,CarClass,PerformanceIndex FROM Laps ORDER BY Id;");
-            Assert.HasCount(3, rows);
-            CollectionAssert.AreEqual(new[] { "a", "6", "998" }, rows[0].ToArray());
-            CollectionAssert.AreEqual(new[] { "b", "6", "917" }, rows[1].ToArray());
-            CollectionAssert.AreEqual(new[] { "c", "3", "800" }, rows[2].ToArray(),
-                "有效的官方 CarClass 必须优先于按 PI 推断的结果。");
-            Assert.AreEqual("Circuit", migrated.QueryText("SELECT LayoutKind FROM TrackTemplates WHERE Id='legacy-track';"),
-                "Schema 5 must preserve legacy templates as circuits instead of guessing a new topology.");
-            Assert.AreEqual("UserCustom", migrated.QueryText("SELECT CatalogKind FROM TrackTemplates WHERE Id='legacy-track';"),
-                "Schema 6 must preserve legacy templates as mutable user data until an embedded catalog explicitly claims them.");
-            Assert.AreEqual("1", migrated.QueryText("SELECT RecommendationsEnabled FROM VehicleProfiles WHERE Id='legacy-profile';"),
-                "Schema 7 must keep existing profiles enabled by default.");
-            Assert.IsNull(migrated.QueryText("SELECT DisplayName FROM VehicleProfiles WHERE Id='legacy-profile';"));
+            {
+                Assert.AreEqual(8, store.SchemaVersion);
+                var databaseField = typeof(LazyForzaStore).GetField(
+                    "database",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic);
+                Assert.IsNotNull(databaseField);
+                var migrated = (WinSqliteDatabase?)databaseField.GetValue(store);
+                Assert.IsNotNull(migrated);
+                var rows = migrated.QueryRows("SELECT Id,CarClass,PerformanceIndex FROM Laps ORDER BY Id;");
+                Assert.HasCount(3, rows);
+                CollectionAssert.AreEqual(new[] { "a", "6", "998" }, rows[0].ToArray());
+                CollectionAssert.AreEqual(new[] { "b", "6", "917" }, rows[1].ToArray());
+                CollectionAssert.AreEqual(new[] { "c", "3", "800" }, rows[2].ToArray(),
+                    "有效的官方 CarClass 必须优先于按 PI 推断的结果。");
+                Assert.AreEqual("Circuit", migrated.QueryText("SELECT LayoutKind FROM TrackTemplates WHERE Id='legacy-track';"),
+                    "Schema 5 must preserve legacy templates as circuits instead of guessing a new topology.");
+                Assert.AreEqual("UserCustom", migrated.QueryText("SELECT CatalogKind FROM TrackTemplates WHERE Id='legacy-track';"),
+                    "Schema 6 must preserve legacy templates as mutable user data until an embedded catalog explicitly claims them.");
+                Assert.AreEqual("1", migrated.QueryText("SELECT RecommendationsEnabled FROM VehicleProfiles WHERE Id='legacy-profile';"),
+                    "Schema 7 must keep existing profiles enabled by default.");
+                Assert.IsNull(migrated.QueryText("SELECT DisplayName FROM VehicleProfiles WHERE Id='legacy-profile';"));
+            }
         }
         finally
         {
@@ -317,6 +467,31 @@ public sealed class StorageTests
         }
     }
 
+    private static ShiftLearningSnapshot VehicleSnapshot(
+        VehicleProfileFingerprint fingerprint,
+        params (int Gear, double Slope)[] gears) =>
+        new(
+            LearningState.Ready,
+            1,
+            0.9,
+            fingerprint,
+            [new EngineCurveBin(7_200, 20, 385_000, 530, 12, 3, 0.9)],
+            gears
+                .Select(gear => new GearModel(gear.Gear, gear.Slope, 30, 0.9))
+                .ToArray(),
+            gears.Length >= 2
+                ? [new ShiftTarget(
+                    gears[0].Gear,
+                    gears[1].Gear,
+                    8_200,
+                    7_800,
+                    6_000,
+                    0.88,
+                    false)]
+                : [],
+            new Dictionary<string, int>(),
+            "ready");
+
     private static string TempDatabasePath() => Path.Combine(Path.GetTempPath(), $"lazyforza-{Guid.NewGuid():N}.db");
 
     private static void DeleteDatabase(string path)
@@ -324,7 +499,24 @@ public sealed class StorageTests
         foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
         {
             var file = path + suffix;
-            if (File.Exists(file)) File.Delete(file);
+            for (var attempt = 0; attempt < 8 && File.Exists(file); attempt++)
+            {
+                try
+                {
+                    File.Delete(file);
+                }
+                catch (IOException) when (attempt < 7)
+                {
+                    Thread.Sleep(25);
+                }
+                catch (IOException)
+                {
+                    // A prior connection in the same Windows test host can retain
+                    // the migrated file until process exit. The database is unique
+                    // test data and remains eligible for OS temp cleanup.
+                    break;
+                }
+            }
         }
     }
 }

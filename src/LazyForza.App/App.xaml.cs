@@ -19,6 +19,7 @@ public partial class App : Application
     private ModuleManager? moduleManager;
     private TelemetryRecorderController? recorder;
     private RollingLog? log;
+    private ApplicationUpdateManager? updateManager;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -56,6 +57,7 @@ public partial class App : Application
                 $"{PlaygroundOfficialTrackCatalog.DisplayName} catalog {catalogImport.Version}: " +
                 $"{catalogImport.TotalTracks} tracks available, {catalogImport.ImportedTracks} imported or refreshed.");
             log.Write($"Starting with source {source.Description}");
+            updateManager = new ApplicationUpdateManager(store, directories, message => log.Write(message));
             var context = new ModuleContext(telemetry, overlay, store, store, message => log.Write(message));
             var modules = BuiltInModuleCatalog.Create(store, source.Kind, () => overlay.TimingLayout);
             moduleManager = new ModuleManager(modules, context);
@@ -68,8 +70,18 @@ public partial class App : Application
             }
 
             recorder = new TelemetryRecorderController(telemetry, directories);
-            MainWindow = new MainWindow(moduleManager, telemetry, overlay, store, directories, recorder, source.Kind);
+            MainWindow = new MainWindow(
+                moduleManager,
+                telemetry,
+                overlay,
+                store,
+                directories,
+                recorder,
+                source.Kind,
+                updateManager);
             MainWindow.Show();
+            if (captureDirectory is null && recordSeconds is null)
+                _ = ((MainWindow)MainWindow).CheckForUpdatesOnStartupAsync();
             if (captureDirectory is not null) _ = CaptureQaAsync(captureDirectory);
             else if (recordSeconds is not null) _ = AutoRecordAndExitAsync(recordSeconds.Value);
         }
@@ -91,6 +103,7 @@ public partial class App : Application
         if (moduleManager is not null) await moduleManager.DisposeAsync();
         if (telemetry is not null) await telemetry.DisposeAsync();
         overlay?.Dispose();
+        updateManager?.Dispose();
         store?.Dispose();
         log?.Dispose();
         base.OnExit(e);

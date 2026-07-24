@@ -90,36 +90,52 @@ public sealed class ShiftAnalysisTests
     }
 
     [TestMethod]
-    public void SameCarOrdinalAndPiWithChangedGearRatioStartsANewTuneProfile()
+    public void SingleGearNoiseDoesNotSplitTuneButTwoPersistentGearChangesDo()
     {
         var learner = new ShiftLearner(new ShiftLearnerOptions(
             MinimumSamplesPerBin: 2,
             MinimumReadyBins: 2,
             MinimumGearSamples: 3,
-            TuneMismatchSamples: 3));
+            TuneMismatchSamples: 3,
+            MinimumMismatchedGears: 2));
         var parser = new Fh6PacketParser();
 
-        for (var index = 0; index < 9; index++)
+        var packetIndex = 0;
+        foreach (var gear in new[] { 3, 4 })
         {
-            var packet = StablePacket(index, 3, 4_000);
-            Assert.IsTrue(parser.TryParse(
-                packet, index, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var frame, out _));
-            learner.Observe(frame!);
+            for (var sample = 0; sample < 5; sample++)
+            {
+                var packet = StablePacket(packetIndex, gear, 4_000);
+                Assert.IsTrue(parser.TryParse(
+                    packet, packetIndex++, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var frame, out _));
+                learner.Observe(frame!);
+            }
         }
 
         var original = learner.Snapshot;
-        Assert.IsTrue(original.AcceptedSamples >= 3);
+        Assert.IsTrue(original.AcceptedSamples >= 6);
         var originalOrdinal = original.Fingerprint?.CarOrdinal;
         var originalPi = original.Fingerprint?.PerformanceIndex;
 
-        for (var index = 9; index < 12; index++)
+        for (var sample = 0; sample < 4; sample++)
         {
-            var changedRatio = StablePacket(index, 3, 4_800);
+            var changedRatio = StablePacket(packetIndex, 3, 4_800);
             Assert.IsTrue(parser.TryParse(
-                changedRatio, index, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var frame, out _));
+                changedRatio, packetIndex++, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var frame, out _));
             learner.Observe(frame!);
         }
+        Assert.AreEqual(
+            original.ConfigurationRevision,
+            learner.Snapshot.ConfigurationRevision,
+            "单个挡位的瞬时偏差不足以证明用户更换了调校。");
 
+        for (var sample = 0; sample < 4; sample++)
+        {
+            var changedRatio = StablePacket(packetIndex, 4, 4_800);
+            Assert.IsTrue(parser.TryParse(
+                changedRatio, packetIndex++, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var frame, out _));
+            learner.Observe(frame!);
+        }
         var changed = learner.Snapshot;
         Assert.IsTrue(changed.ConfigurationRevision > original.ConfigurationRevision);
         Assert.AreEqual(originalOrdinal, changed.Fingerprint?.CarOrdinal);
@@ -129,36 +145,102 @@ public sealed class ShiftAnalysisTests
     }
 
     [TestMethod]
-    public void SameCarOrdinalAndPiWithChangedPowerCurveStartsANewTuneProfile()
+    public void SinglePowerBinNoiseDoesNotSplitTuneButThreePersistentBinsDo()
     {
         var learner = new ShiftLearner(new ShiftLearnerOptions(
             MinimumSamplesPerBin: 3,
             MinimumReadyBins: 2,
             MinimumGearSamples: 100,
-            TuneMismatchSamples: 3));
+            TuneMismatchSamples: 3,
+            MinimumMismatchedPowerBins: 3));
         var parser = new Fh6PacketParser();
 
-        for (var index = 0; index < 8; index++)
+        var packetIndex = 0;
+        foreach (var rpm in new[] { 4_000f, 4_200f, 4_400f })
+        {
+            for (var sample = 0; sample < 4; sample++)
+            {
+                var packet = StablePacket(packetIndex, 3, rpm);
+                Fh6PacketBuilder.WriteFloat(packet, 260, 200_000);
+                Assert.IsTrue(parser.TryParse(
+                    packet, packetIndex++, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var frame, out _));
+                learner.Observe(frame!);
+            }
+        }
+
+        var original = learner.Snapshot;
+        foreach (var rpm in new[] { 4_000f, 4_200f, 4_400f })
+        {
+            for (var sample = 0; sample < 3; sample++)
+            {
+                var changedPower = StablePacket(packetIndex, 3, rpm);
+                Fh6PacketBuilder.WriteFloat(changedPower, 260, 270_000);
+                Assert.IsTrue(parser.TryParse(
+                    changedPower, packetIndex++, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var frame, out _));
+                learner.Observe(frame!);
+            }
+            if (rpm == 4_000)
+                Assert.AreEqual(
+                    original.ConfigurationRevision,
+                    learner.Snapshot.ConfigurationRevision,
+                    "单个转速区间的功率偏差不足以证明用户更换了调校。");
+        }
+
+        Assert.IsTrue(learner.Snapshot.ConfigurationRevision > original.ConfigurationRevision);
+        Assert.IsTrue(learner.Snapshot.RejectedSamples.ContainsKey("tune-signature-changed"));
+    }
+
+    [TestMethod]
+    public void PerformanceIndexChangeImmediatelyStartsANewConfiguration()
+    {
+        var learner = new ShiftLearner();
+        var parser = new Fh6PacketParser();
+        for (var index = 0; index < 3; index++)
         {
             var packet = StablePacket(index, 3, 4_000);
-            Fh6PacketBuilder.WriteFloat(packet, 260, 200_000);
             Assert.IsTrue(parser.TryParse(
                 packet, index, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var frame, out _));
             learner.Observe(frame!);
         }
 
-        var original = learner.Snapshot;
-        for (var index = 8; index < 11; index++)
-        {
-            var changedPower = StablePacket(index, 3, 4_000);
-            Fh6PacketBuilder.WriteFloat(changedPower, 260, 260_000);
-            Assert.IsTrue(parser.TryParse(
-                changedPower, index, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var frame, out _));
-            learner.Observe(frame!);
-        }
+        var originalRevision = learner.Snapshot.ConfigurationRevision;
+        var changedPi = StablePacket(3, 3, 4_000);
+        Fh6PacketBuilder.WriteInt32(changedPi, 220, 799);
+        Assert.IsTrue(parser.TryParse(
+            changedPi, 3, DateTimeOffset.UtcNow, TelemetrySourceKind.Replay, out var changedFrame, out _));
+        learner.Observe(changedFrame!);
 
-        Assert.IsTrue(learner.Snapshot.ConfigurationRevision > original.ConfigurationRevision);
-        Assert.IsTrue(learner.Snapshot.RejectedSamples.ContainsKey("tune-signature-changed"));
+        Assert.IsTrue(learner.Snapshot.ConfigurationRevision > originalRevision);
+        Assert.AreEqual(799, learner.Snapshot.Fingerprint?.PerformanceIndex);
+        Assert.IsTrue(learner.Snapshot.RejectedSamples.ContainsKey("configuration-changed"));
+    }
+
+    [TestMethod]
+    public void TuneCompatibilityRequiresSharedTransmissionEvidence()
+    {
+        var baseline = new VehicleProfileFingerprint(
+            2038, 4, 800, 2, 8, 9_000,
+            "g2_264-g3_198",
+            "p77_t53_r7200");
+        var overlappingSubset = baseline with
+        {
+            GearSlopeSignature = "g3_198-g4_156"
+        };
+        var disjointSubset = baseline with
+        {
+            GearSlopeSignature = "g5_126-g6_106"
+        };
+        var differentPi = baseline with { PerformanceIndex = 799 };
+
+        Assert.IsTrue(VehicleTuneCompatibility.AreCompatible(
+            baseline,
+            overlappingSubset));
+        Assert.IsFalse(VehicleTuneCompatibility.AreCompatible(
+            baseline,
+            disjointSubset));
+        Assert.IsFalse(VehicleTuneCompatibility.AreCompatible(
+            baseline,
+            differentPi));
     }
 
     [TestMethod]
