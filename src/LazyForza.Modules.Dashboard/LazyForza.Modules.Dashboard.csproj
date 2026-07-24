@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LazyForza.Domain\LazyForza.Domain.csproj" />
+    <ProjectReference Include="..\LazyForza.Analysis\LazyForza.Analysis.csproj" />
+    <ProjectReference Include="..\LazyForza.Modules.Abstractions\LazyForza.Modules.Abstractions.csproj" />
+  </ItemGroup>
+</Project>
+

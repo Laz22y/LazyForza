@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+.idea/
+.packages/
+artifacts/
+.agents/
+.codex_work/
+.dev-preview/
+.lazyweb/
+*.user
+*.suo
+*.lfztelemetry
+*.db
+*.db-shm
+*.db-wal
+*.log

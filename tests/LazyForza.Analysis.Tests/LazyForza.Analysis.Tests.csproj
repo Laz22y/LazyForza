@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="MSTest.TestAdapter" />
+    <PackageReference Include="MSTest.TestFramework" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\LazyForza.Domain\LazyForza.Domain.csproj" />
+    <ProjectReference Include="..\..\src\LazyForza.Telemetry\LazyForza.Telemetry.csproj" />
+    <ProjectReference Include="..\..\src\LazyForza.Analysis\LazyForza.Analysis.csproj" />
+  </ItemGroup>
+</Project>
+
