@@ -390,7 +390,10 @@ public sealed class ModuleAndOverlayTests
     }
     private sealed class EmptyAnalysisStore : IAnalysisStore
     {
-        public ValueTask SaveShiftLearningAsync(ShiftLearningSnapshot snapshot, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+        public ValueTask<string?> SaveShiftLearningAsync(
+            ShiftLearningSnapshot snapshot,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(VehicleProfileIdentity.TryCreate(snapshot.Fingerprint));
         public ValueTask<bool> GetShiftRecommendationsEnabledAsync(string vehicleProfileId, CancellationToken cancellationToken) =>
             ValueTask.FromResult(true);
     }

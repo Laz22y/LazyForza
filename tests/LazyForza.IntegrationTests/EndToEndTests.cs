@@ -58,7 +58,10 @@ public sealed class EndToEndTests
         try
         {
             using var store = new LazyForzaStore(databasePath);
-            await using var hub = new TelemetryHub(new FastLapSource(), new TelemetryOptions(SubscriberCapacity: 1024));
+            var source = new FastLapSource();
+            // Keep the full deterministic six-lap burst so a busy parallel test
+            // process cannot drop the opening frames that establish the start line.
+            await using var hub = new TelemetryHub(source, new TelemetryOptions(SubscriberCapacity: 2048));
             var hud = new CapturingHud();
             var context = new TestContext(hub, hud, store, store);
             var dashboard = new DashboardModule();
@@ -67,10 +70,11 @@ public sealed class EndToEndTests
             await manager.InitializeAsync(CancellationToken.None);
             await manager.SetEnabledAsync(DashboardModule.ModuleId, true, CancellationToken.None);
             await manager.SetEnabledAsync(LapAnalysisModule.ModuleId, true, CancellationToken.None);
+            source.Start();
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
             while ((lap.CurrentTrack is null || store.CountLaps() == 0 || lap.VisibleLaps.Count == 0) && !timeout.IsCancellationRequested)
-                await Task.Delay(25, timeout.Token);
+                await Task.Delay(25);
 
             Assert.IsNotNull(dashboard.Snapshot as DashboardHudState);
             Assert.IsNotNull(lap.CurrentTrack);
@@ -103,10 +107,16 @@ public sealed class EndToEndTests
     private sealed class FastLapSource : ITelemetrySource
     {
         private readonly Fh6PacketParser parser = new();
+        private readonly TaskCompletionSource start =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TelemetrySourceKind Kind => TelemetrySourceKind.Simulator;
         public string Description => "E2E deterministic laps";
+
+        public void Start() => start.TrySetResult();
+
         public async Task RunAsync(Func<TelemetryFrame, ValueTask> publish, Action<string> onInvalid, CancellationToken cancellationToken)
         {
+            await start.Task.WaitAsync(cancellationToken);
             const int framesPerLap = 180;
             for (var index = 0; index < framesPerLap * 6 && !cancellationToken.IsCancellationRequested; index++)
             {
@@ -122,7 +132,10 @@ public sealed class EndToEndTests
                 packet[313] = 0;
                 if (parser.TryParse(packet, index, DateTimeOffset.UtcNow, Kind, out var frame, out var error)) await publish(frame!);
                 else onInvalid(error ?? "parse");
-                await Task.Delay(1, cancellationToken);
+                // The production crossing debounce is two seconds of arrival time.
+                // Keep each synthetic lap above that boundary instead of relying on
+                // scheduler speed or treating several lap resets as one crossing.
+                await Task.Delay(12, cancellationToken);
             }
         }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

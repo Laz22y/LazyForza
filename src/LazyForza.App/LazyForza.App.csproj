@@ -3,7 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\LazyForza.ico</ApplicationIcon>
   </PropertyGroup>
@@ -16,6 +16,7 @@
     <ProjectReference Include="..\LazyForza.Telemetry\LazyForza.Telemetry.csproj" />
     <ProjectReference Include="..\LazyForza.Analysis\LazyForza.Analysis.csproj" />
     <ProjectReference Include="..\LazyForza.Storage\LazyForza.Storage.csproj" />
+    <ProjectReference Include="..\LazyForza.Update\LazyForza.Update.csproj" />
     <ProjectReference Include="..\LazyForza.Modules.Abstractions\LazyForza.Modules.Abstractions.csproj" />
     <ProjectReference Include="..\LazyForza.Modules.Dashboard\LazyForza.Modules.Dashboard.csproj" />
     <ProjectReference Include="..\LazyForza.Modules.LapAnalysis\LazyForza.Modules.LapAnalysis.csproj" />

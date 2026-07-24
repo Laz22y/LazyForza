@@ -5,17 +5,20 @@ namespace LazyForza.Analysis;
 public sealed record ShiftLearnerOptions(
     double MinimumAccel = 0.90,
     double MinimumSpeedMps = 10,
-    double MaximumSlip = 0.35,
+    double MaximumSlip = 0.18,
     double MaximumClutch = 0.08,
     int RpmBinSize = 200,
     int MinimumSamplesPerBin = 4,
     int MinimumReadyBins = 10,
     int MinimumGearSamples = 10,
     double MaximumIntervalSeconds = 0.25,
-    double GearSlopeChangeRatio = 0.06,
-    double PowerCurveChangeRatio = 0.18,
-    double MinimumPowerChangeWatts = 15_000,
-    int TuneMismatchSamples = 12);
+    double GearSlopeChangeRatio = 0.10,
+    double PowerCurveChangeRatio = 0.25,
+    double MinimumPowerChangeWatts = 30_000,
+    int TuneMismatchSamples = 8,
+    int MinimumMismatchedGears = 2,
+    int MinimumMismatchedPowerBins = 3,
+    int StableSamplesToClearTuneProbe = 45);
 
 public sealed class ShiftLearner
 {
@@ -31,7 +34,9 @@ public sealed class ShiftLearner
     private DateTimeOffset? firstAcceptedAt;
     private DateTimeOffset? lastAcceptedAt;
     private long configurationRevision;
-    private int tuneMismatchStreak;
+    private readonly Dictionary<int, int> gearMismatchEvidence = [];
+    private readonly Dictionary<int, int> powerMismatchEvidence = [];
+    private int stableTuneSamples;
 
     public ShiftLearner(ShiftLearnerOptions? options = null) => this.options = options ?? new ShiftLearnerOptions();
 
@@ -71,10 +76,17 @@ public sealed class ShiftLearner
             return;
         }
 
-        if (LooksLikeDifferentTune(frame))
+        var mismatch = MeasureTuneMismatch(frame);
+        if (mismatch.Gear is int mismatchedGear)
+            gearMismatchEvidence[mismatchedGear] =
+                gearMismatchEvidence.GetValueOrDefault(mismatchedGear) + 1;
+        if (mismatch.PowerBin is int mismatchedPowerBin)
+            powerMismatchEvidence[mismatchedPowerBin] =
+                powerMismatchEvidence.GetValueOrDefault(mismatchedPowerBin) + 1;
+        if (mismatch.HasEvidence)
         {
-            tuneMismatchStreak++;
-            if (tuneMismatchStreak >= Math.Max(2, options.TuneMismatchSamples))
+            stableTuneSamples = 0;
+            if (HasConclusiveTuneMismatch())
             {
                 Reset();
                 fingerprint = incoming;
@@ -91,7 +103,9 @@ public sealed class ShiftLearner
             return;
         }
 
-        tuneMismatchStreak = 0;
+        stableTuneSamples++;
+        if (stableTuneSamples >= Math.Max(10, options.StableSamplesToClearTuneProbe))
+            ClearTuneEvidence();
         var raw = frame.Raw;
         var binCenter = (int)(Math.Round(raw.CurrentEngineRpm / options.RpmBinSize) * options.RpmBinSize);
         if (!bins.TryGetValue(binCenter, out var bucket))
@@ -131,7 +145,7 @@ public sealed class ShiftLearner
         acceptedSamples = 0;
         firstAcceptedAt = null;
         lastAcceptedAt = null;
-        tuneMismatchStreak = 0;
+        ClearTuneEvidence();
         configurationRevision++;
     }
 
@@ -141,6 +155,7 @@ public sealed class ShiftLearner
         if (raw.IsRaceOn != 1) { reason = "not-driving"; return false; }
         if (frame.Normalized.AccelRatio < options.MinimumAccel) { reason = "low-throttle"; return false; }
         if (raw.Speed < options.MinimumSpeedMps) { reason = "low-speed"; return false; }
+        if (raw.Power <= 0 || raw.Torque <= 0) { reason = "non-positive-output"; return false; }
         if (ForzaGear.ForwardNumber(raw.Gear) is null) { reason = "unsupported-gear"; return false; }
         if (frame.Normalized.ClutchRatio > options.MaximumClutch) { reason = "clutch"; return false; }
         if (raw.TireSlipRatio.MaxAbsolute > options.MaximumSlip || raw.TireCombinedSlip.MaxAbsolute > options.MaximumSlip)
@@ -264,10 +279,11 @@ public sealed class ShiftLearner
         })
         .ToArray();
 
-    private bool LooksLikeDifferentTune(TelemetryFrame frame)
+    private TuneMismatchEvidence MeasureTuneMismatch(TelemetryFrame frame)
     {
         var raw = frame.Raw;
         var forwardGear = ForzaGear.ForwardNumber(raw.Gear);
+        int? mismatchedGear = null;
         if (forwardGear is int gear &&
             gearSlopes.TryGetValue(gear, out var slopes) &&
             slopes.Count >= options.MinimumGearSamples)
@@ -276,25 +292,45 @@ public sealed class ShiftLearner
             var observed = raw.CurrentEngineRpm / Math.Max(0.1, raw.Speed);
             if (expected > 1 &&
                 Math.Abs(observed - expected) / expected >= options.GearSlopeChangeRatio)
-                return true;
+                mismatchedGear = gear;
         }
 
         var binCenter = (int)(Math.Round(raw.CurrentEngineRpm / options.RpmBinSize) * options.RpmBinSize);
         if (!bins.TryGetValue(binCenter, out var samples) ||
             samples.Count < options.MinimumSamplesPerBin)
-            return false;
+            return new TuneMismatchEvidence(mismatchedGear, null);
 
         var expectedPower = RobustStatistics.Median(samples.Select(sample => sample.Power));
         var powerDifference = Math.Abs(raw.Power - expectedPower);
-        return Math.Abs(expectedPower) >= options.MinimumPowerChangeWatts &&
-               powerDifference >= options.MinimumPowerChangeWatts &&
-               powerDifference / Math.Abs(expectedPower) >= options.PowerCurveChangeRatio;
+        var mismatchedPower =
+            Math.Abs(expectedPower) >= options.MinimumPowerChangeWatts &&
+            powerDifference >= options.MinimumPowerChangeWatts &&
+            powerDifference / Math.Abs(expectedPower) >= options.PowerCurveChangeRatio
+                ? binCenter
+                : (int?)null;
+        return new TuneMismatchEvidence(mismatchedGear, mismatchedPower);
     }
 
-    private static bool SameBaseConfiguration(VehicleProfileFingerprint left, VehicleProfileFingerprint right) =>
-        left.CarOrdinal == right.CarOrdinal && left.CarClass == right.CarClass &&
-        left.PerformanceIndex == right.PerformanceIndex && left.DrivetrainType == right.DrivetrainType &&
-        left.NumCylinders == right.NumCylinders && Math.Abs(left.RoundedMaxRpm - right.RoundedMaxRpm) <= 100;
+    private bool HasConclusiveTuneMismatch()
+    {
+        var minimumSamples = Math.Max(2, options.TuneMismatchSamples);
+        var mismatchedGears = gearMismatchEvidence.Count(pair => pair.Value >= minimumSamples);
+        var mismatchedPowerBins = powerMismatchEvidence.Count(pair => pair.Value >= minimumSamples);
+        return mismatchedGears >= Math.Max(2, options.MinimumMismatchedGears) ||
+               mismatchedPowerBins >= Math.Max(2, options.MinimumMismatchedPowerBins);
+    }
+
+    private void ClearTuneEvidence()
+    {
+        gearMismatchEvidence.Clear();
+        powerMismatchEvidence.Clear();
+        stableTuneSamples = 0;
+    }
+
+    private static bool SameBaseConfiguration(
+        VehicleProfileFingerprint left,
+        VehicleProfileFingerprint right) =>
+        VehicleTuneCompatibility.HasSameBaseConfiguration(left, right);
 
     private void Reject(string reason) => rejected[reason] = rejected.GetValueOrDefault(reason) + 1;
 
@@ -305,4 +341,8 @@ public sealed class ShiftLearner
     }
 
     private readonly record struct Sample(double Power, double Torque, double Boost);
+    private readonly record struct TuneMismatchEvidence(int? Gear, int? PowerBin)
+    {
+        public bool HasEvidence => Gear is not null || PowerBin is not null;
+    }
 }
