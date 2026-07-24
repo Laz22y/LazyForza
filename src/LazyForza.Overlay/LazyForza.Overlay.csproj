@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LazyForza.Domain\LazyForza.Domain.csproj" />
+    <ProjectReference Include="..\LazyForza.Modules.Abstractions\LazyForza.Modules.Abstractions.csproj" />
+    <ProjectReference Include="..\LazyForza.Modules.Dashboard\LazyForza.Modules.Dashboard.csproj" />
+    <ProjectReference Include="..\LazyForza.Modules.LapAnalysis\LazyForza.Modules.LapAnalysis.csproj" />
+  </ItemGroup>
+</Project>
+

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Version>1.0.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\LazyForza.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\LazyForza.png" />
+    <Resource Include="Assets\LazyForzaWordmark.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LazyForza.Domain\LazyForza.Domain.csproj" />
+    <ProjectReference Include="..\LazyForza.Telemetry\LazyForza.Telemetry.csproj" />
+    <ProjectReference Include="..\LazyForza.Analysis\LazyForza.Analysis.csproj" />
+    <ProjectReference Include="..\LazyForza.Storage\LazyForza.Storage.csproj" />
+    <ProjectReference Include="..\LazyForza.Modules.Abstractions\LazyForza.Modules.Abstractions.csproj" />
+    <ProjectReference Include="..\LazyForza.Modules.Dashboard\LazyForza.Modules.Dashboard.csproj" />
+    <ProjectReference Include="..\LazyForza.Modules.LapAnalysis\LazyForza.Modules.LapAnalysis.csproj" />
+    <ProjectReference Include="..\LazyForza.Overlay\LazyForza.Overlay.csproj" />
+  </ItemGroup>
+</Project>
