@@ -24,6 +24,39 @@ public sealed class TrackAnalysisTests
     }
 
     [TestMethod]
+    public void SpeedEnvelopeDownsamplingPreservesEndpointsAndShortLivedExtremes()
+    {
+        var samples = Enumerable.Range(0, 1_000)
+            .Select(index => new LapSample(
+                index,
+                index * 0.1,
+                index switch
+                {
+                    421 => 120,
+                    733 => 2,
+                    _ => 40 + Math.Sin(index * 0.03) * 5
+                },
+                5_000,
+                4,
+                1,
+                0,
+                0,
+                index,
+                0,
+                index))
+            .ToArray();
+
+        var reduced = ChartInteractionAlgorithms.DownsampleSpeedEnvelope(samples, 64);
+
+        Assert.IsTrue(reduced.Count <= 64);
+        Assert.AreSame(samples[0], reduced[0]);
+        Assert.AreSame(samples[^1], reduced[^1]);
+        Assert.IsTrue(reduced.Any(sample => sample.SpeedMps == 120), "A short speed peak must remain visible.");
+        Assert.IsTrue(reduced.Any(sample => sample.SpeedMps == 2), "A short braking minimum must remain visible.");
+        Assert.IsTrue(reduced.Zip(reduced.Skip(1)).All(pair => pair.First.S <= pair.Second.S));
+    }
+
+    [TestMethod]
     public void PointToPointVisualsPreserveOpenRouteEndpointsAndProgress()
     {
         var first = new[]

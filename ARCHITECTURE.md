@@ -56,14 +56,16 @@ cueRpm = targetRpm - rpmRiseRate * totalLatency
 
 ## 路线与圈
 
-环形模板显式闭合，5 m 重采样后保存三维点、累计 `s` 和切向。投影只在上一段附近搜索，同时使用高度，避免交叉/立交桥跳段。路线状态从 Unknown → Candidate → Confirmed；置信度下降会退回。分段算法版本为 `sector-v1.0.0`、SchemaVersion 1，目标数为 `clamp(round(length/350m), 4, 16)`，优先已有有效圈的稳定制动入口，特征不足时按距离均分。
+环形模板显式闭合，定点模板保留独立起终点；5 m 重采样后保存三维点、累计 `s` 和切向。投影只在上一段附近搜索，同时使用高度，避免交叉/立交桥跳段。路线状态从 Unknown → Candidate → Confirmed；置信度下降会退回。分段算法版本为 `sector-v1.1.0-start-line`、SchemaVersion 2，目标数为 `clamp(round(length/350m), 4, 16)`，优先已有有效圈的稳定制动入口，特征不足时按距离均分。
 
 有效圈要求整圈至少 95% 投影可信且每个分段覆盖完整。起终点回绕帧先结束上一圈，再进入新圈，防止 `CurrentLap=0` 污染最后一段时间。
 
 累计分段 Delta 与分段颜色使用不同基准：颜色可按单个分段比较本场/全数据集最优；Dashboard Delta 必须先选出同赛道、同性能等级的真实历史最快完整 `LapRecord`，再累计该圈从 S1 到已通过分段的时间。当前圈边界时间在首次进入下一分段时锁定，因此显示的是从圈起点到分段终点的累计差，不是单段差，也不是拼接的理论圈。
 
-历史圈从 SQLite 恢复后按路线、方向和 `SectorSchemaVersion` 限定比较范围；UI 可联动选择 1–4 圈。内存只保留最近 50 个完整圈，SQLite 保存完整历史，避免长会话中图表数据无限常驻。
+历史圈从 SQLite 恢复后按路线、方向和 `SectorSchemaVersion` 限定比较范围。模块常驻内存的最多 50 圈只保存 `LapSummary`（元数据和分段），不加载高密度 `LapSamples`。UI 勾选 0–4 圈后，由用户点击“显示勾选圈数据”一次性批量加载采样；模块只缓存最近使用的 8 个完整圈。速度曲线使用保留峰谷的包络降采样和冻结几何，悬停命中继续使用按进度二分；走线图缓存绘制和屏幕空间命中网格。每条赛道在 SQLite 中最多保留 50 圈，并为每个性能等级保护一条历史最快有效圈。
 
 ## 存储
 
-SchemaVersion 4 包含 AppSettings、ModuleSettings、Sessions、VehicleProfiles、EngineCurveBins、GearModels、ShiftTargets、TrackTemplates、TrackPoints、SectorDefinitions、Laps、LapSegments 与 LapSamples。圈速显式保存官方 CarClass/PI；升级前缺失的 CarClass 会先从旧车辆指纹恢复 PI，再按 D 100–400、C 401–500、B 501–600、A 601–700、S1 701–800、S2 801–900、R 901–998、X 999 的规范区间补齐。写入使用事务，开启外键与 WAL；高频原始包不写 SQLite，而是顺序写入版本化 `.lfztelemetry`。
+SchemaVersion 8 包含 AppSettings、ModuleSettings、Sessions、VehicleProfiles、EngineCurveBins、GearModels、ShiftTargets、TrackTemplates、TrackPoints、SectorDefinitions、Laps、LapSegments 与 LapSamples，并加入定点布局、官方目录分类、车辆自定义名称、推荐挡位开关和兼容车辆配置合并。圈速显式保存官方 CarClass/PI；升级前缺失的 CarClass 会先从旧车辆指纹恢复 PI，再按 D 100–400、C 401–500、B 501–600、A 601–700、S1 701–800、S2 801–900、R 901–998、X 999 的规范区间补齐。
+
+圈速列表使用两次批量查询读取圈元数据与所有分段，不再逐圈查询；只有图表确认显示的圈才批量读取 `LapSamples`。兼容用的 `LoadLaps` 也改为固定次数的批量查询。写入使用事务，开启外键与 WAL；高频原始包不写 SQLite，而是顺序写入版本化 `.lfztelemetry`。

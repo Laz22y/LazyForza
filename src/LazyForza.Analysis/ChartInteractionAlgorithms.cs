@@ -154,6 +154,49 @@ public static class ChartInteractionAlgorithms
             : low - 1;
     }
 
+    public static IReadOnlyList<LapSample> DownsampleSpeedEnvelope(
+        IReadOnlyList<LapSample> samples,
+        int maximumSamples)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maximumSamples, 4);
+        if (samples.Count <= maximumSamples) return samples;
+
+        var interiorCount = samples.Count - 2;
+        var bucketCount = Math.Max(1, (maximumSamples - 2) / 2);
+        var result = new List<LapSample>(Math.Min(maximumSamples, samples.Count))
+        {
+            samples[0]
+        };
+        for (var bucket = 0; bucket < bucketCount; bucket++)
+        {
+            var start = 1 + bucket * interiorCount / bucketCount;
+            var end = 1 + (bucket + 1) * interiorCount / bucketCount;
+            if (start >= end) continue;
+
+            var minimumIndex = start;
+            var maximumIndex = start;
+            for (var index = start + 1; index < end; index++)
+            {
+                if (samples[index].SpeedMps < samples[minimumIndex].SpeedMps) minimumIndex = index;
+                if (samples[index].SpeedMps > samples[maximumIndex].SpeedMps) maximumIndex = index;
+            }
+
+            if (minimumIndex <= maximumIndex)
+            {
+                result.Add(samples[minimumIndex]);
+                if (maximumIndex != minimumIndex) result.Add(samples[maximumIndex]);
+            }
+            else
+            {
+                result.Add(samples[maximumIndex]);
+                result.Add(samples[minimumIndex]);
+            }
+        }
+
+        result.Add(samples[^1]);
+        return result;
+    }
+
     public static ChartViewport ZoomAroundCursor(
         ChartViewport current,
         double cursorX,

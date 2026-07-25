@@ -7,7 +7,7 @@ namespace LazyForza.App;
 
 internal sealed class LapBulkDeleteDialog : Window
 {
-    private readonly IReadOnlyList<LapRecord> laps;
+    private readonly IReadOnlyList<LapSummary> laps;
     private readonly HashSet<int> selectedPerformanceClasses;
     private readonly CheckBox selectedClassesOnly;
     private readonly CheckBox deleteHistoricalBests;
@@ -17,7 +17,7 @@ internal sealed class LapBulkDeleteDialog : Window
     public LapBulkDeleteDialog(
         Window owner,
         string trackName,
-        IReadOnlyList<LapRecord> laps,
+        IReadOnlyList<LapSummary> laps,
         IReadOnlySet<int> selectedPerformanceClasses)
     {
         Owner = owner;

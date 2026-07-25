@@ -44,6 +44,8 @@ internal sealed class LapTelemetryChart : FrameworkElement
     private readonly double progressExtent;
     private readonly ToolTip hoverToolTip;
     private LapVisualHit? hover;
+    private DrawingGroup? baseDrawing;
+    private ChartDrawingKey? baseDrawingKey;
 
     public LapTelemetryChart(
         IReadOnlyList<LapRecord> laps,
@@ -73,13 +75,8 @@ internal sealed class LapTelemetryChart : FrameworkElement
     {
         base.OnRender(drawingContext);
         if (!TryMetrics(out var metrics)) return;
-        drawingContext.DrawRectangle(
-            new SolidColorBrush(Color.FromRgb(18, 23, 30)),
-            new Pen(new SolidColorBrush(Color.FromRgb(48, 58, 72)), 1),
-            metrics.Bounds);
-        DrawChartGrid(drawingContext, metrics.Bounds);
-        for (var index = 0; index < laps.Length; index++)
-            DrawSeries(drawingContext, laps[index].Samples, LapSeriesPalette.At(index), metrics);
+        EnsureBaseDrawing(metrics);
+        if (baseDrawing is not null) drawingContext.DrawDrawing(baseDrawing);
 
         if (hover is not null)
         {
@@ -146,6 +143,31 @@ internal sealed class LapTelemetryChart : FrameworkElement
         return true;
     }
 
+    private void EnsureBaseDrawing(ChartMetrics metrics)
+    {
+        var key = new ChartDrawingKey(metrics.Bounds, metrics.MaxSpeed, metrics.MaxProgress);
+        if (baseDrawing is not null &&
+            baseDrawingKey is { } cachedKey &&
+            cachedKey.Equals(key))
+            return;
+
+        var drawing = new DrawingGroup();
+        using (var drawingContext = drawing.Open())
+        {
+            drawingContext.DrawRectangle(
+                new SolidColorBrush(Color.FromRgb(18, 23, 30)),
+                new Pen(new SolidColorBrush(Color.FromRgb(48, 58, 72)), 1),
+                metrics.Bounds);
+            DrawChartGrid(drawingContext, metrics.Bounds);
+            for (var index = 0; index < laps.Length; index++)
+                DrawSeries(drawingContext, laps[index].Samples, index, metrics);
+        }
+
+        if (drawing.CanFreeze) drawing.Freeze();
+        baseDrawing = drawing;
+        baseDrawingKey = key;
+    }
+
     private void SetHover(LapVisualHit? next, Point pointer, bool includePosition)
     {
         if (next is null)
@@ -181,31 +203,42 @@ internal sealed class LapTelemetryChart : FrameworkElement
     private static void DrawSeries(
         DrawingContext drawingContext,
         IReadOnlyList<LapSample> samples,
-        Color color,
+        int seriesIndex,
         ChartMetrics metrics)
     {
-        var pen = new Pen(new SolidColorBrush(color), 2);
-        Point? previous = null;
-        foreach (var sample in Downsample(samples, (int)Math.Max(64, metrics.Bounds.Width)))
+        var visibleSamples = ChartInteractionAlgorithms.DownsampleSpeedEnvelope(
+            samples,
+            (int)Math.Max(64, metrics.Bounds.Width * 2));
+        if (visibleSamples.Count < 2) return;
+        var geometry = new StreamGeometry();
+        using (var geometryContext = geometry.Open())
         {
-            var point = ChartPoint(sample, metrics);
-            if (previous is Point old) drawingContext.DrawLine(pen, old, point);
-            previous = point;
+            geometryContext.BeginFigure(
+                ChartPoint(visibleSamples[0], metrics),
+                isFilled: false,
+                isClosed: false);
+            for (var index = 1; index < visibleSamples.Count; index++)
+                geometryContext.LineTo(
+                    ChartPoint(visibleSamples[index], metrics),
+                    isStroked: true,
+                    isSmoothJoin: true);
         }
+
+        geometry.Freeze();
+        var pen = new Pen(LapSeriesPalette.BrushAt(seriesIndex), 2)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round
+        };
+        pen.Freeze();
+        drawingContext.DrawGeometry(null, pen, geometry);
     }
 
     private static Point ChartPoint(LapSample sample, ChartMetrics metrics) => new(
         metrics.Bounds.Left + metrics.Bounds.Width * sample.S / metrics.MaxProgress,
         metrics.Bounds.Bottom -
         metrics.Bounds.Height * Math.Clamp(sample.SpeedMps / metrics.MaxSpeed, 0, 1));
-
-    private static IEnumerable<LapSample> Downsample(IReadOnlyList<LapSample> source, int maximum)
-    {
-        if (source.Count <= maximum) return source;
-        var step = source.Count / (double)maximum;
-        return Enumerable.Range(0, maximum)
-            .Select(index => source[Math.Min(source.Count - 1, (int)(index * step))]);
-    }
 
     private static void DrawChartGrid(DrawingContext drawingContext, Rect bounds)
     {
@@ -223,6 +256,7 @@ internal sealed class LapTelemetryChart : FrameworkElement
     }
 
     private readonly record struct ChartMetrics(Rect Bounds, double MaxSpeed, double MaxProgress);
+    private readonly record struct ChartDrawingKey(Rect Bounds, double MaxSpeed, double MaxProgress);
 
     internal static ToolTip CreateToolTip(FrameworkElement target) => new()
     {
