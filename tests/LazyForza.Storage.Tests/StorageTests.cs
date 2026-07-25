@@ -364,6 +364,73 @@ public sealed class StorageTests
     }
 
     [TestMethod]
+    public void LoadsLightweightLapSummariesAndHydratesOnlySelectedLaps()
+    {
+        var path = TempDatabasePath();
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var raw = Enumerable.Range(0, 80)
+                .Select(index => new TrackPoint(index * 10, 0, Math.Sin(index / 8d) * 20, 0, 0, 0))
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("Lazy loading", raw);
+            var sectors = TrackAlgorithms.CreateSectors(track);
+            store.SaveTrack(track, sectors);
+            var vehicle = new VehicleProfileFingerprint(10, 5, 850, 2, 8, 7_500, "g", "c");
+            var lapIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+
+            for (var lapIndex = 0; lapIndex < lapIds.Length; lapIndex++)
+            {
+                var samples = track.Points.Take(60)
+                    .Select((point, index) => new LapSample(
+                        point.S,
+                        index * 0.1,
+                        40 + lapIndex,
+                        5_000,
+                        4,
+                        1,
+                        0,
+                        0,
+                        point.X,
+                        point.Y,
+                        point.Z))
+                    .ToArray();
+                store.SaveLap(new LapRecord(
+                    lapIds[lapIndex],
+                    track.Id,
+                    track.Direction,
+                    TrackAlgorithms.SectorSchemaVersion,
+                    Guid.NewGuid(),
+                    vehicle,
+                    DateTimeOffset.UnixEpoch.AddMinutes(lapIndex),
+                    50 + lapIndex,
+                    true,
+                    null,
+                    sectors.Select(sector => new LapSegment(
+                        sector.Index,
+                        (50d + lapIndex) / sectors.Count,
+                        true)).ToArray(),
+                    samples));
+            }
+
+            var summaries = store.LoadLapSummaries(track.Id);
+            Assert.HasCount(2, summaries);
+            Assert.AreEqual(lapIds[0], summaries[0].Id);
+            Assert.HasCount(sectors.Count, summaries[0].Segments);
+
+            var selected = store.LoadLapsByIds([lapIds[1]]);
+            Assert.HasCount(1, selected);
+            Assert.AreEqual(lapIds[1], selected[0].Id);
+            Assert.HasCount(60, selected[0].Samples);
+            Assert.IsNull(store.LoadLap(Guid.NewGuid()));
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
     public void KeepsFiftyLapsPreservesEveryClassBestAndSupportsClassScopedDeletion()
     {
         var path = TempDatabasePath();

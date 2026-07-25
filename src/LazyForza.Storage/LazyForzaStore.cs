@@ -342,55 +342,101 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
 
     public int CountLaps(Guid trackId) => int.Parse(database.QueryText($"SELECT COUNT(*) FROM Laps WHERE TrackId={Quote(trackId.ToString())};") ?? "0", CultureInfo.InvariantCulture);
 
-    public IReadOnlyList<LapRecord> LoadLaps(Guid trackId, int limit = 50)
+    public IReadOnlyList<LapSummary> LoadLapSummaries(Guid trackId, int limit = MaxLapsPerTrack)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         var rows = database.QueryRows(
-            $"SELECT Id,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason FROM Laps WHERE TrackId={Quote(trackId.ToString())} ORDER BY StartedAt DESC LIMIT {limit};");
-        var laps = new List<LapRecord>(rows.Count);
-        foreach (var row in rows)
+            $"SELECT Id,TrackId,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason " +
+            $"FROM Laps WHERE TrackId={Quote(trackId.ToString())} ORDER BY StartedAt DESC LIMIT {limit};");
+        var summaries = ParseLapSummaries(rows);
+        summaries.Reverse();
+        return summaries;
+    }
+
+    public IReadOnlyList<LapRecord> LoadLapsByIds(IReadOnlyCollection<Guid> lapIds)
+    {
+        if (lapIds.Count == 0) return [];
+        var distinctIds = lapIds.Distinct().ToArray();
+        var idList = string.Join(',', distinctIds.Select(id => Quote(id.ToString())));
+        var rows = database.QueryRows(
+            "SELECT Id,TrackId,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason " +
+            $"FROM Laps WHERE Id IN ({idList}) ORDER BY StartedAt;");
+        return AttachSamples(ParseLapSummaries(rows));
+    }
+
+    public LapRecord? LoadLap(Guid lapId) => LoadLapsByIds([lapId]).SingleOrDefault();
+
+    public IReadOnlyList<LapRecord> LoadLaps(Guid trackId, int limit = 50)
+    {
+        return AttachSamples(LoadLapSummaries(trackId, limit));
+    }
+
+    private List<LapSummary> ParseLapSummaries(IReadOnlyList<IReadOnlyList<string?>> rows)
+    {
+        if (rows.Count == 0) return [];
+        var ids = rows.Select(row => Guid.Parse(row[0]!)).ToArray();
+        var idList = string.Join(',', ids.Select(id => Quote(id.ToString())));
+        var segmentsByLap = ids.ToDictionary(id => id, _ => new List<LapSegment>());
+        foreach (var segment in database.QueryRows(
+                     $"SELECT LapId,SectorIndex,TimeSeconds,IsValid FROM LapSegments WHERE LapId IN ({idList}) ORDER BY LapId,SectorIndex;"))
         {
-            var lapId = Guid.Parse(row[0]!);
-            var segments = database.QueryRows($"SELECT SectorIndex,TimeSeconds,IsValid FROM LapSegments WHERE LapId={Quote(lapId.ToString())} ORDER BY SectorIndex;")
-                .Select(segment => new LapSegment(
-                    int.Parse(segment[0]!, CultureInfo.InvariantCulture),
-                    double.Parse(segment[1]!, CultureInfo.InvariantCulture),
-                    segment[2] == "1"))
-                .ToArray();
-            var samples = database.QueryRows($"SELECT S,ElapsedSeconds,SpeedMps,Rpm,Gear,Accel,Brake,DeltaSeconds,X,Y,Z FROM LapSamples WHERE LapId={Quote(lapId.ToString())} ORDER BY S;")
-                .Select(sample => new LapSample(
-                    double.Parse(sample[0]!, CultureInfo.InvariantCulture),
-                    double.Parse(sample[1]!, CultureInfo.InvariantCulture),
-                    double.Parse(sample[2]!, CultureInfo.InvariantCulture),
-                    double.Parse(sample[3]!, CultureInfo.InvariantCulture),
-                    checked((byte)int.Parse(sample[4]!, CultureInfo.InvariantCulture)),
-                    double.Parse(sample[5]!, CultureInfo.InvariantCulture),
-                    double.Parse(sample[6]!, CultureInfo.InvariantCulture),
-                    double.Parse(sample[7]!, CultureInfo.InvariantCulture),
-                    double.Parse(sample[8]!, CultureInfo.InvariantCulture),
-                    double.Parse(sample[9]!, CultureInfo.InvariantCulture),
-                    double.Parse(sample[10]!, CultureInfo.InvariantCulture)))
-                .ToArray();
-            laps.Add(new LapRecord(
-                lapId,
-                trackId,
-                int.Parse(row[1]!, CultureInfo.InvariantCulture),
-                int.Parse(row[2]!, CultureInfo.InvariantCulture),
-                Guid.Parse(row[3]!),
-                ParseStoredVehicle(
-                    row[4],
-                    int.Parse(row[5]!, CultureInfo.InvariantCulture),
-                    int.Parse(row[6]!, CultureInfo.InvariantCulture)),
-                DateTimeOffset.Parse(row[7]!, CultureInfo.InvariantCulture),
-                double.Parse(row[8]!, CultureInfo.InvariantCulture),
-                row[9] == "1",
-                row[10],
-                segments,
-                samples));
+            var lapId = Guid.Parse(segment[0]!);
+            if (!segmentsByLap.TryGetValue(lapId, out var lapSegments)) continue;
+            lapSegments.Add(new LapSegment(
+                int.Parse(segment[1]!, CultureInfo.InvariantCulture),
+                double.Parse(segment[2]!, CultureInfo.InvariantCulture),
+                segment[3] == "1"));
         }
 
-        laps.Reverse();
-        return laps;
+        return rows.Select(row =>
+        {
+            var lapId = Guid.Parse(row[0]!);
+            return new LapSummary(
+                lapId,
+                Guid.Parse(row[1]!),
+                int.Parse(row[2]!, CultureInfo.InvariantCulture),
+                int.Parse(row[3]!, CultureInfo.InvariantCulture),
+                Guid.Parse(row[4]!),
+                ParseStoredVehicle(
+                    row[5],
+                    int.Parse(row[6]!, CultureInfo.InvariantCulture),
+                    int.Parse(row[7]!, CultureInfo.InvariantCulture)),
+                DateTimeOffset.Parse(row[8]!, CultureInfo.InvariantCulture),
+                double.Parse(row[9]!, CultureInfo.InvariantCulture),
+                row[10] == "1",
+                row[11],
+                segmentsByLap[lapId].ToArray());
+        }).ToList();
+    }
+
+    private IReadOnlyList<LapRecord> AttachSamples(IReadOnlyList<LapSummary> summaries)
+    {
+        if (summaries.Count == 0) return [];
+        var idList = string.Join(',', summaries.Select(summary => Quote(summary.Id.ToString())));
+        var samplesByLap = summaries.ToDictionary(summary => summary.Id, _ => new List<LapSample>());
+        foreach (var sample in database.QueryRows(
+                     "SELECT LapId,S,ElapsedSeconds,SpeedMps,Rpm,Gear,Accel,Brake,DeltaSeconds,X,Y,Z " +
+                     $"FROM LapSamples WHERE LapId IN ({idList}) ORDER BY LapId,S;"))
+        {
+            var lapId = Guid.Parse(sample[0]!);
+            if (!samplesByLap.TryGetValue(lapId, out var lapSamples)) continue;
+            lapSamples.Add(new LapSample(
+                double.Parse(sample[1]!, CultureInfo.InvariantCulture),
+                double.Parse(sample[2]!, CultureInfo.InvariantCulture),
+                double.Parse(sample[3]!, CultureInfo.InvariantCulture),
+                double.Parse(sample[4]!, CultureInfo.InvariantCulture),
+                checked((byte)int.Parse(sample[5]!, CultureInfo.InvariantCulture)),
+                double.Parse(sample[6]!, CultureInfo.InvariantCulture),
+                double.Parse(sample[7]!, CultureInfo.InvariantCulture),
+                double.Parse(sample[8]!, CultureInfo.InvariantCulture),
+                double.Parse(sample[9]!, CultureInfo.InvariantCulture),
+                double.Parse(sample[10]!, CultureInfo.InvariantCulture),
+                double.Parse(sample[11]!, CultureInfo.InvariantCulture)));
+        }
+
+        return summaries
+            .Select(summary => summary.WithSamples(samplesByLap[summary.Id].ToArray()))
+            .ToArray();
     }
 
     public void DeleteLap(Guid lapId) => database.Execute(

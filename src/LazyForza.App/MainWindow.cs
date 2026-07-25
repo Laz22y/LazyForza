@@ -50,7 +50,9 @@ internal sealed class MainWindow : Window
     private readonly DispatcherTimer refreshTimer;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly HashSet<Guid> selectedLapIds = [];
+    private readonly HashSet<Guid> displayedLapIds = [];
     private readonly Dictionary<Guid, HashSet<int>> selectedLapPerformanceClasses = [];
+    private readonly HashSet<Guid> customizedLapPerformanceFilters = [];
     private readonly Dictionary<Guid, TrackTemplate> trackPreviewCache = [];
     private Action? refreshVisiblePage;
     private bool changingModule;
@@ -394,7 +396,7 @@ internal sealed class MainWindow : Window
             lapStack.Children.Add(lapTable);
             stack.Children.Add(Card(lapStack));
 
-            void AddCompetitionLapRow(string[] cells, int row, bool header, LapRecord? lap, SectorColorState? state)
+            void AddCompetitionLapRow(string[] cells, int row, bool header, LapSummary? lap, SectorColorState? state)
             {
                 lapTable.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
                 for (var column = 0; column < cells.Length; column++)
@@ -486,6 +488,7 @@ internal sealed class MainWindow : Window
             .ThenBy(item => item.Summary.Name, StringComparer.CurrentCulture)
             .ToArray();
         Button? deleteSelectedLapsButton = null;
+        Button? displaySelectedLapsButton = null;
         if (compatibleTracks.Length > 0)
         {
             var selectorGrid = new Grid();
@@ -537,6 +540,7 @@ internal sealed class MainWindow : Window
                     if (selectedTrackId is Guid trackId) module.SelectTrack(trackId);
                     else module.ClearTrackSelection();
                     selectedLapIds.Clear();
+                    displayedLapIds.Clear();
                     RenderSelectedPage(true);
                 }
                 catch (InvalidOperationException exception)
@@ -547,11 +551,11 @@ internal sealed class MainWindow : Window
             var selectedTrackIdForActions = selector.SelectedItem is ComboBoxItem { Tag: Guid selectedId }
                 ? selectedId
                 : Guid.Empty;
-            LapRecord[] TrackLaps(Guid trackId) => trackId == module.CurrentTrack?.Id
+            LapSummary[] TrackLaps(Guid trackId) => trackId == module.CurrentTrack?.Id
                 ? module.VisibleLaps.Where(lap => lap.TrackId == trackId).ToArray()
                 : trackId == Guid.Empty
                     ? []
-                : store.LoadLaps(trackId, LazyForzaStore.MaxLapsPerTrack).ToArray();
+                : store.LoadLapSummaries(trackId, LazyForzaStore.MaxLapsPerTrack).ToArray();
 
             var selectedTrackLaps = TrackLaps(selectedTrackIdForActions);
             HashSet<int> selectedClasses;
@@ -559,13 +563,17 @@ internal sealed class MainWindow : Window
             {
                 selectedClasses = [];
             }
-            else if (selectedLapPerformanceClasses.TryGetValue(selectedTrackIdForActions, out var savedSelectedClasses))
+            else if (customizedLapPerformanceFilters.Contains(selectedTrackIdForActions) &&
+                     selectedLapPerformanceClasses.TryGetValue(selectedTrackIdForActions, out var savedSelectedClasses))
             {
                 selectedClasses = savedSelectedClasses;
             }
             else
             {
-                selectedClasses = Enumerable.Range(0, 8).ToHashSet();
+                selectedClasses = selectedTrackLaps
+                    .Select(lap => lap.Vehicle.CarClass)
+                    .Where(performanceClass => performanceClass is >= 0 and <= 7)
+                    .ToHashSet();
                 selectedLapPerformanceClasses[selectedTrackIdForActions] = selectedClasses;
             }
             if (selectedTrackIdForActions != Guid.Empty)
@@ -593,9 +601,11 @@ internal sealed class MainWindow : Window
                     };
                     chip.Click += (_, _) =>
                     {
+                        customizedLapPerformanceFilters.Add(selectedTrackIdForActions);
                         if (chip.IsChecked == true) selectedClasses.Add(performanceClass);
                         else selectedClasses.Remove(performanceClass);
                         selectedLapIds.Clear();
+                        displayedLapIds.Clear();
                         RenderSelectedPage(true);
                     };
                     classFilter.Children.Add(chip);
@@ -635,6 +645,7 @@ internal sealed class MainWindow : Window
                     : null;
                 module.DeleteTrackLaps(selectedTrackId, confirmation.DeleteHistoricalBests, deletionClasses);
                 selectedLapIds.Clear();
+                displayedLapIds.Clear();
                 RenderSelectedPage(true);
             };
 
@@ -688,6 +699,7 @@ internal sealed class MainWindow : Window
 
                 foreach (var lap in selectedLaps) module.DeleteLap(lap.Id);
                 selectedLapIds.ExceptWith(selectedLaps.Select(lap => lap.Id));
+                displayedLapIds.ExceptWith(selectedLaps.Select(lap => lap.Id));
                 RenderSelectedPage(true);
             };
 
@@ -735,7 +747,9 @@ internal sealed class MainWindow : Window
                 .OrderByDescending(lap => lap.StartedAt)
                 .ToArray();
         selectedLapIds.RemoveWhere(id => comparableLaps.All(lap => lap.Id != id));
+        displayedLapIds.RemoveWhere(id => comparableLaps.All(lap => lap.Id != id));
         if (deleteSelectedLapsButton is not null) deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
+        var comparisonHost = new StackPanel();
         if (comparableLaps.Length > 0)
         {
             var bestLapIds = comparableLaps
@@ -766,12 +780,37 @@ internal sealed class MainWindow : Window
                     isHistoricalBest, false);
             }
             var savedStack = new StackPanel();
-            savedStack.Children.Add(Label($"已保存圈速 · {comparableLaps.Length}/50", 16, FontWeights.SemiBold));
-            savedStack.Children.Add(Label("勾选最多 4 圈进行对比；每个性能等级单独标记历史最快。", 11, FontWeights.Normal, "MutedBrush"));
+            var savedHeader = new Grid();
+            savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var savedHeaderText = new StackPanel();
+            savedHeaderText.Children.Add(Label($"已保存圈速 · {comparableLaps.Length}/50", 16, FontWeights.SemiBold));
+            savedHeaderText.Children.Add(Label("勾选最多 4 圈，再加载图表；每个性能等级单独标记历史最快。", 11, FontWeights.Normal, "MutedBrush"));
+            savedHeader.Children.Add(savedHeaderText);
+            var displaySelectedLaps = new Button
+            {
+                Content = "显示勾选圈数据",
+                Padding = new Thickness(14, 7, 14, 7),
+                Margin = new Thickness(16, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                IsEnabled = !displayedLapIds.SetEquals(selectedLapIds),
+                ToolTip = "一次性加载当前勾选圈的速度与走线数据"
+            };
+            displaySelectedLaps.Click += (_, _) =>
+            {
+                displayedLapIds.Clear();
+                displayedLapIds.UnionWith(selectedLapIds);
+                displaySelectedLaps.IsEnabled = false;
+                RenderComparisonVisuals();
+            };
+            displaySelectedLapsButton = displaySelectedLaps;
+            Grid.SetColumn(displaySelectedLaps, 1);
+            savedHeader.Children.Add(displaySelectedLaps);
+            savedStack.Children.Add(savedHeader);
             savedStack.Children.Add(savedTable);
             stack.Children.Add(Card(savedStack));
 
-            void AddSavedRow(int row, LapRecord? selectableLap, string group, bool historicalBest, bool header)
+            void AddSavedRow(int row, LapSummary? selectableLap, string group, bool historicalBest, bool header)
             {
                 var cells = header
                     ? new[] { "选择", "等级 / PI", "比赛范围", "保存时间", "圈速", "有效性", "分段", "操作" }
@@ -815,7 +854,10 @@ internal sealed class MainWindow : Window
                             {
                                 selectedLapIds.Remove(selectableLap.Id);
                             }
-                            RenderSelectedPage(true);
+                            if (deleteSelectedLapsButton is not null)
+                                deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
+                            if (displaySelectedLapsButton is not null)
+                                displaySelectedLapsButton.IsEnabled = !displayedLapIds.SetEquals(selectedLapIds);
                         };
                         cell = check;
                     }
@@ -840,6 +882,7 @@ internal sealed class MainWindow : Window
                                     "删除已保存圈速", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
                             module.DeleteLap(selectableLap.Id);
                             selectedLapIds.Remove(selectableLap.Id);
+                            displayedLapIds.Remove(selectableLap.Id);
                             RenderSelectedPage(true);
                         };
                         cell = delete;
@@ -866,13 +909,68 @@ internal sealed class MainWindow : Window
                 }
             }
         }
-        var visualLaps = comparableLaps
-            .Where(lap => selectedLapIds.Contains(lap.Id) && lap.Samples.Count >= 2)
-            .OrderBy(lap => lap.StartedAt)
-            .Take(4)
-            .ToArray();
-        if (visualLaps.Length > 0)
+        stack.Children.Add(comparisonHost);
+        RenderComparisonVisuals();
+        stack.Children.Add(Card(Label(SectorColorClassifier.DatasetBestExplanation, 12, FontWeights.Normal, "MutedBrush")));
+        var initialTrackId = module.CurrentTrack?.Id;
+        var initialCompletedLaps = hud.CompletedLaps;
+        refreshVisiblePage = () =>
         {
+            if (module.Snapshot is not LapHudState current ||
+                current.Sectors.Count != sectorRows.Count ||
+                current.CompletedLaps != initialCompletedLaps ||
+                module.CurrentTrack?.Id != initialTrackId)
+            {
+                RenderSelectedPage(true);
+                return;
+            }
+
+            statusLabel.Text = $"{current.TrackName} · 已保存 {current.CompletedLaps} 圈\n{current.Status}";
+            for (var index = 0; index < current.Sectors.Count; index++)
+            {
+                var sector = current.Sectors[index];
+                var cells = sectorRows[index];
+                cells[0].Text = (sector.Index + 1).ToString();
+                cells[1].Text = AnalysisTime(sector.CurrentSeconds, pointToPointTimingApproximate);
+                cells[2].Text = AnalysisTime(sector.CurrentCompetitionBestSeconds, pointToPointTimingApproximate);
+                cells[3].Text = AnalysisTime(sector.HistoricalBestSeconds, pointToPointTimingApproximate);
+                cells[4].Text = sector.DeltaSeconds is double delta ? $"{delta:+0.000;-0.000;0.000}" : "—";
+                cells[5].Text = SectorStateText(sector.State);
+                cells[5].Foreground = Brush(SectorStateBrush(sector.State));
+            }
+        };
+        refreshVisiblePage();
+        return Scroll(stack);
+
+        void RenderComparisonVisuals()
+        {
+            comparisonHost.Children.Clear();
+            var selectedVisualLapIds = comparableLaps
+                .Where(lap => displayedLapIds.Contains(lap.Id))
+                .OrderBy(lap => lap.StartedAt)
+                .Take(4)
+                .Select(lap => lap.Id)
+                .ToArray();
+            var visualLaps = module.LoadLapDetails(selectedVisualLapIds)
+                .Where(lap => lap.Samples.Count >= 2)
+                .OrderBy(lap => lap.StartedAt)
+                .ToArray();
+            if (visualLaps.Length == 0)
+            {
+                comparisonHost.Children.Add(activeTrack is null
+                    ? module.HasCurrentCompetitionSession
+                        ? EmptyCard(hud.TrackName, hud.Status)
+                        : EmptyCard("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。")
+                    : activePerformanceClasses.Count == 0
+                        ? EmptyCard("未选择性能等级", "选择至少一个性能等级。")
+                        : comparableLaps.Length > 0 && displayedLapIds.Count == 0
+                            ? selectedLapIds.Count == 0
+                                ? EmptyCard("未选择对比圈", "勾选最多 4 圈，再点击“显示勾选圈数据”。")
+                                : EmptyCard("圈速已勾选", "点击“显示勾选圈数据”加载速度曲线与走线。")
+                            : EmptyCard("暂无圈速", "完成对应等级的比赛后显示。"));
+                return;
+            }
+
             var previewStack = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
             var legendStack = new StackPanel();
             legendStack.Children.Add(Label("对比图例", 15, FontWeights.SemiBold));
@@ -930,50 +1028,8 @@ internal sealed class MainWindow : Window
             mapPanel.Children.Add(mapView);
             visuals.Children.Add(Card(mapPanel));
             previewStack.Children.Add(visuals);
-            stack.Children.Add(previewStack);
+            comparisonHost.Children.Add(previewStack);
         }
-        else
-        {
-            stack.Children.Add(activeTrack is null
-                ? module.HasCurrentCompetitionSession
-                    ? EmptyCard(hud.TrackName, hud.Status)
-                    : EmptyCard("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。")
-                : activePerformanceClasses.Count == 0
-                    ? EmptyCard("未选择性能等级", "选择至少一个性能等级。")
-                    : comparableLaps.Length > 0 && selectedLapIds.Count == 0
-                        ? EmptyCard("未选择对比圈", "勾选最多 4 圈查看曲线与走线。")
-                        : EmptyCard("暂无圈速", "完成对应等级的比赛后显示。"));
-        }
-        stack.Children.Add(Card(Label(SectorColorClassifier.DatasetBestExplanation, 12, FontWeights.Normal, "MutedBrush")));
-        var initialTrackId = module.CurrentTrack?.Id;
-        var initialCompletedLaps = hud.CompletedLaps;
-        refreshVisiblePage = () =>
-        {
-            if (module.Snapshot is not LapHudState current ||
-                current.Sectors.Count != sectorRows.Count ||
-                current.CompletedLaps != initialCompletedLaps ||
-                module.CurrentTrack?.Id != initialTrackId)
-            {
-                RenderSelectedPage(true);
-                return;
-            }
-
-            statusLabel.Text = $"{current.TrackName} · 已保存 {current.CompletedLaps} 圈\n{current.Status}";
-            for (var index = 0; index < current.Sectors.Count; index++)
-            {
-                var sector = current.Sectors[index];
-                var cells = sectorRows[index];
-                cells[0].Text = (sector.Index + 1).ToString();
-                cells[1].Text = AnalysisTime(sector.CurrentSeconds, pointToPointTimingApproximate);
-                cells[2].Text = AnalysisTime(sector.CurrentCompetitionBestSeconds, pointToPointTimingApproximate);
-                cells[3].Text = AnalysisTime(sector.HistoricalBestSeconds, pointToPointTimingApproximate);
-                cells[4].Text = sector.DeltaSeconds is double delta ? $"{delta:+0.000;-0.000;0.000}" : "—";
-                cells[5].Text = SectorStateText(sector.State);
-                cells[5].Foreground = Brush(SectorStateBrush(sector.State));
-            }
-        };
-        refreshVisiblePage();
-        return Scroll(stack);
 
         TextBlock[] AddRow(string[] cells, int row, bool header)
         {
@@ -1305,6 +1361,7 @@ internal sealed class MainWindow : Window
             {
                 lapModule.SelectTrack(summary.Id);
                 selectedLapIds.Clear();
+                displayedLapIds.Clear();
             }
             catch (InvalidOperationException exception)
             {

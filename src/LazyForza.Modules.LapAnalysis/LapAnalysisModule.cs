@@ -20,7 +20,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private readonly Func<OverlayLayout> getOverlayLayout;
     private readonly List<TrackPoint> capture = [];
     private readonly List<LapSample> currentSamples = [];
-    private readonly List<LapRecord> visibleLaps = [];
+    private readonly List<LapSummary> visibleLaps = [];
+    private readonly Dictionary<Guid, LapRecord> visibleLapDetails = [];
     private readonly List<CompatibleTrack> compatibleTracks = [];
     private readonly List<TelemetryFrame> automaticMatchFrames = [];
     private readonly Dictionary<Guid, AutomaticMatchCandidate> automaticMatchCandidates = [];
@@ -124,11 +125,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         ? Volatile.Read(ref currentCompetitionSnapshot)
         : GetRecentCompetition()?.Snapshot;
     public TrackTemplate? CurrentTrack => track;
-    public IReadOnlyList<LapRecord> VisibleLaps
+    public IReadOnlyList<LapSummary> VisibleLaps
     {
         get { lock (lapGate) return visibleLaps.ToArray(); }
     }
-    public IReadOnlyList<LapRecord> CurrentSessionLaps
+    public IReadOnlyList<LapSummary> CurrentSessionLaps
     {
         get
         {
@@ -137,6 +138,31 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 return visibleLaps.Where(lap => lap.SessionId == sessionId).OrderBy(lap => lap.StartedAt).ToArray();
             }
         }
+    }
+    public IReadOnlyList<LapRecord> LoadLapDetails(IReadOnlyCollection<Guid> lapIds)
+    {
+        if (lapIds.Count == 0) return [];
+        var requestedIds = lapIds.Distinct().ToArray();
+        Dictionary<Guid, LapRecord> cached;
+        lock (lapGate)
+        {
+            cached = requestedIds
+                .Where(visibleLapDetails.ContainsKey)
+                .ToDictionary(id => id, id => visibleLapDetails[id]);
+        }
+
+        var missingIds = requestedIds.Where(id => !cached.ContainsKey(id)).ToArray();
+        foreach (var lap in store.LoadLapsByIds(missingIds)) cached[lap.Id] = lap;
+        lock (lapGate)
+        {
+            foreach (var lap in cached.Values) visibleLapDetails[lap.Id] = lap;
+            TrimVisibleLapDetails();
+        }
+
+        return requestedIds
+            .Where(cached.ContainsKey)
+            .Select(id => cached[id])
+            .ToArray();
     }
     public Guid CurrentSessionId => sessionId;
     public int? CurrentCompetitionPerformanceClass
@@ -944,7 +970,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         sectors = [];
         sectorStartTimes = [];
         currentSamples.Clear();
-        lock (lapGate) visibleLaps.Clear();
+        lock (lapGate)
+        {
+            visibleLaps.Clear();
+            visibleLapDetails.Clear();
+        }
         projectionIndex = 0;
         confidentProjectionCount = 0;
         validProjectionSamples = 0;
@@ -1098,7 +1128,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         sectorStartTimes = [];
         forceTrackLearning = false;
         incompatibleTrackName = null;
-        lock (lapGate) visibleLaps.Clear();
+        lock (lapGate)
+        {
+            visibleLaps.Clear();
+            visibleLapDetails.Clear();
+        }
         store.SetAppSetting(selectionSettingKey, string.Empty);
         ResetCompetitionSession();
         competitionActive = false;
@@ -1113,7 +1147,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         {
             if (visibleLaps.All(lap => lap.Id != lapId)) return;
         }
-        lock (lapGate) visibleLaps.RemoveAll(lap => lap.Id == lapId);
+        lock (lapGate)
+        {
+            visibleLaps.RemoveAll(lap => lap.Id == lapId);
+            visibleLapDetails.Remove(lapId);
+        }
         QueuePersistence(PersistenceCommand.Delete(lapId));
     }
 
@@ -1123,14 +1161,14 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         IReadOnlySet<int>? performanceClasses = null)
     {
         if (performanceClasses is { Count: 0 }) return;
-        LapRecord[] trackLaps;
+        LapSummary[] trackLaps;
         lock (lapGate)
         {
             trackLaps = visibleLaps.Where(lap => lap.TrackId == trackId).ToArray();
         }
         if (trackLaps.Length == 0)
         {
-            trackLaps = store.LoadLaps(trackId, LazyForzaStore.MaxLapsPerTrack).ToArray();
+            trackLaps = store.LoadLapSummaries(trackId, LazyForzaStore.MaxLapsPerTrack).ToArray();
         }
 
         var targetedLaps = trackLaps
@@ -1154,6 +1192,15 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 lap.TrackId == trackId &&
                 (performanceClasses is null || performanceClasses.Contains(lap.Vehicle.CarClass)) &&
                 !preserved.Contains(lap.Id));
+            foreach (var lapId in visibleLapDetails
+                         .Where(pair =>
+                             pair.Value.TrackId == trackId &&
+                             (performanceClasses is null ||
+                              performanceClasses.Contains(pair.Value.Vehicle.CarClass)) &&
+                             !preserved.Contains(pair.Key))
+                         .Select(pair => pair.Key)
+                         .ToArray())
+                visibleLapDetails.Remove(lapId);
         }
         QueuePersistence(PersistenceCommand.DeleteTrack(
             trackId,
@@ -1168,7 +1215,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         sectors = [];
         capture.Clear();
         currentSamples.Clear();
-        lock (lapGate) visibleLaps.Clear();
+        lock (lapGate)
+        {
+            visibleLaps.Clear();
+            visibleLapDetails.Clear();
+        }
         previousLapNumber = null;
         previousCurrentLap = null;
         previousCurrentRaceTime = null;
@@ -1582,14 +1633,14 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private (double? SessionBest, double? AllTimeBest) BestVisibleSectorTimes(int index, int performanceClass)
     {
         if (track is null) return (null, null);
-        LapRecord[] snapshotLaps;
+        LapSummary[] snapshotLaps;
         lock (lapGate) snapshotLaps = visibleLaps.ToArray();
         var comparable = snapshotLaps
             .Where(lap => lap.IsValid && lap.TrackId == track.Id && lap.Direction == track.Direction &&
                           lap.SectorSchemaVersion == TrackAlgorithms.SectorSchemaVersion &&
                           lap.Vehicle.CarClass == performanceClass)
             .ToArray();
-        double? Best(IEnumerable<LapRecord> laps) => laps
+        double? Best(IEnumerable<LapSummary> laps) => laps
             .SelectMany(lap => lap.Segments)
             .Where(segment => segment.Index == index && segment.IsValid && segment.TimeSeconds > 0)
             .Select(segment => (double?)segment.TimeSeconds)
@@ -1597,7 +1648,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         return (Best(comparable.Where(lap => lap.SessionId == sessionId)), Best(comparable));
     }
 
-    private LapRecord? HistoricalFastestLap(int performanceClass)
+    private LapSummary? HistoricalFastestLap(int performanceClass)
     {
         if (track is null) return null;
         lock (lapGate)
@@ -1636,7 +1687,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         return currentCumulative - referenceCumulative;
     }
 
-    private static double? CompletedLapDelta(LapRecord completedLap, LapRecord? historicalReference) =>
+    private static double? CompletedLapDelta(LapRecord completedLap, LapSummary? historicalReference) =>
         historicalReference is null ? null : completedLap.TotalSeconds - historicalReference.TotalSeconds;
 
     private void UpdateSectorProgress(int currentSector, double currentLapSeconds, bool rewound)
@@ -1695,11 +1746,12 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     private void ReloadVisibleLaps()
     {
-        var loaded = track is null ? [] : store.LoadLaps(track.Id, LazyForzaStore.MaxLapsPerTrack);
+        var loaded = track is null ? [] : store.LoadLapSummaries(track.Id, LazyForzaStore.MaxLapsPerTrack);
         lock (lapGate)
         {
             visibleLaps.Clear();
             visibleLaps.AddRange(loaded);
+            visibleLapDetails.Clear();
         }
     }
 
@@ -1733,7 +1785,9 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         lock (lapGate)
         {
             visibleLaps.RemoveAll(candidate => candidate.Id == lap.Id);
-            visibleLaps.Add(lap);
+            visibleLaps.Add(LapSummary.FromRecord(lap));
+            visibleLapDetails[lap.Id] = lap;
+            TrimVisibleLapDetails();
             visibleLaps.Sort((left, right) => left.StartedAt.CompareTo(right.StartedAt));
             if (visibleLaps.Count <= LazyForzaStore.MaxLapsPerTrack) return;
 
@@ -1755,7 +1809,21 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 keep.Add(candidate.Id);
             }
             visibleLaps.RemoveAll(candidate => !keep.Contains(candidate.Id));
+            foreach (var lapId in visibleLapDetails.Keys.Where(id => !keep.Contains(id)).ToArray())
+                visibleLapDetails.Remove(lapId);
         }
+    }
+
+    private void TrimVisibleLapDetails()
+    {
+        const int maximumCachedLaps = 8;
+        if (visibleLapDetails.Count <= maximumCachedLaps) return;
+        foreach (var lapId in visibleLapDetails.Values
+                     .OrderByDescending(lap => lap.StartedAt)
+                     .Skip(maximumCachedLaps)
+                     .Select(lap => lap.Id)
+                     .ToArray())
+            visibleLapDetails.Remove(lapId);
     }
 
     private void QueuePersistence(PersistenceCommand command)

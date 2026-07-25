@@ -169,6 +169,47 @@ public sealed record LapSample(
 
 public sealed record LapSegment(int Index, double TimeSeconds, bool IsValid);
 
+public sealed record LapSummary(
+    Guid Id,
+    Guid TrackId,
+    int Direction,
+    int SectorSchemaVersion,
+    Guid SessionId,
+    VehicleProfileFingerprint Vehicle,
+    DateTimeOffset StartedAt,
+    double TotalSeconds,
+    bool IsValid,
+    string? InvalidReason,
+    IReadOnlyList<LapSegment> Segments)
+{
+    public static LapSummary FromRecord(LapRecord lap) => new(
+        lap.Id,
+        lap.TrackId,
+        lap.Direction,
+        lap.SectorSchemaVersion,
+        lap.SessionId,
+        lap.Vehicle,
+        lap.StartedAt,
+        lap.TotalSeconds,
+        lap.IsValid,
+        lap.InvalidReason,
+        lap.Segments);
+
+    public LapRecord WithSamples(IReadOnlyList<LapSample> samples) => new(
+        Id,
+        TrackId,
+        Direction,
+        SectorSchemaVersion,
+        SessionId,
+        Vehicle,
+        StartedAt,
+        TotalSeconds,
+        IsValid,
+        InvalidReason,
+        Segments,
+        samples);
+}
+
 public sealed record LapRecord(
     Guid Id,
     Guid TrackId,

@@ -39,6 +39,68 @@ public sealed class LapAnalysisBehaviorTests
     }
 
     [TestMethod]
+    public void VisibleLapSummariesHydrateAndCacheOnlyRequestedChartDetails()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-lap-details-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            var track = SaveCircleTrack(store, "Lazy chart details");
+            var saved = store.LoadTrack(track.Id)!.Value;
+            var lapId = Guid.NewGuid();
+            var vehicle = new VehicleProfileFingerprint(1, 4, 800, 2, 6, 8_000, "g", "c");
+            var samples = saved.Track.Points.Take(20)
+                .Select((point, index) => new LapSample(
+                    point.S,
+                    index * 0.1,
+                    30,
+                    5_000,
+                    4,
+                    1,
+                    0,
+                    0,
+                    point.X,
+                    point.Y,
+                    point.Z))
+                .ToArray();
+            store.SaveLap(new LapRecord(
+                lapId,
+                track.Id,
+                track.Direction,
+                TrackAlgorithms.SectorSchemaVersion,
+                Guid.NewGuid(),
+                vehicle,
+                DateTimeOffset.UtcNow,
+                30,
+                true,
+                null,
+                saved.Sectors.Select(sector => new LapSegment(
+                    sector.Index,
+                    30d / saved.Sectors.Count,
+                    true)).ToArray(),
+                samples));
+
+            var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            module.SelectTrack(track.Id);
+            Assert.HasCount(1, module.VisibleLaps);
+            Assert.AreEqual(lapId, module.VisibleLaps[0].Id);
+
+            var details = module.LoadLapDetails([lapId]);
+            Assert.HasCount(1, details);
+            Assert.HasCount(samples.Length, details[0].Samples);
+
+            store.DeleteLap(lapId);
+            var cached = module.LoadLapDetails([lapId]);
+            Assert.HasCount(1, cached);
+            Assert.HasCount(samples.Length, cached[0].Samples);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
     public void TrackLearningStartsAtFirstTimerResetInsteadOfGridPosition()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-start-line-{Guid.NewGuid():N}.db");
