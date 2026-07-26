@@ -21,11 +21,29 @@ internal sealed class WinSqliteDatabase : IDisposable
     {
         lock (gate)
         {
-            var result = Native.sqlite3_exec(handle, sql, IntPtr.Zero, IntPtr.Zero, out var errorPointer);
-            if (result == Ok) return;
-            var message = errorPointer == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(errorPointer);
-            if (errorPointer != IntPtr.Zero) Native.sqlite3_free(errorPointer);
-            throw new InvalidOperationException($"SQLite error {result}: {message ?? ErrorMessage()} (SQL: {Shorten(sql)})");
+            ExecuteCore(sql);
+        }
+    }
+
+    public void ExecuteTransaction(IEnumerable<string> commands)
+    {
+        lock (gate)
+        {
+            ExecuteCore("BEGIN IMMEDIATE;");
+            try
+            {
+                foreach (var command in commands)
+                {
+                    ExecuteCore(command);
+                }
+
+                ExecuteCore("COMMIT;");
+            }
+            catch
+            {
+                try { ExecuteCore("ROLLBACK;"); } catch { }
+                throw;
+            }
         }
     }
 
@@ -53,31 +71,26 @@ internal sealed class WinSqliteDatabase : IDisposable
     {
         lock (gate)
         {
-            var statement = Prepare(sql);
+            return QueryRowsCore(sql);
+        }
+    }
+
+    public IReadOnlyList<IReadOnlyList<IReadOnlyList<string?>>> QueryRowsSnapshot(
+        IEnumerable<string> queries)
+    {
+        lock (gate)
+        {
+            ExecuteCore("BEGIN;");
             try
             {
-                var rows = new List<IReadOnlyList<string?>>();
-                var columnCount = Native.sqlite3_column_count(statement);
-                while (true)
-                {
-                    var result = Native.sqlite3_step(statement);
-                    if (result == Done) break;
-                    if (result != Row) throw CreateException(result, "query rows");
-                    var row = new string?[columnCount];
-                    for (var column = 0; column < columnCount; column++)
-                    {
-                        var pointer = Native.sqlite3_column_text(statement, column);
-                        row[column] = pointer == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(pointer);
-                    }
-
-                    rows.Add(row);
-                }
-
-                return rows;
+                var result = queries.Select(QueryRowsCore).ToArray();
+                ExecuteCore("COMMIT;");
+                return result;
             }
-            finally
+            catch
             {
-                Native.sqlite3_finalize(statement);
+                try { ExecuteCore("ROLLBACK;"); } catch { }
+                throw;
             }
         }
     }
@@ -98,6 +111,45 @@ internal sealed class WinSqliteDatabase : IDisposable
         var result = Native.sqlite3_prepare_v2(handle, sql, -1, out var statement, IntPtr.Zero);
         if (result != Ok) throw CreateException(result, "prepare statement");
         return statement;
+    }
+
+    private void ExecuteCore(string sql)
+    {
+        var result = Native.sqlite3_exec(handle, sql, IntPtr.Zero, IntPtr.Zero, out var errorPointer);
+        if (result == Ok) return;
+        var message = errorPointer == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(errorPointer);
+        if (errorPointer != IntPtr.Zero) Native.sqlite3_free(errorPointer);
+        throw new InvalidOperationException($"SQLite error {result}: {message ?? ErrorMessage()} (SQL: {Shorten(sql)})");
+    }
+
+    private IReadOnlyList<IReadOnlyList<string?>> QueryRowsCore(string sql)
+    {
+        var statement = Prepare(sql);
+        try
+        {
+            var rows = new List<IReadOnlyList<string?>>();
+            var columnCount = Native.sqlite3_column_count(statement);
+            while (true)
+            {
+                var result = Native.sqlite3_step(statement);
+                if (result == Done) break;
+                if (result != Row) throw CreateException(result, "query rows");
+                var row = new string?[columnCount];
+                for (var column = 0; column < columnCount; column++)
+                {
+                    var pointer = Native.sqlite3_column_text(statement, column);
+                    row[column] = pointer == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(pointer);
+                }
+
+                rows.Add(row);
+            }
+
+            return rows;
+        }
+        finally
+        {
+            Native.sqlite3_finalize(statement);
+        }
     }
 
     private InvalidOperationException CreateException(int result, string operation) =>
@@ -131,4 +183,3 @@ internal sealed class WinSqliteDatabase : IDisposable
         [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)] internal static extern void sqlite3_free(IntPtr pointer);
     }
 }
-

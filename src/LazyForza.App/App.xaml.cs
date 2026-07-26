@@ -20,6 +20,7 @@ public partial class App : Application
     private TelemetryRecorderController? recorder;
     private RollingLog? log;
     private ApplicationUpdateManager? updateManager;
+    private DiagnosticCaptureService? diagnosticCapture;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -34,6 +35,13 @@ public partial class App : Application
             var simulatorRequested = e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase) || captureDirectory is not null || recordSeconds is not null;
             var isolatedData = simulatorRequested || replayPath is not null;
             var databasePath = isolatedData ? Path.Combine(directories.Root, "lazyforza-sandbox.db") : directories.DatabasePath;
+            var applicationVersion = ApplicationVersion();
+            var migrationBackup = isolatedData
+                ? null
+                : DataBackupService.CreatePreMigrationSnapshotIfNeeded(
+                    databasePath,
+                    directories.BackupsPath,
+                    applicationVersion);
             store = new LazyForzaStore(databasePath);
             if (e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase))
                 await EnsureDemoVehicleProfilesAsync(store);
@@ -53,13 +61,33 @@ public partial class App : Application
             overlay = new OverlayCoordinator(savedLayout);
             log = new RollingLog(directories.LogsPath);
             log.Write($"Data database {databasePath}");
+            if (migrationBackup is not null)
+                log.Write($"Pre-migration database snapshot created: {migrationBackup}");
             log.Write(
                 $"{PlaygroundOfficialTrackCatalog.DisplayName} catalog {catalogImport.Version}: " +
                 $"{catalogImport.TotalTracks} tracks available, {catalogImport.ImportedTracks} imported or refreshed.");
             log.Write($"Starting with source {source.Description}");
+            diagnosticCapture = new DiagnosticCaptureService(
+                telemetry,
+                directories.Root,
+                message => log.Write(message));
+            await diagnosticCapture.StartAsync(CancellationToken.None);
             updateManager = new ApplicationUpdateManager(store, directories, message => log.Write(message));
-            var context = new ModuleContext(telemetry, overlay, store, store, message => log.Write(message));
-            var modules = BuiltInModuleCatalog.Create(store, source.Kind, () => overlay.TimingLayout);
+            var context = new ModuleContext(
+                telemetry,
+                overlay,
+                store,
+                store,
+                message =>
+                {
+                    log.Write(message);
+                    diagnosticCapture.RecordLog("module", message);
+                });
+            var modules = BuiltInModuleCatalog.Create(
+                store,
+                source.Kind,
+                () => overlay.TimingLayout,
+                diagnosticCapture.RecordSignal);
             moduleManager = new ModuleManager(modules, context);
             await moduleManager.InitializeAsync(CancellationToken.None);
             foreach (var module in moduleManager.Modules)
@@ -78,7 +106,8 @@ public partial class App : Application
                 directories,
                 recorder,
                 source.Kind,
-                updateManager);
+                updateManager,
+                diagnosticCapture);
             MainWindow.Show();
             if (captureDirectory is null && recordSeconds is null)
                 _ = ((MainWindow)MainWindow).CheckForUpdatesOnStartupAsync();
@@ -101,6 +130,7 @@ public partial class App : Application
 
         if (recorder is not null) await recorder.DisposeAsync();
         if (moduleManager is not null) await moduleManager.DisposeAsync();
+        if (diagnosticCapture is not null) await diagnosticCapture.DisposeAsync();
         if (telemetry is not null) await telemetry.DisposeAsync();
         overlay?.Dispose();
         updateManager?.Dispose();
@@ -153,6 +183,16 @@ public partial class App : Application
         }
 
         return Environment.GetEnvironmentVariable("LAZYFORZA_DATA_DIR");
+    }
+
+    private static string ApplicationVersion()
+    {
+        var version = typeof(App).Assembly.GetName().Version;
+        return version is null
+            ? "unknown"
+            : version.Build >= 0
+                ? version.ToString(3)
+                : version.ToString(2);
     }
 
     private async Task AutoRecordAndExitAsync(int seconds)
@@ -277,9 +317,10 @@ internal static class BuiltInModuleCatalog
     public static IReadOnlyList<ILazyForzaModule> Create(
         LazyForzaStore store,
         TelemetrySourceKind sourceKind,
-        Func<OverlayLayout>? getOverlayLayout = null) =>
+        Func<OverlayLayout>? getOverlayLayout = null,
+        Action<DiagnosticSignal>? diagnosticSink = null) =>
     [
         new DashboardModule(),
-        new LapAnalysisModule(store, sourceKind, getOverlayLayout)
+        new LapAnalysisModule(store, sourceKind, getOverlayLayout, diagnosticSink)
     ];
 }

@@ -29,7 +29,7 @@ public sealed record VehicleProfileSummary(
 
 public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisposable
 {
-    private const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 8;
     public const int MaxLapsPerTrack = 50;
     private readonly WinSqliteDatabase database;
     private bool disposed;
@@ -43,6 +43,16 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
     }
 
     public int SchemaVersion => int.Parse(database.QueryText("SELECT Version FROM SchemaVersion LIMIT 1;") ?? "0", CultureInfo.InvariantCulture);
+
+    internal IReadOnlyList<IReadOnlyList<string?>> QueryBackupRows(string sql) =>
+        database.QueryRows(sql);
+
+    internal IReadOnlyList<IReadOnlyList<IReadOnlyList<string?>>> QueryBackupSnapshot(
+        IEnumerable<string> queries) =>
+        database.QueryRowsSnapshot(queries);
+
+    internal void ExecuteBackupTransaction(IEnumerable<string> commands) =>
+        database.ExecuteTransaction(commands);
 
     public ValueTask<string?> GetAsync(string moduleId, string key, CancellationToken cancellationToken)
     {

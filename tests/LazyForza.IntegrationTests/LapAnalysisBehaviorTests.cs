@@ -712,7 +712,11 @@ public sealed class LapAnalysisBehaviorTests
             var first = SaveCircleTrack(store, "First circuit");
             var offset = new Vector3F(5_000, 0, 5_000);
             var second = SaveCircleTrack(store, "Second circuit", offset);
-            var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            var diagnosticSignals = new List<DiagnosticSignal>();
+            var module = new LapAnalysisModule(
+                store,
+                TelemetrySourceKind.Simulator,
+                diagnosticSink: diagnosticSignals.Add);
             var feed = new CircleFrameFeed(module);
 
             feed.Send(0, 20, raceTimeOverride: 2.1f);
@@ -733,6 +737,9 @@ public sealed class LapAnalysisBehaviorTests
             Assert.AreEqual("Second circuit", Hud(module).TrackName);
             Assert.HasCount(0, module.VisibleLaps,
                 "A route locked from the middle must wait for a real start line instead of storing a partial lap.");
+            Assert.IsTrue(diagnosticSignals.Any(signal =>
+                signal.Code == "track.rematch" &&
+                signal.IsAnomaly));
         }
         finally
         {
@@ -907,6 +914,47 @@ public sealed class LapAnalysisBehaviorTests
                 "A newly detected competition must immediately replace the retained previous competition.");
             Assert.IsFalse(module.IsShowingRecentCompetition);
             Assert.AreNotEqual(sessionId, module.CurrentSessionId);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
+    public void ContinuingRaceClockAfterInferredEndCreatesFalseEndDiagnostic()
+    {
+        var databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"lazyforza-false-end-diagnostic-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            SaveCircleTrack(store);
+            var diagnosticSignals = new List<DiagnosticSignal>();
+            var module = new LapAnalysisModule(
+                store,
+                TelemetrySourceKind.Simulator,
+                diagnosticSink: diagnosticSignals.Add);
+            var feed = new CircleFrameFeed(module);
+
+            feed.Send(1, 20, raceTimeOverride: 2.1f);
+            feed.Send(1, 0, raceTimeOverride: 2.2f);
+            feed.Drive(1, 1, 150);
+            for (var index = 0; index <= 20; index++) feed.SendFreeRoam();
+            Assert.IsFalse(module.HasCurrentCompetitionSession);
+
+            feed.Send(1, 151, raceTimeOverride: 39.5f);
+
+            Assert.IsTrue(diagnosticSignals.Any(signal =>
+                signal.Code == "race.false-end-recovered" &&
+                signal.IsAnomaly));
+            Assert.IsTrue(diagnosticSignals.Any(signal =>
+                signal.Code == "race.inferred-end" &&
+                !signal.IsAnomaly));
+            Assert.IsTrue(diagnosticSignals.Any(signal =>
+                signal.Code == "lap.not-settled-on-exit" &&
+                signal.IsAnomaly));
         }
         finally
         {

@@ -10,6 +10,8 @@ public sealed class DataDirectoryService
         RecordingsPath = Path.Combine(Root, "Recordings");
         LogsPath = Path.Combine(Root, "Logs");
         UpdatesPath = Path.Combine(Root, "Updates");
+        BackupsPath = Path.Combine(Root, "Backups");
+        DiagnosticsPath = Path.Combine(Root, "Diagnostics");
     }
 
     public string Root { get; }
@@ -17,6 +19,8 @@ public sealed class DataDirectoryService
     public string RecordingsPath { get; }
     public string LogsPath { get; }
     public string UpdatesPath { get; }
+    public string BackupsPath { get; }
+    public string DiagnosticsPath { get; }
 
     public void EnsureCreated()
     {
@@ -24,5 +28,7 @@ public sealed class DataDirectoryService
         Directory.CreateDirectory(RecordingsPath);
         Directory.CreateDirectory(LogsPath);
         Directory.CreateDirectory(UpdatesPath);
+        Directory.CreateDirectory(BackupsPath);
+        Directory.CreateDirectory(DiagnosticsPath);
     }
 }

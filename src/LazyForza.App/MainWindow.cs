@@ -9,7 +9,9 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Text.Json;
+using System.IO;
 using System.Windows.Data;
+using Microsoft.Win32;
 using VectorPath = System.Windows.Shapes.Path;
 using VectorShape = System.Windows.Shapes.Shape;
 using LazyForza.Analysis;
@@ -39,7 +41,8 @@ internal sealed class MainWindow : Window
         ("M 11 3 C 16 2 20 5 21 9 C 22 13 20 18 16 20 C 12 22 6 21 4 17 C 2 13 3 8 6 5 C 8 3 9 3 11 3 Z M 11 7 C 8 7 7 9 7 12 C 7 15 9 17 12 17 C 15 17 17 15 17 12 C 17 9 15 7 11 7 Z M 16 16 L 18.5 18 M 17.2 14.8 L 19.7 16.8", "赛道"),
         ("M 4 16 L 5.5 11 L 8 8 L 16 8 L 18.5 11 L 20 16 L 20 19 L 18 19 L 18 17 L 6 17 L 6 19 L 4 19 Z M 6 12 L 18 12 M 8 15 L 8.01 15 M 16 15 L 16.01 15", "车辆与换挡"),
         ("M 4 7 L 9 7 M 15 7 L 20 7 M 12 4 L 12 10 M 4 17 L 13 17 M 19 17 L 20 17 M 16 14 L 16 20", "设置"),
-        ("M 3 12 L 7 12 L 9 7 L 13 17 L 16 10 L 18 12 L 21 12 M 4 4 L 20 4 L 20 20 L 4 20 Z", "诊断")
+        ("M 3 12 L 7 12 L 9 7 L 13 17 L 16 10 L 18 12 L 21 12 M 4 4 L 20 4 L 20 20 L 4 20 Z", "诊断"),
+        ("M 5 5 L 19 5 L 19 19 L 5 19 Z M 8 2 L 16 2 L 16 8 L 8 8 Z M 9 12 L 15 12 M 9 15 L 15 15", "数据")
     ];
     private readonly ModuleManager moduleManager;
     private readonly ITelemetryFeed telemetry;
@@ -49,6 +52,7 @@ internal sealed class MainWindow : Window
     private readonly TelemetryRecorderController recorder;
     private readonly TelemetrySourceKind sourceKind;
     private readonly ApplicationUpdateManager updateManager;
+    private readonly DiagnosticCaptureService diagnosticCapture;
     private readonly ContentControl content = new();
     private readonly ListBox navigation = new();
     private readonly DispatcherTimer refreshTimer;
@@ -71,7 +75,8 @@ internal sealed class MainWindow : Window
         DataDirectoryService directories,
         TelemetryRecorderController recorder,
         TelemetrySourceKind sourceKind,
-        ApplicationUpdateManager updateManager)
+        ApplicationUpdateManager updateManager,
+        DiagnosticCaptureService diagnosticCapture)
     {
         this.moduleManager = moduleManager;
         this.telemetry = telemetry;
@@ -81,6 +86,7 @@ internal sealed class MainWindow : Window
         this.recorder = recorder;
         this.sourceKind = sourceKind;
         this.updateManager = updateManager;
+        this.diagnosticCapture = diagnosticCapture;
         lapAnalysisMapHeight = double.TryParse(
             store.GetAppSetting(LapAnalysisMapHeightSetting),
             System.Globalization.NumberStyles.Float,
@@ -105,6 +111,8 @@ internal sealed class MainWindow : Window
         navigation.SelectedIndex = 0;
         refreshTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) =>
         {
+            var lapModule = moduleManager.Modules.OfType<LapAnalysisModule>().FirstOrDefault();
+            if (lapModule is not null) diagnosticCapture.UpdateTrackMatch(lapModule.MatchDiagnostics);
             refreshVisiblePage?.Invoke();
         }, Dispatcher);
         refreshTimer.Start();
@@ -197,7 +205,8 @@ internal sealed class MainWindow : Window
             4 => TracksPage(),
             5 => ShiftPage(),
             6 => SettingsPage(),
-            _ => DiagnosticsPage()
+            7 => DiagnosticsPage(),
+            _ => DataProtectionPage()
         };
         content.Content = page;
         if (preserveScroll && page is ScrollViewer newScroll)
@@ -2205,6 +2214,328 @@ internal sealed class MainWindow : Window
         }
     }
 
+    private UIElement DataProtectionPage()
+    {
+        var stack = PageStack(
+            "数据备份与迁移",
+            "备份、迁移并恢复 LazyForza 的个人数据。");
+        var backupService = new DataBackupService(store, CurrentApplicationVersion());
+        var automaticBackups = Directory.Exists(directories.BackupsPath)
+            ? Directory.EnumerateFiles(directories.BackupsPath, "auto-*.lfzbackup").Count()
+            : 0;
+
+        var protectionPanel = new StackPanel();
+        var protectionHeader = new Grid();
+        protectionHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        protectionHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        protectionHeader.Children.Add(Label("自动保护", 17, FontWeights.SemiBold));
+        var protectionState = Label("● 已启用", 13, FontWeights.SemiBold, "SuccessBrush");
+        protectionState.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(protectionState, 1);
+        protectionHeader.Children.Add(protectionState);
+        protectionPanel.Children.Add(protectionHeader);
+        var protectionDescription = Label(
+            "数据库升级和自动更新前会先创建可恢复副本。",
+            12,
+            FontWeights.Normal,
+            "MutedBrush");
+        protectionDescription.Margin = new Thickness(0, 4, 0, 14);
+        protectionPanel.Children.Add(protectionDescription);
+
+        var protectionSummary = new Grid();
+        protectionSummary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star) });
+        protectionSummary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star) });
+        protectionSummary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.4, GridUnitType.Star) });
+        protectionSummary.Children.Add(DataSummaryItem(
+            "现有备份",
+            $"{automaticBackups} 份",
+            "SuccessBrush"));
+        var retention = DataSummaryItem(
+            "轮换上限",
+            $"{DataBackupService.AutomaticBackupRetention} 份");
+        Grid.SetColumn(retention, 1);
+        protectionSummary.Children.Add(retention);
+        var location = DataSummaryItem("保存位置", directories.BackupsPath);
+        Grid.SetColumn(location, 2);
+        protectionSummary.Children.Add(location);
+        protectionPanel.Children.Add(protectionSummary);
+        stack.Children.Add(Card(protectionPanel));
+
+        var selectionPanel = new StackPanel();
+        selectionPanel.Children.Add(DataSectionHeader(
+            "导出备份",
+            "选择要迁移的数据。导出完成前会校验备份内容。"));
+        var selections = new UniformGrid { Columns = 2, Margin = new Thickness(-4, 10, -4, 10) };
+        var settings = new CheckBox { IsChecked = true };
+        var vehicles = new CheckBox { IsChecked = true };
+        var laps = new CheckBox { IsChecked = true };
+        var tracks = new CheckBox { IsChecked = true };
+        selections.Children.Add(DataSelectionOption(settings, "配置", "应用与模块设置"));
+        selections.Children.Add(DataSelectionOption(vehicles, "车辆与换挡模型", "车辆档案与学习结果"));
+        selections.Children.Add(DataSelectionOption(laps, "个人圈速", "圈速、分段和遥测样本"));
+        selections.Children.Add(DataSelectionOption(tracks, "自定义赛道", "个人学习和编辑的路线"));
+        selectionPanel.Children.Add(selections);
+        var exportStatus = Label("圈速会自动包含所需的赛道定义。", 12, FontWeights.Normal, "MutedBrush");
+        exportStatus.VerticalAlignment = VerticalAlignment.Center;
+        var exportButton = new Button
+        {
+            Content = "导出备份",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            MinWidth = 120
+        };
+        exportButton.Click += async (_, _) =>
+        {
+            var selection = new BackupSelection(
+                settings.IsChecked == true,
+                vehicles.IsChecked == true,
+                laps.IsChecked == true,
+                tracks.IsChecked == true);
+            if (!selection.HasAny)
+            {
+                MessageBox.Show(
+                    "请至少选择一类数据。",
+                    "没有可导出的内容",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            var dialog = new SaveFileDialog
+            {
+                Title = "导出 LazyForza 数据备份",
+                Filter = "LazyForza 备份 (*.lfzbackup)|*.lfzbackup",
+                DefaultExt = ".lfzbackup",
+                AddExtension = true,
+                InitialDirectory = directories.BackupsPath,
+                FileName = $"LazyForza-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.lfzbackup"
+            };
+            if (dialog.ShowDialog(this) != true) return;
+
+            exportButton.IsEnabled = false;
+            exportStatus.Text = "正在整理并校验备份…";
+            try
+            {
+                var manifest = await Task.Run(
+                    () => backupService.Create(
+                        dialog.FileName,
+                        selection,
+                        lifetimeCancellation.Token),
+                    lifetimeCancellation.Token);
+                exportStatus.Text =
+                    $"已导出 · Schema {manifest.SchemaVersion} · 应用 {manifest.ApplicationVersion}";
+                MessageBox.Show(
+                    $"备份已生成并完成 SHA-256 校验。\n\n{dialog.FileName}",
+                    "导出完成",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                exportStatus.Text = "导出已取消。";
+            }
+            catch (Exception exception)
+            {
+                exportStatus.Text = "导出失败。";
+                MessageBox.Show(
+                    exception.Message,
+                    "无法导出备份",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                exportButton.IsEnabled = true;
+            }
+        };
+        var exportFooter = new Grid { Margin = new Thickness(-4, 2, 0, 0) };
+        exportFooter.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        exportFooter.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        exportFooter.Children.Add(exportButton);
+        exportStatus.Margin = new Thickness(12, 0, 0, 0);
+        Grid.SetColumn(exportStatus, 1);
+        exportFooter.Children.Add(exportStatus);
+        selectionPanel.Children.Add(exportFooter);
+        var exportCard = Card(selectionPanel);
+
+        var importPanel = new StackPanel();
+        importPanel.Children.Add(DataSectionHeader(
+            "导入备份",
+            "先校验文件并预览冲突，再决定是否导入。"));
+        var importModeLabel = Label("导入方式", 13, FontWeights.SemiBold);
+        importModeLabel.Margin = new Thickness(0, 12, 0, 6);
+        importPanel.Children.Add(importModeLabel);
+        var modePanel = new UniformGrid { Columns = 2, Margin = new Thickness(-4, 0, -4, 10) };
+        var merge = new RadioButton
+        {
+            IsChecked = true,
+            GroupName = "BackupImportMode"
+        };
+        var overwrite = new RadioButton
+        {
+            GroupName = "BackupImportMode"
+        };
+        modePanel.Children.Add(DataSelectionOption(merge, "合并", "保留本机同名记录"));
+        modePanel.Children.Add(DataSelectionOption(overwrite, "覆盖冲突", "只替换发生冲突的数据"));
+        importPanel.Children.Add(modePanel);
+        var previewTitle = Label("备份预览", 13, FontWeights.SemiBold);
+        previewTitle.Margin = new Thickness(0, 0, 0, 6);
+        importPanel.Children.Add(previewTitle);
+        var previewLabel = Label(
+            "尚未选择备份文件。选择文件后会显示版本、内容数量和冲突。",
+            12,
+            FontWeights.Normal,
+            "MutedBrush");
+        previewLabel.VerticalAlignment = VerticalAlignment.Center;
+        var previewContainer = new Border
+        {
+            Background = Brush("PanelBrush"),
+            BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(7),
+            MinHeight = 78,
+            Padding = new Thickness(12, 10, 12, 10),
+            Child = previewLabel
+        };
+        importPanel.Children.Add(previewContainer);
+        var importControls = new WrapPanel { Margin = new Thickness(-4, 8, 0, 0) };
+        var inspectButton = new Button { Content = "选择备份文件", MinWidth = 140 };
+        var importButton = new Button
+        {
+            Content = "开始导入",
+            MinWidth = 110,
+            IsEnabled = false
+        };
+        string? selectedBackup = null;
+        BackupPreview? preview = null;
+        inspectButton.Click += async (_, _) =>
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = "选择 LazyForza 数据备份",
+                Filter = "LazyForza 备份 (*.lfzbackup)|*.lfzbackup",
+                CheckFileExists = true,
+                Multiselect = false,
+                InitialDirectory = directories.BackupsPath
+            };
+            if (dialog.ShowDialog(this) != true) return;
+
+            inspectButton.IsEnabled = false;
+            importButton.IsEnabled = false;
+            previewLabel.Text = "正在校验清单和文件哈希…";
+            try
+            {
+                preview = await Task.Run(
+                    () => backupService.Preview(
+                        dialog.FileName,
+                        lifetimeCancellation.Token),
+                    lifetimeCancellation.Token);
+                selectedBackup = dialog.FileName;
+                var conflictLines = preview.Conflicts.Count == 0
+                    ? "没有发现冲突。"
+                    : string.Join(
+                        "\n",
+                        preview.Conflicts.Take(8).Select(conflict =>
+                            $"• {conflict.Category}：{conflict.SourceSummary}"));
+                if (preview.Conflicts.Count > 8)
+                    conflictLines += $"\n• 另有 {preview.Conflicts.Count - 8} 项冲突";
+                var warnings = preview.Warnings.Count == 0
+                    ? string.Empty
+                    : "\n\n" + string.Join("\n", preview.Warnings);
+                previewLabel.Text =
+                    $"创建时间：{preview.Manifest.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}\n" +
+                    $"来源版本：{preview.Manifest.ApplicationVersion} · Schema {preview.Manifest.SchemaVersion}\n" +
+                    $"配置 {preview.Settings} · 车辆 {preview.Vehicles} · 圈速 {preview.Laps} · 自定义赛道 {preview.CustomTracks}\n" +
+                    $"冲突 {preview.Conflicts.Count} 项\n\n{conflictLines}{warnings}";
+                importButton.IsEnabled = true;
+            }
+            catch (Exception exception)
+            {
+                selectedBackup = null;
+                preview = null;
+                previewLabel.Text = "备份校验失败。";
+                MessageBox.Show(
+                    exception.Message,
+                    "无法读取备份",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                inspectButton.IsEnabled = true;
+            }
+        };
+        importButton.Click += async (_, _) =>
+        {
+            if (selectedBackup is null || preview is null) return;
+            var mode = overwrite.IsChecked == true
+                ? BackupImportMode.Overwrite
+                : BackupImportMode.Merge;
+            if (mode == BackupImportMode.Overwrite &&
+                preview.Conflicts.Count > 0 &&
+                MessageBox.Show(
+                    $"将覆盖 {preview.Conflicts.Count} 项冲突数据。继续前会保留现有自动备份，是否继续？",
+                    "确认覆盖冲突",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+
+            importButton.IsEnabled = false;
+            inspectButton.IsEnabled = false;
+            previewLabel.Text += "\n\n正在导入…";
+            try
+            {
+                var result = await Task.Run(
+                    () =>
+                    {
+                        backupService.CreateAutomaticBackup(
+                            directories.BackupsPath,
+                            "import",
+                            lifetimeCancellation.Token);
+                        return backupService.Import(
+                            selectedBackup,
+                            mode,
+                            lifetimeCancellation.Token);
+                    },
+                    lifetimeCancellation.Token);
+                previewLabel.Text +=
+                    $"\n完成：配置 {result.ImportedSettings} · 车辆 {result.ImportedVehicles} · " +
+                    $"圈速 {result.ImportedLaps} · 自定义赛道 {result.ImportedCustomTracks}。";
+                MessageBox.Show(
+                    "数据导入完成。为使后台模块重新载入赛道与车辆缓存，请重启 LazyForza。",
+                    "导入完成",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception exception)
+            {
+                previewLabel.Text += "\n导入失败，数据库事务已回滚。";
+                MessageBox.Show(
+                    exception.Message,
+                    "无法导入备份",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                importButton.IsEnabled = true;
+                inspectButton.IsEnabled = true;
+            }
+        };
+        importControls.Children.Add(inspectButton);
+        importControls.Children.Add(importButton);
+        importPanel.Children.Add(importControls);
+        var importCard = Card(importPanel);
+
+        var operations = new Grid();
+        operations.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        operations.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        operations.Children.Add(exportCard);
+        Grid.SetColumn(importCard, 1);
+        operations.Children.Add(importCard);
+        stack.Children.Add(operations);
+        return Scroll(stack);
+    }
+
     private UIElement SettingsPage()
     {
         var stack = PageStack("设置", "设置 Live UDP 与 HUD。监听设置重启后生效。");
@@ -2618,6 +2949,70 @@ internal sealed class MainWindow : Window
         var rawLabel = Label(string.Empty, 13);
         stack.Children.Add(Card(diagnosticsLabel));
         stack.Children.Add(Card(rawLabel));
+        var packagePanel = new StackPanel();
+        packagePanel.Children.Add(Label("一键诊断包", 17, FontWeights.SemiBold));
+        var packageStatus = Label(
+            "短时内存缓冲只保留必要遥测字段；导出时会移除用户名和本地目录。",
+            12,
+            FontWeights.Normal,
+            "MutedBrush");
+        packagePanel.Children.Add(packageStatus);
+        var exportPackage = new Button
+        {
+            Content = "导出诊断包",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            MinWidth = 130,
+            Margin = new Thickness(0, 10, 0, 0)
+        };
+        exportPackage.Click += async (_, _) =>
+        {
+            var dialog = new SaveFileDialog
+            {
+                Title = "导出 LazyForza 诊断包",
+                Filter = "LazyForza 诊断包 (*.lfzdiag)|*.lfzdiag",
+                DefaultExt = ".lfzdiag",
+                AddExtension = true,
+                InitialDirectory = directories.DiagnosticsPath,
+                FileName = $"LazyForza-diagnostic-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.lfzdiag"
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            exportPackage.IsEnabled = false;
+            packageStatus.Text = "正在整理遥测、状态事件和赛道候选评分…";
+            try
+            {
+                var path = await Task.Run(
+                    () => diagnosticCapture.Export(
+                        dialog.FileName,
+                        store.SchemaVersion,
+                        CurrentApplicationVersion(),
+                        lifetimeCancellation.Token),
+                    lifetimeCancellation.Token);
+                packageStatus.Text =
+                    $"已导出：{Path.GetFileName(path)}\n" +
+                    $"当前缓冲 {diagnosticCapture.BufferedSamples} 帧 · " +
+                    $"事件 {diagnosticCapture.EventCount} 条 · 异常快照 {diagnosticCapture.AnomalyCount} 个";
+                MessageBox.Show(
+                    $"诊断包已生成。\n\n{path}",
+                    "导出完成",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception exception)
+            {
+                packageStatus.Text = "诊断包导出失败。";
+                MessageBox.Show(
+                    exception.Message,
+                    "无法导出诊断包",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                exportPackage.IsEnabled = true;
+            }
+        };
+        packagePanel.Children.Add(exportPackage);
+        stack.Children.Add(Card(packagePanel));
         var lapAnalysisModule = moduleManager.Modules.OfType<LapAnalysisModule>().FirstOrDefault();
         var trackMatchLabel = Label(string.Empty, 13);
         if (lapAnalysisModule is not null) stack.Children.Add(Card(trackMatchLabel));
@@ -2652,6 +3047,7 @@ internal sealed class MainWindow : Window
             if (lapAnalysisModule is not null)
             {
                 var match = lapAnalysisModule.MatchDiagnostics;
+                diagnosticCapture.UpdateTrackMatch(match);
                 var candidates = match.TopCandidates.Count == 0
                     ? "  暂无候选"
                     : string.Join(
@@ -2679,6 +3075,13 @@ internal sealed class MainWindow : Window
                             $"  {candidate.TrackName}：{candidate.EliminationReason ?? "未进入精匹配集合"}"));
                 trackMatchLabel.Text =
                     $"赛道识别 2.0\n状态：{match.State}\n路线总数/粗筛通过/精匹配：{match.TotalRoutes} / {match.CoarseEligibleRoutes} / {match.FineCandidateRoutes}\n前三名候选：\n{candidates}\n最近淘汰：\n{eliminations}";
+            }
+            if (exportPackage.IsEnabled)
+            {
+                packageStatus.Text =
+                    $"短时缓冲 {diagnosticCapture.BufferedSamples} 帧 · " +
+                    $"事件 {diagnosticCapture.EventCount} 条 · 异常快照 {diagnosticCapture.AnomalyCount} 个\n" +
+                    "导出内容会移除用户名和本地目录，不包含原始 UDP 字节。";
             }
             recordingLabel.Text = recorder.IsRecording
                 ? $"正在录制：{recorder.FramesWritten:N0} 帧\n{recorder.CurrentPath}"
@@ -2747,6 +3150,51 @@ internal sealed class MainWindow : Window
     {
         RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(ListBoxItem), 1)
     };
+
+    private static StackPanel DataSectionHeader(string title, string description)
+    {
+        var header = new StackPanel();
+        header.Children.Add(Label(title, 17, FontWeights.SemiBold));
+        var detail = Label(description, 12, FontWeights.Normal, "MutedBrush");
+        detail.Margin = new Thickness(0, 4, 0, 0);
+        header.Children.Add(detail);
+        return header;
+    }
+
+    private static Border DataSelectionOption(ToggleButton input, string title, string description)
+    {
+        var content = new StackPanel();
+        content.Children.Add(Label(title, 14, FontWeights.SemiBold));
+        var detail = Label(description, 12, FontWeights.Normal, "MutedBrush");
+        detail.Margin = new Thickness(0, 2, 0, 0);
+        content.Children.Add(detail);
+        input.Content = content;
+        input.HorizontalAlignment = HorizontalAlignment.Stretch;
+        input.VerticalAlignment = VerticalAlignment.Stretch;
+        input.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        input.Padding = new Thickness(0);
+        input.Margin = new Thickness(12, 10, 12, 10);
+
+        return new Border
+        {
+            Background = Brush("PanelBrush"),
+            BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(7),
+            Margin = new Thickness(4),
+            Child = input
+        };
+    }
+
+    private static StackPanel DataSummaryItem(string title, string value, string? valueBrush = null)
+    {
+        var item = new StackPanel { Margin = new Thickness(0, 0, 18, 0) };
+        item.Children.Add(Label(title, 12, FontWeights.Normal, "MutedBrush"));
+        var valueLabel = Label(value, 14, FontWeights.SemiBold, valueBrush);
+        valueLabel.Margin = new Thickness(0, 3, 0, 0);
+        item.Children.Add(valueLabel);
+        return item;
+    }
 
     private static Border MetricCard(string label, string value, string detail)
     {

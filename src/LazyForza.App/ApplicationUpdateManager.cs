@@ -73,6 +73,10 @@ internal sealed class ApplicationUpdateManager : IDisposable
         if (!CanInstallAutomatically)
             throw new UpdateException("当前运行的是开发构建，已阻止发行包覆盖开发目录。请在完整发行版中安装更新。");
 
+        var backup = new DataBackupService(store, CurrentVersion.ToString(3))
+            .CreateAutomaticUpdateBackup(directories.BackupsPath);
+        log($"Automatic pre-update data backup created: {backup}");
+
         var process = WindowsUpdateLauncher.Launch(
             update,
             AppContext.BaseDirectory,
