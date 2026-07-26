@@ -16,7 +16,6 @@ public enum ModuleRuntimeState
 public sealed record ModuleDescriptor(
     string Id,
     string DisplayName,
-    Version Version,
     string Description,
     IReadOnlyList<string> Dependencies,
     string? MainPageKey,

@@ -12,7 +12,8 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
     private OverlayLayout layout;
     private bool disposed;
 
-    public OverlayCoordinator(OverlayLayout? initialLayout = null) => layout = initialLayout ?? new OverlayLayout();
+    public OverlayCoordinator(OverlayLayout? initialLayout = null) =>
+        layout = NormalizeLayout(initialLayout ?? new OverlayLayout());
 
     public OverlayLayout CurrentLayout => window?.CaptureLayout() ?? layout;
     public OverlayLayout TimingLayout => layout;
@@ -63,12 +64,12 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
 
     public async ValueTask SetLayoutAsync(OverlayLayout newLayout, CancellationToken cancellationToken)
     {
-        layout = newLayout;
+        layout = NormalizeLayout(newLayout);
         if (Application.Current is null) return;
         await Application.Current.Dispatcher.InvokeAsync(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            window?.ApplyLayout(newLayout);
+            window?.ApplyLayout(layout);
         });
     }
 
@@ -100,4 +101,7 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
         if (window is not null) return;
         window = new TelemetryOverlayWindow(() => contributions.Values.OrderBy(item => item.ZIndex).ToArray(), layout);
     }
+
+    private static OverlayLayout NormalizeLayout(OverlayLayout value) =>
+        value with { Scale = OverlayScaleSettings.Normalize(value.Scale) };
 }

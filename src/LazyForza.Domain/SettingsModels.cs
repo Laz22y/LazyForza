@@ -20,6 +20,32 @@ public sealed record OverlayLayout(
     double LapNoMatchFadeSeconds = 0.5,
     double LiveHudStaleSeconds = 0.8);
 
+public static class OverlayScaleSettings
+{
+    public const double Minimum = 0.20;
+    public const double Maximum = 1.50;
+    public const double Step = 0.01;
+    public const double Default = 0.60;
+
+    public static double Normalize(double scale)
+    {
+        if (!double.IsFinite(scale)) return Default;
+        var clamped = Math.Clamp(scale, Minimum, Maximum);
+        return Math.Clamp(
+            Math.Round(clamped / Step, MidpointRounding.AwayFromZero) * Step,
+            Minimum,
+            Maximum);
+    }
+
+    public static double ScaledDimension(double baseDimension, double scale)
+    {
+        var safeBaseDimension = double.IsFinite(baseDimension)
+            ? Math.Max(1, baseDimension)
+            : 1;
+        return Math.Max(1, safeBaseDimension * Normalize(scale));
+    }
+}
+
 public sealed record TelemetryOptions(
     string ListenAddress = "127.0.0.1",
     int Port = 2299,
