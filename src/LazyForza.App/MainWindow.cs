@@ -2287,6 +2287,9 @@ internal sealed class MainWindow : Window
         var rawLabel = Label(string.Empty, 13);
         stack.Children.Add(Card(diagnosticsLabel));
         stack.Children.Add(Card(rawLabel));
+        var lapAnalysisModule = moduleManager.Modules.OfType<LapAnalysisModule>().FirstOrDefault();
+        var trackMatchLabel = Label(string.Empty, 13);
+        if (lapAnalysisModule is not null) stack.Children.Add(Card(trackMatchLabel));
         var recordingControls = new StackPanel();
         var recordingLabel = Label(string.Empty, 13);
         recordingControls.Children.Add(recordingLabel);
@@ -2315,6 +2318,37 @@ internal sealed class MainWindow : Window
                 rawLabel.Text = $"当前原始帧（用于真实 FH6 核验）\nIsRaceOn={raw.IsRaceOn} · Competition={TelemetryContextClassifier.IsCompetition(raw)} · RacePosition={raw.RacePosition} · LapNumber={raw.LapNumber}\nCarOrdinal={raw.CarOrdinal} · Class/PI={raw.CarClass}/{raw.CarPerformanceIndex} · Cylinders={raw.NumCylinders} · Drivetrain={raw.DrivetrainType}\nRace/Current/Last={raw.CurrentRaceTime:0.000}/{raw.CurrentLap:0.000}/{raw.LastLap:0.000} s\nGear(raw)={raw.Gear} · Display={displayGear} · Speed={raw.Speed:0.000} m/s → {latest.Normalized.SpeedKph:0.0} km/h · Distance={raw.DistanceTraveled:0.0} m\nPosition={raw.Position.X:0.000}/{raw.Position.Y:0.000}/{raw.Position.Z:0.000} · Yaw/Pitch/Roll={raw.Yaw:0.000}/{raw.Pitch:0.000}/{raw.Roll:0.000}\nVelocity={raw.Velocity.X:0.000}/{raw.Velocity.Y:0.000}/{raw.Velocity.Z:0.000} · WheelRad/s={raw.WheelRotationSpeed.FrontLeft:0.000}/{raw.WheelRotationSpeed.FrontRight:0.000}/{raw.WheelRotationSpeed.RearLeft:0.000}/{raw.WheelRotationSpeed.RearRight:0.000}\nRPM={raw.CurrentEngineRpm:0}/{raw.EngineMaxRpm:0} · Power={raw.Power:0} W → {latest.Normalized.PowerKw:0.0} kW · Torque={raw.Torque:0.0} N·m\nAccel={raw.Accel} · Brake={raw.Brake} · Clutch={raw.Clutch} · HandBrake={raw.HandBrake} · Steer={raw.Steer}\nTireTemp raw={raw.TireTemperature.FrontLeft:0.0}/{raw.TireTemperature.FrontRight:0.0}/{raw.TireTemperature.RearLeft:0.0}/{raw.TireTemperature.RearRight:0.0} °F（实机同帧对照；仪表盘换算为 °C）";
             }
             else rawLabel.Text = "尚未收到原始帧。";
+            if (lapAnalysisModule is not null)
+            {
+                var match = lapAnalysisModule.MatchDiagnostics;
+                var candidates = match.TopCandidates.Count == 0
+                    ? "  暂无候选"
+                    : string.Join(
+                        "\n",
+                        match.TopCandidates.Select((candidate, index) =>
+                        {
+                            var layout = candidate.LayoutKind == TrackLayoutKind.Circuit ? "环道" : "定点";
+                            var startDistance = candidate.StartDistanceMeters is double start
+                                ? $"{start:0.0} m"
+                                : "—";
+                            var meanDistance = candidate.MeanDistanceMeters is double mean
+                                ? $"{mean:0.0} m"
+                                : "—";
+                            var reason = string.IsNullOrWhiteSpace(candidate.EliminationReason)
+                                ? string.Empty
+                                : $" · 淘汰：{candidate.EliminationReason}";
+                            return $"  {index + 1}. {candidate.TrackName} [{candidate.Stage} · {layout}/{candidate.Category ?? "未分类"} · {candidate.LengthMeters:0} m]" +
+                                   $"\n     起点 {startDistance} · 平均距离 {meanDistance} · 进度 {candidate.ProgressMeters:0} m · 有效率 {candidate.ValidRatio:P0}{reason}";
+                        }));
+                var eliminations = match.EliminatedCandidates.Count == 0
+                    ? "  暂无淘汰记录"
+                    : string.Join(
+                        "\n",
+                        match.EliminatedCandidates.Select(candidate =>
+                            $"  {candidate.TrackName}：{candidate.EliminationReason ?? "未进入精匹配集合"}"));
+                trackMatchLabel.Text =
+                    $"赛道识别 2.0\n状态：{match.State}\n路线总数/粗筛通过/精匹配：{match.TotalRoutes} / {match.CoarseEligibleRoutes} / {match.FineCandidateRoutes}\n前三名候选：\n{candidates}\n最近淘汰：\n{eliminations}";
+            }
             recordingLabel.Text = recorder.IsRecording
                 ? $"正在录制：{recorder.FramesWritten:N0} 帧\n{recorder.CurrentPath}"
                 : "原始数据录制已停止。回放：dotnet run --project src/LazyForza.App -- --replay <file>";

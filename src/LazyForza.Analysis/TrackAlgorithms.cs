@@ -143,23 +143,24 @@ public static class TrackAlgorithms
         var end = Math.Clamp(endSegmentIndex, start, route.Count - 2);
         var best = ProjectionResult.Invalid;
         for (var index = start; index <= end; index++)
+            best = ProjectSegment(route, x, y, z, index, best);
+
+        return best;
+    }
+
+    public static ProjectionResult ProjectSegments(
+        IReadOnlyList<TrackPoint> route,
+        double x,
+        double y,
+        double z,
+        IEnumerable<int> segmentIndices)
+    {
+        if (route.Count < 2) return ProjectionResult.Invalid;
+        var best = ProjectionResult.Invalid;
+        foreach (var index in segmentIndices)
         {
-            var a = route[index];
-            var b = route[index + 1];
-            var dx = b.X - a.X;
-            var dy = b.Y - a.Y;
-            var dz = b.Z - a.Z;
-            var lengthSquared = dx * dx + dy * dy + dz * dz;
-            if (lengthSquared <= 0) continue;
-            var amount = Math.Clamp(((x - a.X) * dx + (y - a.Y) * dy + (z - a.Z) * dz) / lengthSquared, 0, 1);
-            var px = a.X + amount * dx;
-            var py = a.Y + amount * dy;
-            var pz = a.Z + amount * dz;
-            var distanceSquared = (x - px) * (x - px) + (y - py) * (y - py) + (z - pz) * (z - pz);
-            if (!best.IsValid || distanceSquared < best.DistanceMeters * best.DistanceMeters)
-            {
-                best = new ProjectionResult(true, index, a.S + amount * (b.S - a.S), Math.Sqrt(distanceSquared), Math.Abs(y - py));
-            }
+            if (index < 0 || index >= route.Count - 1) continue;
+            best = ProjectSegment(route, x, y, z, index, best);
         }
 
         return best;
@@ -190,6 +191,31 @@ public static class TrackAlgorithms
     }
 
     private static double Lerp(double left, double right, double amount) => left + ((right - left) * amount);
+
+    private static ProjectionResult ProjectSegment(
+        IReadOnlyList<TrackPoint> route,
+        double x,
+        double y,
+        double z,
+        int index,
+        ProjectionResult best)
+    {
+        var a = route[index];
+        var b = route[index + 1];
+        var dx = b.X - a.X;
+        var dy = b.Y - a.Y;
+        var dz = b.Z - a.Z;
+        var lengthSquared = dx * dx + dy * dy + dz * dz;
+        if (lengthSquared <= 0) return best;
+        var amount = Math.Clamp(((x - a.X) * dx + (y - a.Y) * dy + (z - a.Z) * dz) / lengthSquared, 0, 1);
+        var px = a.X + amount * dx;
+        var py = a.Y + amount * dy;
+        var pz = a.Z + amount * dz;
+        var distanceSquared = (x - px) * (x - px) + (y - py) * (y - py) + (z - pz) * (z - pz);
+        return !best.IsValid || distanceSquared < best.DistanceMeters * best.DistanceMeters
+            ? new ProjectionResult(true, index, a.S + amount * (b.S - a.S), Math.Sqrt(distanceSquared), Math.Abs(y - py))
+            : best;
+    }
 }
 
 public readonly record struct ProjectionResult(bool IsValid, int SegmentIndex, double S, double DistanceMeters, double ElevationErrorMeters)
