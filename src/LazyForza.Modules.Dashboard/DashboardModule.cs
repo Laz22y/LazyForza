@@ -24,7 +24,6 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
         : base(new ModuleDescriptor(
             ModuleId,
             "仪表盘",
-            new Version(1, 0, 0),
             "显示车辆状态，并学习当前车辆的换挡区间。",
             [],
             "vehicle-shift",

@@ -25,6 +25,10 @@ namespace LazyForza.App;
 
 internal sealed class MainWindow : Window
 {
+    private const string LapAnalysisMapHeightSetting = "lapAnalysis.mapHeight";
+    private const double DefaultLapAnalysisMapHeight = 640;
+    private const double MinimumLapAnalysisMapHeight = 360;
+    private const double MaximumLapAnalysisMapHeight = 1_200;
     private static readonly FontFamily UiFont = new("Microsoft YaHei UI");
     private static readonly (string IconData, string Title)[] Pages =
     [
@@ -54,6 +58,7 @@ internal sealed class MainWindow : Window
     private readonly Dictionary<Guid, HashSet<int>> selectedLapPerformanceClasses = [];
     private readonly HashSet<Guid> customizedLapPerformanceFilters = [];
     private readonly Dictionary<Guid, TrackTemplate> trackPreviewCache = [];
+    private double lapAnalysisMapHeight;
     private Action? refreshVisiblePage;
     private bool changingModule;
     private string CurrentTrackSource => TelemetryDataPartition.TrackSource(sourceKind);
@@ -76,6 +81,13 @@ internal sealed class MainWindow : Window
         this.recorder = recorder;
         this.sourceKind = sourceKind;
         this.updateManager = updateManager;
+        lapAnalysisMapHeight = double.TryParse(
+            store.GetAppSetting(LapAnalysisMapHeightSetting),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var savedMapHeight)
+            ? Math.Clamp(savedMapHeight, MinimumLapAnalysisMapHeight, MaximumLapAnalysisMapHeight)
+            : DefaultLapAnalysisMapHeight;
         Title = "LazyForza";
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForza.png", UriKind.Absolute));
         Width = 1280;
@@ -249,7 +261,7 @@ internal sealed class MainWindow : Window
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var description = new StackPanel();
-            description.Children.Add(Label($"{module.Descriptor.DisplayName}  v{module.Descriptor.Version}", 17, FontWeights.SemiBold));
+            description.Children.Add(Label(module.Descriptor.DisplayName, 17, FontWeights.SemiBold));
             description.Children.Add(Label(module.Descriptor.Description, 13, FontWeights.Normal, "MutedBrush"));
             description.Children.Add(Label($"状态：{ModuleStateText(module.Status.State)}" + (module.Status.LastError is null ? string.Empty : $" · {module.Status.LastError}"), 12,
                 FontWeights.Normal, module.Status.State == ModuleRuntimeState.Faulted ? "AccentBrush" : "MutedBrush"));
@@ -945,16 +957,30 @@ internal sealed class MainWindow : Window
         void RenderComparisonVisuals()
         {
             comparisonHost.Children.Clear();
-            var selectedVisualLapIds = comparableLaps
+            var selectedVisualLaps = comparableLaps
                 .Where(lap => displayedLapIds.Contains(lap.Id))
                 .OrderBy(lap => lap.StartedAt)
                 .Take(4)
+                .ToArray();
+            var singleLapPlan = selectedVisualLaps.Length == 1
+                ? LapComparisonPlanner.Resolve(selectedVisualLaps[0], comparableLaps)
+                : null;
+            var lapIdsToLoad = selectedVisualLaps
                 .Select(lap => lap.Id)
-                .ToArray();
-            var visualLaps = module.LoadLapDetails(selectedVisualLapIds)
+                .ToList();
+            if (singleLapPlan?.ReferenceLap is { } referenceSummary &&
+                !lapIdsToLoad.Contains(referenceSummary.Id))
+                lapIdsToLoad.Add(referenceSummary.Id);
+            var loadedLaps = module.LoadLapDetails(lapIdsToLoad)
                 .Where(lap => lap.Samples.Count >= 2)
-                .OrderBy(lap => lap.StartedAt)
                 .ToArray();
+            var visualLaps = singleLapPlan is null
+                ? loadedLaps.OrderBy(lap => lap.StartedAt).ToArray()
+                : lapIdsToLoad
+                    .Select(id => loadedLaps.FirstOrDefault(lap => lap.Id == id))
+                    .Where(lap => lap is not null)
+                    .Cast<LapRecord>()
+                    .ToArray();
             if (visualLaps.Length == 0)
             {
                 comparisonHost.Children.Add(activeTrack is null
@@ -980,8 +1006,18 @@ internal sealed class MainWindow : Window
             {
                 var lap = visualLaps[index];
                 var pi = lap.Vehicle.PerformanceIndex >= 0 ? lap.Vehicle.PerformanceIndex.ToString() : "—";
+                var role = singleLapPlan is null
+                    ? null
+                    : lap.Id == singleLapPlan.SelectedLap.Id
+                        ? singleLapPlan.Mode == SingleLapAnalysisMode.AnalyzePersonalBest
+                            ? "所选圈 · 同等级个人最快"
+                            : "所选圈"
+                        : "个人参考圈 · 同等级最快";
                 var legendText = new StackPanel { Margin = new Thickness(8, 0, 0, 0) };
-                legendText.Children.Add(Label(AnalysisTime(lap.TotalSeconds, pointToPointTimingApproximate), 14, FontWeights.SemiBold));
+                legendText.Children.Add(Label(
+                    $"{AnalysisTime(lap.TotalSeconds, pointToPointTimingApproximate)}{(role is null ? string.Empty : $" · {role}")}",
+                    14,
+                    FontWeights.SemiBold));
                 legendText.Children.Add(Label(
                     $"{PerformanceClassName(lap.Vehicle.CarClass)} {pi} · {lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss}{(lap.IsValid ? string.Empty : " · 无效")}",
                     10, FontWeights.Normal, "MutedBrush"));
@@ -1004,6 +1040,19 @@ internal sealed class MainWindow : Window
             }
             legendStack.Children.Add(legend);
             previewStack.Children.Add(Card(legendStack));
+            if (singleLapPlan is not null)
+            {
+                var selectedDetail = visualLaps.FirstOrDefault(lap => lap.Id == singleLapPlan.SelectedLap.Id);
+                var referenceDetail = singleLapPlan.ReferenceLap is null
+                    ? null
+                    : visualLaps.FirstOrDefault(lap => lap.Id == singleLapPlan.ReferenceLap.Id);
+                if (selectedDetail is not null)
+                    previewStack.Children.Add(Card(SingleLapDrivingAnalysis(
+                        singleLapPlan,
+                        selectedDetail,
+                        referenceDetail,
+                        pointToPointTimingApproximate)));
+            }
 
             var visuals = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
             var chartPanel = new Grid { Height = 320 };
@@ -1017,12 +1066,68 @@ internal sealed class MainWindow : Window
             chartPanel.Children.Add(chart);
             visuals.Children.Add(Card(chartPanel));
 
-            var mapPanel = new Grid { Height = 480 };
+            var mapPanel = new Grid { Height = lapAnalysisMapHeight };
             mapPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             mapPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            var mapHeader = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            mapHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            mapHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            mapHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var mapTitle = Label("走线预览 · 滚轮缩放，拖动平移", 13, FontWeights.SemiBold);
-            mapTitle.Margin = new Thickness(0, 0, 0, 8);
-            mapPanel.Children.Add(mapTitle);
+            mapHeader.Children.Add(mapTitle);
+            var mapHeightLabel = Label($"{lapAnalysisMapHeight:0} px", 11, FontWeights.Normal, "MutedBrush");
+            mapHeightLabel.VerticalAlignment = VerticalAlignment.Center;
+            mapHeightLabel.Margin = new Thickness(12, 0, 8, 0);
+            Grid.SetColumn(mapHeightLabel, 1);
+            mapHeader.Children.Add(mapHeightLabel);
+            var mapSizeControls = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var mapSize = new Slider
+            {
+                Minimum = MinimumLapAnalysisMapHeight,
+                Maximum = MaximumLapAnalysisMapHeight,
+                Value = lapAnalysisMapHeight,
+                Width = 190,
+                TickFrequency = 40,
+                IsSnapToTickEnabled = false,
+                ToolTip = "调整走线预览高度；设置会自动保存"
+            };
+            void SaveMapHeight() => store.SetAppSetting(
+                LapAnalysisMapHeightSetting,
+                lapAnalysisMapHeight.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+            mapSize.ValueChanged += (_, args) =>
+            {
+                lapAnalysisMapHeight = Math.Clamp(
+                    args.NewValue,
+                    MinimumLapAnalysisMapHeight,
+                    MaximumLapAnalysisMapHeight);
+                mapPanel.Height = lapAnalysisMapHeight;
+                mapHeightLabel.Text = $"{lapAnalysisMapHeight:0} px";
+            };
+            mapSize.AddHandler(
+                Thumb.DragCompletedEvent,
+                new DragCompletedEventHandler((_, _) => SaveMapHeight()));
+            mapSize.LostKeyboardFocus += (_, _) => SaveMapHeight();
+            var resetMapSize = new Button
+            {
+                Content = "恢复默认",
+                Padding = new Thickness(9, 4, 9, 4),
+                Margin = new Thickness(8, 0, 0, 0),
+                ToolTip = $"恢复为 {DefaultLapAnalysisMapHeight:0} px"
+            };
+            resetMapSize.Click += (_, _) =>
+            {
+                mapSize.Value = DefaultLapAnalysisMapHeight;
+                SaveMapHeight();
+            };
+            mapSizeControls.Children.Add(mapSize);
+            mapSizeControls.Children.Add(resetMapSize);
+            Grid.SetColumn(mapSizeControls, 2);
+            mapHeader.Children.Add(mapSizeControls);
+            mapPanel.Children.Add(mapHeader);
             var mapView = new TrackMapView(visualLaps, activeTrack);
             Grid.SetRow(mapView, 1);
             mapPanel.Children.Add(mapView);
@@ -1045,6 +1150,227 @@ internal sealed class MainWindow : Window
             return controls;
         }
     }
+
+    private StackPanel SingleLapDrivingAnalysis(
+        SingleLapAnalysisPlan plan,
+        LapRecord selectedLap,
+        LapRecord? referenceLap,
+        bool pointToPointTimingApproximate)
+    {
+        var content = new StackPanel();
+        content.Children.Add(Label(
+            plan.Mode == SingleLapAnalysisMode.CompareWithClassFastest
+                ? "弯道分析 · 对比同等级个人最快"
+                : plan.Mode == SingleLapAnalysisMode.AnalyzePersonalBest
+                    ? "弯道分析 · 这圈已经是同等级个人最快"
+                    : "弯道分析 · 暂无可用参考圈",
+            16,
+            FontWeights.SemiBold));
+
+        var intro = plan.Mode switch
+        {
+            SingleLapAnalysisMode.CompareWithClassFastest when referenceLap is not null =>
+                $"所选圈 {AnalysisTime(selectedLap.TotalSeconds, pointToPointTimingApproximate)}，自动对比 " +
+                $"{PerformanceClassName(referenceLap.Vehicle.CarClass)} 级个人最快 " +
+                $"{AnalysisTime(referenceLap.TotalSeconds, pointToPointTimingApproximate)}。" +
+                $"参考情况：{ReferenceMatchText(selectedLap.Vehicle, referenceLap.Vehicle)}。" +
+                "LazyForza 只能提供轻度范围内的分析，仅供参考。",
+            SingleLapAnalysisMode.AnalyzePersonalBest =>
+                "分析范围包括滑行、补油时机和弯中换挡。LazyForza 只能提供轻度范围内的分析，仅供参考。",
+            _ =>
+                "这个等级还没有有效参考圈，目前只分析所选圈中较明显的驾驶节奏。" +
+                "LazyForza 只能提供轻度范围内的分析，仅供参考。"
+        };
+        var introLabel = Label(intro, 12, FontWeights.Normal, "MutedBrush");
+        introLabel.TextWrapping = TextWrapping.Wrap;
+        introLabel.Margin = new Thickness(0, 5, 0, 0);
+        content.Children.Add(introLabel);
+
+        if (plan.Mode == SingleLapAnalysisMode.CompareWithClassFastest && referenceLap is not null)
+        {
+            var comparisons = CornerDrivingAnalyzer.Compare(selectedLap, referenceLap);
+            var shown = comparisons
+                .OrderByDescending(corner => corner.TimeLossSeconds)
+                .Take(8)
+                .ToArray();
+            var summary = Label(
+                comparisons.Count == 0
+                    ? "没有识别到足够明显的减速弯。"
+                    : $"识别到 {comparisons.Count} 个明显减速弯，下面先列时间差最大的 {shown.Length} 个。",
+                11,
+                FontWeights.Normal,
+                "MutedBrush");
+            summary.Margin = new Thickness(0, 8, 0, 4);
+            content.Children.Add(summary);
+            foreach (var corner in shown)
+                content.Children.Add(ComparisonCornerRow(corner));
+        }
+        else
+        {
+            var opportunities = CornerDrivingAnalyzer.AnalyzePersonalBest(selectedLap);
+            var shown = opportunities
+                .OrderByDescending(corner => corner.OpportunityScore)
+                .Take(8)
+                .ToArray();
+            var summary = Label(
+                opportunities.Count == 0
+                    ? "没有识别到足够明显的减速弯。"
+                    : $"识别到 {opportunities.Count} 个明显减速弯，下面先列最值得复看的 {shown.Length} 个。",
+                11,
+                FontWeights.Normal,
+                "MutedBrush");
+            summary.Margin = new Thickness(0, 8, 0, 4);
+            content.Children.Add(summary);
+            foreach (var corner in shown)
+                content.Children.Add(OptimizationCornerRow(corner));
+        }
+
+        var limitation = Label(
+            "依据：速度、刹车、油门、挡位、位置和圈进度。圈速样本没有保存轮胎滑移，" +
+            "所以这里不判断空转或抓地力丢失。所有结果都是个人数据对比，不是世界纪录，也不是标准答案。",
+            11,
+            FontWeights.Normal,
+            "MutedBrush");
+        limitation.TextWrapping = TextWrapping.Wrap;
+        limitation.Margin = new Thickness(0, 10, 0, 0);
+        content.Children.Add(limitation);
+        return content;
+    }
+
+    private Border ComparisonCornerRow(CornerComparisonMetrics corner)
+    {
+        var title = Label(
+            $"弯道 {corner.Window.Number} · {ProgressRange(corner.Window)} · {CornerTimeText(corner.TimeLossSeconds)}",
+            13,
+            FontWeights.SemiBold,
+            corner.TimeLossSeconds > 0.05
+                ? "WarningBrush"
+                : corner.TimeLossSeconds < -0.05
+                    ? "SuccessBrush"
+                    : null);
+        var brake = corner.BrakePointDeltaMeters is double brakeDelta
+            ? brakeDelta >= 0
+                ? $"刹车晚 {brakeDelta:0} m"
+                : $"刹车早 {Math.Abs(brakeDelta):0} m"
+            : "没有找到稳定刹车点";
+        var throttle = corner.ThrottleRecoveryDeltaSeconds is double throttleDelta
+            ? throttleDelta >= 0
+                ? $"补油晚 {throttleDelta:0.00} s"
+                : $"补油早 {Math.Abs(throttleDelta):0.00} s"
+            : "没有找到稳定补油点";
+        var speeds =
+            $"入弯 {corner.SelectedEntrySpeedKph:0}/{corner.ReferenceEntrySpeedKph:0}，" +
+            $"最低 {corner.SelectedMinimumSpeedKph:0}/{corner.ReferenceMinimumSpeedKph:0}，" +
+            $"出弯 {corner.SelectedExitSpeedKph:0}/{corner.ReferenceExitSpeedKph:0} km/h";
+        var gears =
+            $"弯心 {GearText(corner.SelectedApexGear)}/{GearText(corner.ReferenceApexGear)}，" +
+            $"弯中换挡 {corner.SelectedGearChanges}/{corner.ReferenceGearChanges} 次";
+        var details = Label(
+            $"{brake} · {throttle}\n{speeds}\n走线平均偏离 {corner.MeanLineDeviationMeters:0.0} m · {gears}",
+            11,
+            FontWeights.Normal,
+            "MutedBrush");
+        details.TextWrapping = TextWrapping.Wrap;
+        var hint = Label(ComparisonHint(corner), 11, FontWeights.SemiBold);
+        hint.TextWrapping = TextWrapping.Wrap;
+        hint.Margin = new Thickness(0, 4, 0, 0);
+        var stack = new StackPanel();
+        stack.Children.Add(title);
+        stack.Children.Add(details);
+        stack.Children.Add(hint);
+        return AnalysisRow(stack);
+    }
+
+    private Border OptimizationCornerRow(CornerOptimizationMetrics corner)
+    {
+        var title = Label(
+            $"弯道 {corner.Window.Number} · {ProgressRange(corner.Window)}",
+            13,
+            FontWeights.SemiBold);
+        var throttle = corner.ThrottleRecoverySeconds is double recovery
+            ? $"过弯心后 {recovery:0.00} s 恢复 70% 油门"
+            : "这段没有恢复到 70% 油门";
+        var details = Label(
+            $"入弯/最低/出弯 {corner.EntrySpeedKph:0}/{corner.MinimumSpeedKph:0}/{corner.ExitSpeedKph:0} km/h · " +
+            $"{throttle}\n无油无刹 {corner.CoastingSeconds:0.00} s · 油刹重叠 {corner.BrakeThrottleOverlapSeconds:0.00} s · " +
+            $"弯心 {GearText(corner.ApexGear)} · 弯中换挡 {corner.GearChanges} 次",
+            11,
+            FontWeights.Normal,
+            "MutedBrush");
+        details.TextWrapping = TextWrapping.Wrap;
+        var hint = Label(OptimizationHint(corner), 11, FontWeights.SemiBold);
+        hint.TextWrapping = TextWrapping.Wrap;
+        hint.Margin = new Thickness(0, 4, 0, 0);
+        var stack = new StackPanel();
+        stack.Children.Add(title);
+        stack.Children.Add(details);
+        stack.Children.Add(hint);
+        return AnalysisRow(stack);
+    }
+
+    private static Border AnalysisRow(UIElement content) => new()
+    {
+        Child = content,
+        Margin = new Thickness(0, 6, 0, 0),
+        Padding = new Thickness(12, 10, 12, 10),
+        Background = Brush("PanelBrush"),
+        BorderBrush = Brush("BorderBrush"),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8)
+    };
+
+    private static string ComparisonHint(CornerComparisonMetrics corner)
+    {
+        if (corner.TimeLossSeconds < -0.05) return "该区间快于参考圈，可保留当前处理方式。";
+        var hints = new List<string>();
+        if (corner.BrakePointDeltaMeters is < -4) hints.Add("刹车偏早");
+        if (corner.SelectedMinimumSpeedKph < corner.ReferenceMinimumSpeedKph - 3) hints.Add("弯心速度偏低");
+        if (corner.ThrottleRecoveryDeltaSeconds is > 0.15) hints.Add("补油偏晚");
+        if (corner.SelectedExitSpeedKph < corner.ReferenceExitSpeedKph - 3) hints.Add("出弯速度偏低");
+        if (corner.MeanLineDeviationMeters > 2) hints.Add("走线差异较大");
+        if (corner.SelectedGearChanges > corner.ReferenceGearChanges)
+            hints.Add("弯中换挡比参考圈多");
+        if (corner.SelectedApexGear != corner.ReferenceApexGear)
+            hints.Add("弯心挡位不同，需结合车辆确认");
+        return hints.Count == 0
+            ? "单项差异不大，这段更像是整体节奏损失。"
+            : $"建议优先复查：{string.Join("、", hints)}。";
+    }
+
+    private static string OptimizationHint(CornerOptimizationMetrics corner)
+    {
+        var hints = new List<string>();
+        if (corner.CoastingSeconds > 0.35) hints.Add("可复查是否存在过长的无油无刹滑行");
+        if (corner.ThrottleRecoverySeconds is > 0.90) hints.Add("可尝试略早且更平缓地恢复油门");
+        if (corner.BrakeThrottleOverlapSeconds > 0.25) hints.Add("油刹重叠偏多");
+        if (corner.GearChanges > 1) hints.Add("复核入弯挡位，尽量少在弯中换挡");
+        return hints.Count == 0
+            ? "当前数据未显示明显问题，无需仅为配合分析结论而改变跑法。"
+            : $"{string.Join("；", hints)}。";
+    }
+
+    private static string ReferenceMatchText(
+        VehicleProfileFingerprint selected,
+        VehicleProfileFingerprint reference)
+    {
+        if (selected == reference) return "车辆和调校指纹一致";
+        if (selected.CarOrdinal == reference.CarOrdinal &&
+            selected.PerformanceIndex == reference.PerformanceIndex)
+            return "车型和 PI 一致，但调校指纹不同或尚未识别";
+        if (selected.CarOrdinal == reference.CarOrdinal)
+            return "车型相同，但 PI 或调校不同";
+        return "同等级不同车辆，速度和挡位差异要谨慎看";
+    }
+
+    private static string CornerTimeText(double deltaSeconds) =>
+        deltaSeconds >= 0
+            ? $"损失 {deltaSeconds:0.000} s"
+            : $"快 {Math.Abs(deltaSeconds):0.000} s";
+
+    private static string ProgressRange(CornerWindow window) =>
+        $"{window.StartS / 1_000:0.00}–{window.EndS / 1_000:0.00} km";
+
+    private static string GearText(int gear) => gear > 0 ? $"{gear} 挡" : "—";
 
     private UIElement TracksPage()
     {
@@ -1963,7 +2289,12 @@ internal sealed class MainWindow : Window
         var appearance = new StackPanel();
         var scale = AddValueSlider(
             appearance, "缩放", "调整 HUD 整体尺寸", current.Scale,
-            0.6, 1.5, 0.05, value => value.ToString("0%"));
+            OverlayScaleSettings.Minimum,
+            OverlayScaleSettings.Maximum,
+            OverlayScaleSettings.Step,
+            value => value.ToString("P0"));
+        scale.SmallChange = OverlayScaleSettings.Step;
+        scale.LargeChange = 0.05;
         var opacity = AddValueSlider(
             appearance, "不透明度", "HUD 内容的最高可见度", current.Opacity,
             0.25, 1, 0.05, value => value.ToString("P0"));
@@ -2075,7 +2406,7 @@ internal sealed class MainWindow : Window
         {
             var next = overlay.CurrentLayout with
             {
-                Scale = scale.Value,
+                Scale = OverlayScaleSettings.Normalize(scale.Value),
                 Opacity = opacity.Value,
                 MonitorId = string.IsNullOrWhiteSpace(monitor.Text) ? "primary" : monitor.Text.Trim(),
                 ClickThrough = locked.IsChecked == true || clickThrough.IsChecked == true,

@@ -57,6 +57,24 @@ public sealed class ModuleAndOverlayTests
     }
 
     [TestMethod]
+    public void OverlayScaleSupportsTwentyPercentWithOnePercentPrecision()
+    {
+        var layout = LazyForzaDefaults.CreateOverlayLayout();
+
+        Assert.AreEqual(0.20, OverlayScaleSettings.Minimum);
+        Assert.AreEqual(0.01, OverlayScaleSettings.Step);
+        Assert.AreEqual(0.20, OverlayScaleSettings.Normalize(0.10), 1e-9);
+        Assert.AreEqual(0.20, OverlayScaleSettings.Normalize(0.204), 1e-9);
+        Assert.AreEqual(0.21, OverlayScaleSettings.Normalize(0.206), 1e-9);
+        Assert.AreEqual(1.50, OverlayScaleSettings.Normalize(1.80), 1e-9);
+        Assert.AreEqual(layout.Width * 0.20, OverlayScaleSettings.ScaledDimension(layout.Width, 0.20), 1e-9);
+        Assert.AreEqual(layout.Height * 0.20, OverlayScaleSettings.ScaledDimension(layout.Height, 0.20), 1e-9);
+
+        using var coordinator = new OverlayCoordinator(layout with { Scale = 0.206 });
+        Assert.AreEqual(0.21, coordinator.CurrentLayout.Scale, 1e-9);
+    }
+
+    [TestMethod]
     public async Task ModuleLifecycleIsIdempotentAndFailureIsIsolated()
     {
         var good = new CountingModule("good", false);
@@ -348,7 +366,7 @@ public sealed class ModuleAndOverlayTests
     }
 
     private sealed class CountingModule(string id, bool throwOnStart) : LazyForzaModuleBase(
-        new ModuleDescriptor(id, id, new Version(1, 0), "test", [], null, null, false))
+        new ModuleDescriptor(id, id, "test", [], null, null, false))
     {
         public int Starts { get; private set; }
         public int Stops { get; private set; }

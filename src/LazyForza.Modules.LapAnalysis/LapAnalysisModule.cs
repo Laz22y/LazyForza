@@ -102,7 +102,6 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         : base(new ModuleDescriptor(
             ModuleId,
             "圈速分析",
-            new Version(1, 0, 0),
             "识别赛道、记录圈速，并对比分段与走线。",
             [],
             "lap-analysis",

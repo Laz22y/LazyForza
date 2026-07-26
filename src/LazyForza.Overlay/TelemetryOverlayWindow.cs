@@ -48,6 +48,7 @@ internal sealed class TelemetryOverlayWindow : Window
     {
         layout = newLayout with
         {
+            Scale = OverlayScaleSettings.Normalize(newLayout.Scale),
             DashboardMotionIntensity = Math.Clamp(newLayout.DashboardMotionIntensity, 0, 1),
             DashboardIdleWaitSeconds = Math.Clamp(newLayout.DashboardIdleWaitSeconds, 0, 60),
             DashboardVisibilityFadeSeconds = Math.Clamp(newLayout.DashboardVisibilityFadeSeconds, 0.05, 10),
@@ -56,11 +57,11 @@ internal sealed class TelemetryOverlayWindow : Window
             LapNoMatchFadeSeconds = Math.Clamp(newLayout.LapNoMatchFadeSeconds, 0.05, 10),
             LiveHudStaleSeconds = Math.Clamp(newLayout.LiveHudStaleSeconds, 0.05, 10)
         };
-        Left = newLayout.Left;
-        Top = newLayout.Top;
-        Width = Math.Max(640, newLayout.Width * newLayout.Scale);
-        Height = Math.Max(360, newLayout.Height * newLayout.Scale);
-        Opacity = Math.Clamp(newLayout.Opacity, 0.25, 1);
+        Left = layout.Left;
+        Top = layout.Top;
+        Width = OverlayScaleSettings.ScaledDimension(layout.Width, layout.Scale);
+        Height = OverlayScaleSettings.ScaledDimension(layout.Height, layout.Scale);
+        Opacity = Math.Clamp(layout.Opacity, 0.25, 1);
         UpdateNativeStyles();
         surface.InvalidateVisual();
     }
@@ -69,8 +70,8 @@ internal sealed class TelemetryOverlayWindow : Window
     {
         Left = Left,
         Top = Top,
-        Width = Width / Math.Max(0.1, layout.Scale),
-        Height = Height / Math.Max(0.1, layout.Scale)
+        Width = Width / OverlayScaleSettings.Normalize(layout.Scale),
+        Height = Height / OverlayScaleSettings.Normalize(layout.Scale)
     };
 
     public void InvalidateHud() => surface.InvalidateVisual();
