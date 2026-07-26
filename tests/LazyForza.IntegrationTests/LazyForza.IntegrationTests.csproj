@@ -19,5 +19,6 @@
     <ProjectReference Include="..\..\src\LazyForza.Modules.Dashboard\LazyForza.Modules.Dashboard.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Modules.LapAnalysis\LazyForza.Modules.LapAnalysis.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Overlay\LazyForza.Overlay.csproj" />
+    <ProjectReference Include="..\..\src\LazyForza.App\LazyForza.App.csproj" />
   </ItemGroup>
 </Project>

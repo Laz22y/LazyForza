@@ -21,6 +21,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private static readonly TimeSpan CumulativeHistoricalDeltaDisplayDuration = TimeSpan.FromSeconds(2);
     private readonly LazyForzaStore store;
     private readonly Func<OverlayLayout> getOverlayLayout;
+    private readonly Action<DiagnosticSignal>? diagnosticSink;
     private readonly List<TrackPoint> capture = [];
     private readonly List<LapSample> currentSamples = [];
     private readonly List<LapSummary> visibleLaps = [];
@@ -94,11 +95,14 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private DateTimeOffset? severeDeviationStartedAt;
     private double severeDeviationTravelMeters;
     private Vector3F? severeDeviationPreviousPosition;
+    private DateTimeOffset? lastInferredCompetitionEndAt;
+    private float lastInferredCompetitionRaceTime;
 
     public LapAnalysisModule(
         LazyForzaStore store,
         TelemetrySourceKind? expectedSource = null,
-        Func<OverlayLayout>? getOverlayLayout = null)
+        Func<OverlayLayout>? getOverlayLayout = null,
+        Action<DiagnosticSignal>? diagnosticSink = null)
         : base(new ModuleDescriptor(
             ModuleId,
             "圈速分析",
@@ -110,6 +114,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     {
         this.store = store;
         this.getOverlayLayout = getOverlayLayout ?? (() => new OverlayLayout());
+        this.diagnosticSink = diagnosticSink;
         expectedTrackSource = expectedSource is null ? null : TelemetryDataPartition.TrackSource(expectedSource.Value);
         selectionSettingKey = $"lap.selectedTrack.{expectedTrackSource ?? "all"}";
         foreach (var candidateId in store.ListTracks(expectedTrackSource).Select(candidate => candidate.Id))
@@ -275,6 +280,42 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 {
                     var learnedRoute = TryCompletePendingRouteLearningAtCompetitionEnd();
                     var recoveredFinalLap = learnedRoute ? null : TryCompletePendingLapAtCompetitionEnd();
+                    if (!learnedRoute &&
+                        recoveredFinalLap is null &&
+                        lapArmed &&
+                        currentSamples.Count >= 20)
+                    {
+                        RecordDiagnostic(
+                            "lap.not-settled-on-exit",
+                            "比赛会话结束时仍有一圈未能结算。",
+                            true,
+                            frame.ArrivalTime,
+                            new Dictionary<string, string>
+                            {
+                                ["samples"] = currentSamples.Count.ToString(),
+                                ["validProjectionSamples"] = validProjectionSamples.ToString(),
+                                ["invalidProjectionSamples"] = invalidProjectionSamples.ToString(),
+                                ["lastProgressMeters"] = lastS.ToString("0.0")
+                            });
+                    }
+                    RecordDiagnostic(
+                        "race.inferred-end",
+                        recoveredFinalLap is null
+                            ? "持续收到非比赛驾驶帧，程序据此结束当前比赛会话。"
+                            : "持续收到非比赛驾驶帧，程序在结束会话前补记了最后一圈。",
+                        false,
+                        frame.ArrivalTime,
+                        new Dictionary<string, string>
+                        {
+                            ["sessionId"] = sessionId.ToString(),
+                            ["lapNumber"] = raw.LapNumber.ToString(),
+                            ["currentLap"] = raw.CurrentLap.ToString("0.000"),
+                            ["lastLap"] = raw.LastLap.ToString("0.000"),
+                            ["recoveredFinalLap"] = (recoveredFinalLap is not null).ToString()
+                        });
+                    lastInferredCompetitionEndAt = frame.ArrivalTime;
+                    lastInferredCompetitionRaceTime =
+                        lastCompetitionFrame?.Raw.CurrentRaceTime ?? raw.CurrentRaceTime;
                     LogIfInitialized(learnedRoute
                         ? $"Sustained non-competition driving ended session {sessionId}; learned a route from the confirmed event exit."
                         : recoveredFinalLap is null
@@ -491,6 +532,22 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 var performanceClass = PerformanceClassCatalog.Resolve(frame.Raw.CarClass, frame.Raw.CarPerformanceIndex);
                 var historicalReference = HistoricalFastestLap(performanceClass);
                 if (lapArmed && currentSamples.Count >= 20) completedLap = CompleteLap(frame);
+                if (completedLap is null && lapArmed)
+                {
+                    RecordDiagnostic(
+                        "lap.not-settled",
+                        "检测到过线或完赛信号，但当前圈未能结算。",
+                        true,
+                        frame.ArrivalTime,
+                        new Dictionary<string, string>
+                        {
+                            ["samples"] = currentSamples.Count.ToString(),
+                            ["validProjectionSamples"] = validProjectionSamples.ToString(),
+                            ["invalidProjectionSamples"] = invalidProjectionSamples.ToString(),
+                            ["currentLap"] = raw.CurrentLap.ToString("0.000"),
+                            ["lastLap"] = raw.LastLap.ToString("0.000")
+                        });
+                }
                 if (completedLap is not null)
                 {
                     heldComparisons = BuildCompletedComparisons(completedLap);
@@ -1089,6 +1146,17 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         LogIfInitialized(
             $"Severe route deviation invalidated {rejectedTrack.Name} ({rejectedTrack.Id}) after " +
             $"{duration.TotalSeconds:0.0}s/{severeDeviationTravelMeters:0}m; restarting identification from the current route.");
+        RecordDiagnostic(
+            "track.rematch",
+            $"赛道“{rejectedTrack.Name}”出现持续大幅偏离，程序已重新开始识别。",
+            true,
+            frame.ArrivalTime,
+            new Dictionary<string, string>
+            {
+                ["trackId"] = rejectedTrack.Id.ToString(),
+                ["durationSeconds"] = duration.TotalSeconds.ToString("0.0"),
+                ["travelMeters"] = severeDeviationTravelMeters.ToString("0.0")
+            });
 
         track = null;
         trackSpatialIndex = null;
@@ -1199,6 +1267,28 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         var sampledTotal = currentSamples.Count == 0 ? 0 : currentSamples.Max(sample => sample.ElapsedSeconds);
         var resolvedTime = ResolveCompletedLapTime(frame.Raw, sampledTotal);
         var totalSeconds = resolvedTime.Seconds;
+        var lastLapChanged = frame.Raw.LastLap > 0 &&
+                             Math.Abs(frame.Raw.LastLap - lastLapValueAtLapStart) > 0.0005f;
+        var timingDifference = lastLapChanged
+            ? Math.Abs(frame.Raw.LastLap - totalSeconds)
+            : 0;
+        var timingTolerance = Math.Max(2, totalSeconds * 0.05);
+        if (lastLapChanged && timingDifference > timingTolerance)
+        {
+            RecordDiagnostic(
+                "lap.lastlap-difference",
+                "FH6 LastLap 与程序结算成绩差异超过允许范围。",
+                true,
+                frame.ArrivalTime,
+                new Dictionary<string, string>
+                {
+                    ["lastLap"] = frame.Raw.LastLap.ToString("0.000"),
+                    ["resolved"] = totalSeconds.ToString("0.000"),
+                    ["sampled"] = sampledTotal.ToString("0.000"),
+                    ["difference"] = timingDifference.ToString("0.000"),
+                    ["source"] = resolvedTime.Source
+                });
+        }
         var times = new List<LapSegment>();
         for (var index = 0; index < sectors.Count; index++)
         {
@@ -1691,6 +1781,24 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private void BeginCompetitionSession(TelemetryFrame frame)
     {
         var raw = frame.Raw;
+        if (lastInferredCompetitionEndAt is DateTimeOffset inferredEndAt &&
+            frame.ArrivalTime - inferredEndAt <= TimeSpan.FromSeconds(15) &&
+            raw.CurrentRaceTime >= lastInferredCompetitionRaceTime - 0.5f)
+        {
+            RecordDiagnostic(
+                "race.false-end-recovered",
+                "比赛计时仍在延续，上一条结束判定可能不正确。",
+                true,
+                frame.ArrivalTime,
+                new Dictionary<string, string>
+                {
+                    ["endedRaceTime"] = lastInferredCompetitionRaceTime.ToString("0.000"),
+                    ["resumedRaceTime"] = raw.CurrentRaceTime.ToString("0.000"),
+                    ["resumeDelaySeconds"] =
+                        (frame.ArrivalTime - inferredEndAt).TotalSeconds.ToString("0.000")
+                });
+        }
+        lastInferredCompetitionEndAt = null;
         ResetAutomaticMatchState();
         ClearRecentCompetition();
         competitionActive = true;
@@ -2015,6 +2123,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             catch (Exception exception)
             {
                 LogIfInitialized($"Lap persistence failed: {exception}");
+                RecordDiagnostic(
+                    "lap.persistence-failed",
+                    $"圈速写入失败：{exception.Message}",
+                    true,
+                    DateTimeOffset.UtcNow);
             }
         }
     }
@@ -2138,6 +2251,14 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     }
 
     private readonly record struct CompletedLapTimeResolution(double Seconds, string Source);
+
+    private void RecordDiagnostic(
+        string code,
+        string summary,
+        bool isAnomaly,
+        DateTimeOffset occurredAt,
+        IReadOnlyDictionary<string, string>? data = null) =>
+        diagnosticSink?.Invoke(new DiagnosticSignal(code, summary, isAnomaly, occurredAt, data));
 
     private double? EstimateSectorTime(int index)
     {
