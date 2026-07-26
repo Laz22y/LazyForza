@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.1.1',
+    [string]$Version = '1.1.2',
     [ValidateSet('win-x64')]
     [string]$Runtime = 'win-x64'
 )
@@ -55,6 +55,7 @@ if ($catalogHash -ne $expectedCatalogHash) {
     throw "Embedded official track catalog hash mismatch. Expected $expectedCatalogHash, found $catalogHash."
 }
 
+# Keep packages flat while 1.1.0-1.1.1 update clients remain in use; those clients reject nested satellite paths.
 & dotnet publish (Join-Path $repositoryRoot 'src\LazyForza.App\LazyForza.App.csproj') `
     -c Release `
     -r $Runtime `
@@ -63,9 +64,16 @@ if ($catalogHash -ne $expectedCatalogHash) {
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -p:PublishTrimmed=false `
+    -p:SatelliteResourceLanguages=en `
     -o $publishPath
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE."
+}
+
+$nestedPublishFiles = Get-ChildItem -LiteralPath $publishPath -Recurse -File |
+    Where-Object { $_.DirectoryName -ne $publishPath }
+if ($nestedPublishFiles) {
+    throw "Release publish contains nested files that are incompatible with LazyForza 1.1.0-1.1.1 updaters: $($nestedPublishFiles.FullName -join ', ')"
 }
 
 Get-ChildItem -LiteralPath $publishPath -Filter '*.pdb' -File -ErrorAction SilentlyContinue |

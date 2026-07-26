@@ -144,7 +144,8 @@ public static partial class UpdatePackageVerifier
             .Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Any(segment => segment is "." or ".." || segment.Contains(':')))
             return string.Empty;
-        return Path.Combine(segments);
+        // Manifest keys must not depend on the host operating system's directory separator.
+        return string.Join('/', segments);
     }
 
     private static void TryDeleteDirectory(string path)

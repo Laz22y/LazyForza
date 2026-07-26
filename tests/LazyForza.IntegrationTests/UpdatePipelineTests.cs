@@ -131,6 +131,38 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
+    public async Task PackageExtractionAcceptsNestedManifestPaths()
+    {
+        var root = CreateTempDirectory("lazyforza-update-nested");
+        try
+        {
+            var archivePath = Path.Combine(root, "nested.zip");
+            await File.WriteAllBytesAsync(
+                archivePath,
+                BuildPackageArchive(new Dictionary<string, byte[]>
+                {
+                    ["LazyForza.App.exe"] = Encoding.UTF8.GetBytes("new-app"),
+                    ["BUILDINFO.txt"] = Encoding.UTF8.GetBytes("LazyForza 1.2.3"),
+                    ["zh-Hans\\PresentationCore.resources.dll"] = Encoding.UTF8.GetBytes("satellite")
+                }));
+
+            var packageRoot = await UpdatePackageVerifier.ExtractAndVerifyAsync(
+                archivePath,
+                Path.Combine(root, "extract"),
+                CancellationToken.None);
+
+            Assert.AreEqual(
+                "satellite",
+                await File.ReadAllTextAsync(
+                    Path.Combine(packageRoot, "zh-Hans", "PresentationCore.resources.dll")));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
     public async Task PackageExtractionRejectsPathTraversal()
     {
         var root = CreateTempDirectory("lazyforza-update-traversal");
@@ -180,7 +212,8 @@ public sealed class UpdatePipelineTests
             {
                 ["LazyForza.App.exe"] = Encoding.UTF8.GetBytes("new-app"),
                 ["BUILDINFO.txt"] = Encoding.UTF8.GetBytes("new-build"),
-                ["new-runtime.dll"] = Encoding.UTF8.GetBytes("new-runtime")
+                ["new-runtime.dll"] = Encoding.UTF8.GetBytes("new-runtime"),
+                ["zh-Hans/PresentationCore.resources.dll"] = Encoding.UTF8.GetBytes("satellite")
             });
 
             var exitCode = await RunInstallerScriptAsync(source, target, work);
@@ -190,6 +223,9 @@ public sealed class UpdatePipelineTests
                 : string.Empty);
             Assert.AreEqual("new-app", File.ReadAllText(Path.Combine(target, "LazyForza.App.exe")));
             Assert.AreEqual("new-runtime", File.ReadAllText(Path.Combine(target, "new-runtime.dll")));
+            Assert.AreEqual(
+                "satellite",
+                File.ReadAllText(Path.Combine(target, "zh-Hans", "PresentationCore.resources.dll")));
             Assert.IsFalse(File.Exists(Path.Combine(target, "stale-runtime.dll")));
             Assert.AreEqual("preserve", File.ReadAllText(Path.Combine(target, "user-note.txt")));
             Assert.IsTrue(File.Exists(Path.Combine(work, "install.complete")));
@@ -279,7 +315,12 @@ public sealed class UpdatePipelineTests
 
     private static void WritePackage(string directory, IReadOnlyDictionary<string, byte[]> files)
     {
-        foreach (var (name, content) in files) File.WriteAllBytes(Path.Combine(directory, name), content);
+        foreach (var (name, content) in files)
+        {
+            var path = Path.Combine(directory, name);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, content);
+        }
         File.WriteAllText(Path.Combine(directory, "MANIFEST.sha256"), Manifest(files), Encoding.ASCII);
     }
 
