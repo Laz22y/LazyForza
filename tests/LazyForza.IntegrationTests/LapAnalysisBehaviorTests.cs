@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using LazyForza.Analysis;
 using LazyForza.Domain;
 using LazyForza.Modules.LapAnalysis;
@@ -8,6 +9,8 @@ namespace LazyForza.IntegrationTests;
 [TestClass]
 public sealed class LapAnalysisBehaviorTests
 {
+    private const int MaximumExpectedCoarseCandidates = 12;
+
     [TestMethod]
     public void StartsWithNoSelectedTrackAndAllowsManualSelectionToBeCleared()
     {
@@ -179,7 +182,7 @@ public sealed class LapAnalysisBehaviorTests
     }
 
     [TestMethod]
-    public void DashboardDeltaUsesCumulativeTimeAgainstFastestCompleteHistoricalLap()
+    public void DashboardDeltaUsesCumulativeTimeAgainstFastestLapAndExpiresAfterTwoSeconds()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-cumulative-delta-{Guid.NewGuid():N}.db");
         try
@@ -195,14 +198,77 @@ public sealed class LapAnalysisBehaviorTests
             feed.Send(1, 0);
             Assert.HasCount(1, module.VisibleLaps);
 
-            feed.Drive(1, 1, 150);
+            var frame = 1;
+            while (frame < 239 && Hud(module).ShowingPreviousLap) feed.Send(1, frame++);
+            while (frame < 239 && Hud(module).CurrentSector == 0)
+            {
+                feed.Send(1, frame);
+                frame++;
+            }
             var current = Hud(module);
             Assert.IsTrue(current.CurrentSector > 0, "测试帧必须已经开过至少一个分段。 ");
             Assert.IsNotNull(current.CumulativeHistoricalDeltaSeconds,
                 "有同等级历史完整圈后，通过分段应发布累计 Delta。 ");
             Assert.IsTrue(Math.Abs(current.CumulativeHistoricalDeltaSeconds.Value) < 0.5,
                 $"两圈使用相同确定性轨迹与计时，累计 Delta 应接近 0，实际为 {current.CumulativeHistoricalDeltaSeconds:0.000}。 ");
-            Assert.AreEqual(15, current.CurrentLapSeconds, 0.001);
+
+            for (var offset = 0; offset < 19; offset++) feed.Send(1, frame++);
+            Assert.IsNotNull(Hud(module).CumulativeHistoricalDeltaSeconds,
+                "累计 Delta 在触发后的 2 秒内必须保持可见。");
+            feed.Send(1, frame++);
+            Assert.IsNull(Hud(module).CumulativeHistoricalDeltaSeconds,
+                "累计 Delta 显示满 2 秒后必须消失。");
+
+            feed.Drive(1, frame, 239);
+            feed.Send(2, 0);
+            Assert.IsNotNull(Hud(module).CumulativeHistoricalDeltaSeconds,
+                "完成圈与历史最快圈的 Delta 必须立即显示。");
+            feed.Drive(2, 1, 19);
+            Assert.IsNotNull(Hud(module).CumulativeHistoricalDeltaSeconds,
+                "完成圈 Delta 在触发后的 2 秒内必须保持可见。");
+            feed.Send(2, 20);
+            Assert.IsNull(Hud(module).CumulativeHistoricalDeltaSeconds,
+                "完成圈 Delta 显示满 2 秒后必须消失。");
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
+    public void TwentyMinuteLapKeepsHudProcessingInsideRealtimeBudget()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-long-lap-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            SaveCircleTrack(store, "Long circuit");
+            var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            var feed = new CircleFrameFeed(module);
+
+            feed.Send(0, 20, raceTimeOverride: 2.1f);
+            feed.Send(0, 0, raceTimeOverride: 2.2f);
+            feed.Drive(0, 1, 239);
+            feed.Send(1, 0);
+
+            const int totalFrames = 40_000;
+            var stopwatch = Stopwatch.StartNew();
+            for (var frame = 1; frame <= totalFrames; frame++)
+            {
+                var routeFrame = (int)Math.Floor(frame * 239d / totalFrames);
+                feed.Send(1, frame, Position(routeFrame), currentLapOverride: frame * 1_200f / totalFrames);
+            }
+            stopwatch.Stop();
+
+            var hud = Hud(module);
+            Assert.AreEqual("Long circuit", hud.TrackName);
+            Assert.AreEqual(1_200, hud.CurrentLapSeconds, 0.001);
+            Assert.IsFalse(hud.MatchRejectionEligible);
+            Assert.IsTrue(
+                stopwatch.Elapsed < TimeSpan.FromSeconds(2),
+                $"20 分钟长圈的 40,000 帧处理耗时 {stopwatch.Elapsed.TotalSeconds:0.000}s，" +
+                "圈速处理不能随累计采样数退化到无法实时更新 HUD。");
         }
         finally
         {
@@ -299,12 +365,78 @@ public sealed class LapAnalysisBehaviorTests
             feed.Drive(0, 1, 239);
             feed.Send(1, 0);
 
+            Console.WriteLine(DescribeMatchDiagnostics(module));
             Assert.HasCount(0, module.VisibleLaps);
             Assert.IsTrue(Hud(module).MatchRejectionEligible);
             Assert.AreEqual("未识别赛事", Hud(module).TrackName);
             Assert.AreEqual(string.Empty, store.GetAppSetting("lap.selectedTrack.simulator"),
                 "An ambiguous match must not replace the empty selection with an arbitrary candidate.");
             Assert.AreNotEqual(first.Id, module.VisibleLaps.FirstOrDefault()?.TrackId);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
+    public void CoarseFilterCapsFineCandidatesAndPublishesEliminationReasons()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-auto-match-prefilter-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            for (var index = 0; index < 20; index++)
+                SaveCircleTrack(store, $"Shared start {index:00}");
+            var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            var feed = new CircleFrameFeed(module);
+
+            feed.Send(0, 20, raceTimeOverride: 2.1f);
+
+            var diagnostics = module.MatchDiagnostics;
+            Assert.AreEqual(20, diagnostics.TotalRoutes);
+            Assert.AreEqual(20, diagnostics.CoarseEligibleRoutes);
+            Assert.AreEqual(MaximumExpectedCoarseCandidates, diagnostics.FineCandidateRoutes);
+            Assert.HasCount(3, diagnostics.TopCandidates);
+            Assert.IsTrue(diagnostics.TopCandidates.All(candidate => candidate.Stage == "精匹配"));
+            Assert.IsTrue(
+                diagnostics.EliminatedCandidates.Any(candidate =>
+                    candidate.EliminationReason?.Contains("未进入精匹配集合", StringComparison.Ordinal) == true),
+                "Diagnostics must explain why otherwise start-compatible routes were not sent to fine projection.");
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
+    public void DirectionPrefilterPromotesTheCorrectRouteIntoTheFineCandidateSet()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-auto-match-direction-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            for (var index = 0; index < MaximumExpectedCoarseCandidates; index++)
+                SaveReverseCircleTrack(store, $"A reverse route {index:00}");
+            var expected = SaveCircleTrack(store, "Z forward route");
+            var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            var feed = new CircleFrameFeed(module);
+
+            feed.Send(0, 20, raceTimeOverride: 2.1f);
+            feed.Send(0, 0, raceTimeOverride: 2.2f);
+            Assert.AreEqual(13, module.MatchDiagnostics.CoarseEligibleRoutes);
+            Assert.AreEqual(MaximumExpectedCoarseCandidates, module.MatchDiagnostics.FineCandidateRoutes);
+            Assert.IsTrue(module.MatchDiagnostics.EliminatedCandidates.Any(candidate =>
+                candidate.TrackName == expected.Name && candidate.Stage == "粗筛候补"));
+
+            feed.Drive(0, 1, 80);
+
+            Assert.AreEqual(
+                expected.Id,
+                module.CurrentTrack?.Id,
+                "Forward movement must eliminate reverse candidates and promote the initially thirteenth route before fine matching. " +
+                DescribeMatchDiagnostics(module));
         }
         finally
         {
@@ -368,6 +500,7 @@ public sealed class LapAnalysisBehaviorTests
             for (var index = 1; index <= 100; index++)
                 Send(electric.Points[index], index * 0.05f, 5 + (index * 0.05f));
 
+            Console.WriteLine(DescribeMatchDiagnostics(module));
             Assert.AreEqual(electricSummary.Id, module.CurrentTrack?.Id);
             Assert.AreEqual("电器街环道赛", Hud(module).TrackName);
             Assert.AreEqual(TrackMatchState.Confirmed, Hud(module).MatchState);
@@ -476,7 +609,10 @@ public sealed class LapAnalysisBehaviorTests
                 }
 
                 if (module.CurrentTrack is { } actual && actual.Id != expected.Id)
+                {
                     wrongMatches.Add($"{expected.Name} -> {actual.Name}");
+                    Console.WriteLine($"{expected.Name} -> {actual.Name}: {DescribeMatchDiagnostics(module)}");
+                }
                 else if (module.CurrentTrack is null)
                     unresolved.Add(expected.Name);
             }
@@ -490,6 +626,75 @@ public sealed class LapAnalysisBehaviorTests
                 $"unresolved={unresolved.Count}, wrong={wrongMatches.Count}.");
             if (unresolved.Count > 0)
                 Console.WriteLine("Safely unresolved within 1,150 m: " + string.Join("; ", unresolved));
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("CatalogAudit")]
+    public void OfficialReplayCorpusCoversCircuitSprintSharedStartOverpassAndWideOffroad()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-official-replay-corpus-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            PlaygroundOfficialTrackCatalog.EnsureImported(store);
+            var tracks = store.ListTracks("fh6_udp_live")
+                .Select(summary => store.LoadTrack(summary.Id)!.Value.Track)
+                .ToDictionary(track => track.Name, StringComparer.Ordinal);
+
+            LapAnalysisModule Replay(TrackTemplate expected, double maximumProgress, double lateralOffset = 0)
+            {
+                var module = new LapAnalysisModule(store, TelemetrySourceKind.Live);
+                long sequence = 0;
+                var arrivalTime = DateTimeOffset.UnixEpoch;
+                foreach (var point in expected.Points)
+                {
+                    if (point.S > maximumProgress || module.CurrentTrack is not null) break;
+                    var replayPoint = lateralOffset == 0
+                        ? point
+                        : point with
+                        {
+                            X = point.X - (point.TangentZ * lateralOffset),
+                            Z = point.Z + (point.TangentX * lateralOffset)
+                        };
+                    SendLiveTrackFrame(module, replayPoint, ref sequence, ref arrivalTime);
+                }
+                return module;
+            }
+
+            foreach (var name in new[] { "电器街环道赛", "机场径道赛", "彩虹桥下坡赛" })
+            {
+                var expected = tracks[name];
+                var module = Replay(expected, 1_150);
+                Assert.AreEqual(
+                    expected.Id,
+                    module.CurrentTrack?.Id,
+                    $"{name} replay must identify the exact {(expected.LayoutKind == TrackLayoutKind.Circuit ? "circuit" : "point-to-point")} route. " +
+                    DescribeMatchDiagnostics(module));
+                Assert.IsTrue(module.MatchDiagnostics.FineCandidateRoutes <= MaximumExpectedCoarseCandidates);
+            }
+
+            var mingwei = tracks["鸣尾越野环道赛"];
+            var wideOffroad = Replay(mingwei, 1_150, lateralOffset: 30);
+            Assert.AreEqual(
+                mingwei.Id,
+                wideOffroad.CurrentTrack?.Id,
+                "A legal 30 m offroad line must remain attributable to Mingwei instead of Airport. " +
+                DescribeMatchDiagnostics(wideOffroad));
+
+            var goliath = tracks["歌利亚"];
+            var sharedStart = Replay(goliath, 250);
+            Assert.IsNull(
+                sharedStart.CurrentTrack,
+                "Goliath and Legend Island share their opening corridor; Track Match 2.0 must delay the decision beyond 250 m.");
+            Assert.IsTrue(
+                sharedStart.MatchDiagnostics.TopCandidates.Any(candidate => candidate.TrackName == "歌利亚"));
+            Assert.IsTrue(
+                sharedStart.MatchDiagnostics.TopCandidates.Any(candidate => candidate.TrackName == "传奇岛径道赛"));
         }
         finally
         {
@@ -1200,6 +1405,20 @@ public sealed class LapAnalysisBehaviorTests
         return track;
     }
 
+    private static TrackTemplate SaveReverseCircleTrack(
+        LazyForzaStore store,
+        string name)
+    {
+        const int framesPerLap = 240;
+        var rawPoints = Enumerable.Range(0, framesPerLap + 1)
+            .Select(index => Position((framesPerLap - index) % framesPerLap))
+            .Select(position => new TrackPoint(position.X, position.Y, position.Z, 0, 0, 0))
+            .ToArray();
+        var track = TrackAlgorithms.BuildTemplate(name, rawPoints, direction: -1) with { Source = "simulator" };
+        store.SaveTrack(track, TrackAlgorithms.CreateSectors(track));
+        return track;
+    }
+
     private static void SavePointToPointTrack(LazyForzaStore store)
     {
         var rawPoints = Enumerable.Range(0, 201)
@@ -1263,6 +1482,24 @@ public sealed class LapAnalysisBehaviorTests
 
     private static Vector3F PointToPointPosition(int frame) =>
         new(frame * 5f, (float)Math.Sin(frame / 20d) * 2f, (float)Math.Sin(frame / 12d) * 20f);
+
+    private static string DescribeMatchDiagnostics(LapAnalysisModule module)
+    {
+        var diagnostics = module.MatchDiagnostics;
+        var candidates = diagnostics.TopCandidates.Count == 0
+            ? "none"
+            : string.Join("; ", diagnostics.TopCandidates.Select(candidate =>
+                $"{candidate.TrackName}/{candidate.Stage}/start={candidate.StartDistanceMeters:0.0}/" +
+                $"mean={candidate.MeanDistanceMeters:0.0}/progress={candidate.ProgressMeters:0}/" +
+                $"valid={candidate.ValidRatio:P0}/reason={candidate.EliminationReason ?? "none"}"));
+        var eliminated = diagnostics.EliminatedCandidates.Count == 0
+            ? "none"
+            : string.Join("; ", diagnostics.EliminatedCandidates.Select(candidate =>
+                $"{candidate.TrackName}/{candidate.EliminationReason ?? "none"}"));
+        return $"state={diagnostics.State}, total={diagnostics.TotalRoutes}, " +
+               $"coarse={diagnostics.CoarseEligibleRoutes}, fine={diagnostics.FineCandidateRoutes}, " +
+               $"top={candidates}, eliminated={eliminated}";
+    }
 
     private static void DeleteDatabase(string databasePath)
     {
@@ -1362,10 +1599,11 @@ public sealed class LapAnalysisBehaviorTests
             float? raceTimeOverride = null,
             float? lastLapOverride = null,
             int carClass = 4,
-            int performanceIndex = 800)
+            int performanceIndex = 800,
+            float? currentLapOverride = null)
         {
             const int framesPerLap = 240;
-            var currentLap = lapFrame / 10f;
+            var currentLap = currentLapOverride ?? lapFrame / 10f;
             var raceTime = raceTimeOverride ?? lapNumber * (framesPerLap / 10f) + currentLap + 0.1f;
             var raw = new Fh6RawTelemetry
             {

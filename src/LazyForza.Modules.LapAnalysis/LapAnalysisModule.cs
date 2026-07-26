@@ -12,10 +12,13 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private const double AutomaticMatchMaximumTravelMeters = 1_200;
     private const double AutomaticMatchMinimumProgressMeters = 100;
     private const double AutomaticMatchMaximumProgressMeters = 220;
+    private const double SharedStartDecisionMeters = 300;
+    private const int MaximumFineMatchCandidates = 12;
     private const string AutomaticMatchRejectedStatus = "没有找到匹配赛道，本场不会记录圈速。";
     private const string AutomaticMatchRejectedInstruction = "圈速 HUD 即将隐藏。可在赛道页添加自定义赛道。";
     private const string AutomaticMatchRejectedTrackName = "未识别赛事";
     private static readonly TimeSpan AutomaticMatchMaximumDuration = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan CumulativeHistoricalDeltaDisplayDuration = TimeSpan.FromSeconds(2);
     private readonly LazyForzaStore store;
     private readonly Func<OverlayLayout> getOverlayLayout;
     private readonly List<TrackPoint> capture = [];
@@ -25,6 +28,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private readonly List<CompatibleTrack> compatibleTracks = [];
     private readonly List<TelemetryFrame> automaticMatchFrames = [];
     private readonly Dictionary<Guid, AutomaticMatchCandidate> automaticMatchCandidates = [];
+    private readonly List<TrackMatchCandidateDiagnostic> automaticMatchCoarseEliminated = [];
     private readonly object lapGate = new();
     private ITelemetrySubscription? subscription;
     private CancellationTokenSource? runCancellation;
@@ -34,7 +38,9 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private LapHudState? snapshot;
     private LapHudState? currentCompetitionSnapshot;
     private RecentCompetitionState? recentCompetition;
+    private TrackMatchDiagnostics trackMatchDiagnostics = TrackMatchDiagnostics.Empty;
     private TrackTemplate? track;
+    private TrackSpatialIndex? trackSpatialIndex;
     private IReadOnlyList<SectorDefinition> sectors = [];
     private ushort? previousLapNumber;
     private float? previousCurrentLap;
@@ -55,6 +61,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private int confidentProjectionCount;
     private double lastS;
     private double[] sectorStartTimes = [];
+    private double?[] completedSectorTimes = [];
     private Guid sessionId = Guid.NewGuid();
     private int validProjectionSamples;
     private int invalidProjectionSamples;
@@ -62,6 +69,10 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private IReadOnlyList<SectorComparison>? heldComparisons;
     private DateTimeOffset holdComparisonsUntil;
     private double? heldCumulativeHistoricalDeltaSeconds;
+    private DateTimeOffset heldCumulativeHistoricalDeltaUntil;
+    private double? liveCumulativeHistoricalDeltaSeconds;
+    private DateTimeOffset liveCumulativeHistoricalDeltaUntil;
+    private int liveCumulativeHistoricalDeltaSector = -1;
     private bool currentLapInvalidated;
     private readonly string? expectedTrackSource;
     private readonly string selectionSettingKey;
@@ -77,6 +88,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private bool automaticMatchStartedMidLap;
     private bool automaticMatchStartedAtConfirmedLine;
     private double automaticMatchTravelMeters;
+    private int automaticMatchCoarseEligibleCount;
     private Vector3F? automaticMatchPreviousPosition;
     private DateTimeOffset automaticMatchStartedAt;
     private DateTimeOffset? severeDeviationStartedAt;
@@ -112,12 +124,21 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             var latest = store.LoadLatestTrack(expectedTrackSource);
             if (latest is not null) incompatibleTrackName = latest.Value.Track.Name;
         }
+        trackMatchDiagnostics = new TrackMatchDiagnostics(
+            DateTimeOffset.MinValue,
+            "等待比赛或起点",
+            compatibleTracks.Count,
+            0,
+            0,
+            [],
+            []);
     }
 
     public string Id => "hud.lap-sectors";
     public HudContributionKind Kind => HudContributionKind.LapSectors;
     public int ZIndex => 20;
     public object? Snapshot => Volatile.Read(ref snapshot);
+    public TrackMatchDiagnostics MatchDiagnostics => Volatile.Read(ref trackMatchDiagnostics);
     public LapHudState? CurrentCompetitionSnapshot => competitionActive
         ? Volatile.Read(ref currentCompetitionSnapshot)
         : null;
@@ -475,6 +496,9 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 {
                     heldComparisons = BuildCompletedComparisons(completedLap);
                     heldCumulativeHistoricalDeltaSeconds = CompletedLapDelta(completedLap, historicalReference);
+                    heldCumulativeHistoricalDeltaUntil = heldCumulativeHistoricalDeltaSeconds is null
+                        ? DateTimeOffset.MinValue
+                        : frame.ArrivalTime + CumulativeHistoricalDeltaDisplayDuration;
                     holdComparisonsUntil = frame.ArrivalTime + CompletedLapHoldDuration();
                 }
                 if (finalLapSignal)
@@ -604,10 +628,15 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         automaticMatchPreviousPosition = raw.Position;
 
         foreach (var candidate in automaticMatchCandidates.Values)
-            candidate.Observe(raw.Position);
+            candidate.ObserveCoarse(raw.Position);
+        SelectFineMatchCandidates();
+        foreach (var candidate in automaticMatchCandidates.Values.Where(candidate => candidate.IsFineCandidate))
+            candidate.ObserveProjection(raw);
 
         var ranked = automaticMatchCandidates.Values
-            .Where(candidate => candidate.StartEligible && candidate.ValidObservations >= 4)
+            .Where(candidate => candidate.IsFineCandidate &&
+                                !candidate.IsEliminated &&
+                                candidate.ValidObservations >= 4)
             .OrderBy(candidate => candidate.Quality)
             .ThenByDescending(candidate => candidate.ProgressMeters)
             .ToArray();
@@ -618,7 +647,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
         if (best is not null && IsAutomaticMatchConfident(best, second))
         {
-            LockAutomaticTrackMatch(best, second);
+            LockAutomaticTrackMatch(best, second, frame.ArrivalTime);
             if (waitingForInitialStartLine)
             {
                 PublishAwaitingStartLine(frame);
@@ -651,16 +680,18 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 $"(limit={travelLimit:0}m). " +
                 (evidence.Length == 0 ? "No start-compatible candidates." : string.Join("; ", evidence)));
             PublishAutomaticMatchRejected(frame);
+            PublishTrackMatchDiagnostics(frame.ArrivalTime, "未找到可靠匹配", ranked);
             return;
         }
 
         PublishAutomaticMatching(frame, best, second);
+        PublishTrackMatchDiagnostics(frame.ArrivalTime, "精匹配中", ranked);
     }
 
     private double AutomaticMatchTravelLimitMeters()
     {
         var shortestEligibleRoute = automaticMatchCandidates.Values
-            .Where(candidate => candidate.StartEligible)
+            .Where(candidate => candidate.IsFineCandidate && !candidate.IsEliminated)
             .Select(candidate => candidate.Saved.Track.LengthMeters)
             .DefaultIfEmpty(AutomaticMatchMaximumTravelMeters)
             .Min();
@@ -670,8 +701,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     }
 
     private bool CanStartAutomaticTrackIdentification(Vector3F position) =>
-        compatibleTracks.Any(candidate =>
-            AutomaticMatchCandidate.IsStartEligible(candidate.Track, position));
+        compatibleTracks.Any(candidate => candidate.IsStartEligible(position, allowMidRouteStart: false));
 
     private void StartAutomaticTrackMatch(
         TelemetryFrame frame,
@@ -688,20 +718,58 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         automaticMatchStartedAt = frame.ArrivalTime;
         automaticMatchFrames.Clear();
         automaticMatchCandidates.Clear();
-        foreach (var candidate in compatibleTracks)
-            automaticMatchCandidates[candidate.Track.Id] = new AutomaticMatchCandidate(
+        automaticMatchCoarseEliminated.Clear();
+        var evaluated = compatibleTracks
+            .Select(candidate => new AutomaticMatchCandidate(
                 candidate,
-                allowMidRouteStart);
+                allowMidRouteStart,
+                frame.Raw))
+            .OrderBy(candidate => candidate.StartDistanceMeters)
+            .ThenBy(candidate => candidate.Saved.Track.Name, StringComparer.Ordinal)
+            .ToArray();
+        var eligible = evaluated.Where(candidate => candidate.StartEligible).ToArray();
+        automaticMatchCoarseEligibleCount = eligible.Length;
+        foreach (var candidate in eligible)
+            automaticMatchCandidates[candidate.Saved.Track.Id] = candidate;
+        SelectFineMatchCandidates();
+        foreach (var candidate in evaluated.Where(candidate => !candidate.StartEligible))
+        {
+            automaticMatchCoarseEliminated.Add(candidate.ToDiagnostic(
+                "起点粗筛",
+                candidate.EliminationReason));
+        }
         LogIfInitialized(
-            $"Automatic track identification started: candidates={compatibleTracks.Count}, " +
+            $"Automatic track identification started: routes={compatibleTracks.Count}, " +
+            $"coarseEligible={automaticMatchCoarseEligibleCount}, " +
+            $"fine={automaticMatchCandidates.Values.Count(candidate => candidate.IsFineCandidate)}, " +
             $"mode={reason}.");
+        PublishTrackMatchDiagnostics(
+            frame.ArrivalTime,
+            automaticMatchCandidates.Count == 0 ? "起点粗筛无候选" : "粗筛完成",
+            []);
+    }
+
+    private void SelectFineMatchCandidates()
+    {
+        // FH6 Data Out has no TrackOrdinal. Keep all start-compatible routes in
+        // the cheap geometric stage, but spend continuous 3D projection work on
+        // only the best direction/curvature/start-distance candidates.
+        var selectedIds = automaticMatchCandidates.Values
+            .Where(candidate => !candidate.IsEliminated)
+            .OrderBy(candidate => candidate.CoarseQuality)
+            .ThenBy(candidate => candidate.Saved.Track.Name, StringComparer.Ordinal)
+            .Take(MaximumFineMatchCandidates)
+            .Select(candidate => candidate.Saved.Track.Id)
+            .ToHashSet();
+        foreach (var candidate in automaticMatchCandidates.Values)
+            candidate.IsFineCandidate = selectedIds.Contains(candidate.Saved.Track.Id);
     }
 
     private static bool IsAutomaticMatchConfident(
         AutomaticMatchCandidate best,
         AutomaticMatchCandidate? second)
     {
-        var tolerance = Math.Max(8, best.Saved.Track.MatchingToleranceMeters * 0.75);
+        var tolerance = Math.Max(8, best.EffectiveToleranceMeters * 0.75);
         if (best.ValidObservations < 10 ||
             best.ValidRatio < 0.80 ||
             best.ProgressMeters < best.RequiredProgressMeters ||
@@ -713,20 +781,29 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         if (second is null || second.ValidObservations < 4) return true;
         var qualityMargin = second.Quality - best.Quality;
         var progressLead = best.ProgressMeters - second.ProgressMeters;
+        if (best.SharesStartWith(second) &&
+            best.ProgressMeters < SharedStartDecisionMeters &&
+            qualityMargin < 10)
+        {
+            return false;
+        }
         return qualityMargin >= 6 || qualityMargin >= 3 && progressLead >= 40;
     }
 
     private void LockAutomaticTrackMatch(
         AutomaticMatchCandidate winner,
-        AutomaticMatchCandidate? runnerUp)
+        AutomaticMatchCandidate? runnerUp,
+        DateTimeOffset matchedAt)
     {
         var deferRecordingUntilNextStart =
             automaticMatchStartedMidLap ||
             (!automaticMatchStartedAtConfirmedLine &&
              winner.Saved.Track.LayoutKind == TrackLayoutKind.Circuit);
         track = winner.Saved.Track;
+        trackSpatialIndex = winner.Saved.RouteSpatialIndex;
         sectors = winner.Saved.Sectors;
         sectorStartTimes = new double[sectors.Count];
+        completedSectorTimes = new double?[sectors.Count];
         incompatibleTrackName = null;
         forceTrackLearning = false;
         automaticMatchLocked = true;
@@ -763,6 +840,14 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             $"mean={winner.MeanDistanceMeters:0.0}m, progress={winner.ProgressMeters:0}m, " +
             $"runnerUp={(runnerUp is null ? "none" : $"{runnerUp.Saved.Track.Name}/{runnerUp.Quality:0.0}")}, " +
             $"recording={(deferRecordingUntilNextStart ? "next-start" : "current-run")}.");
+        Volatile.Write(ref trackMatchDiagnostics, new TrackMatchDiagnostics(
+            matchedAt,
+            "已锁定",
+            compatibleTracks.Count,
+            automaticMatchCoarseEligibleCount,
+            1,
+            [winner.ToDiagnostic("已锁定")],
+            automaticMatchCoarseEliminated.Take(3).ToArray()));
         automaticMatchFrames.Clear();
         automaticMatchCandidates.Clear();
     }
@@ -865,6 +950,45 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             false));
     }
 
+    private void PublishTrackMatchDiagnostics(
+        DateTimeOffset updatedAt,
+        string state,
+        IReadOnlyList<AutomaticMatchCandidate> ranked)
+    {
+        var orderedActive = (ranked.Count > 0
+                ? ranked
+                : automaticMatchCandidates.Values
+                    .Where(candidate => candidate.IsFineCandidate && !candidate.IsEliminated)
+                    .OrderBy(candidate => candidate.CoarseQuality)
+                    .ToArray())
+            .Take(3)
+            .Select(candidate => candidate.ToDiagnostic("精匹配"))
+            .ToArray();
+        var eliminated = automaticMatchCandidates.Values
+            .Where(candidate => candidate.IsEliminated)
+            .OrderBy(candidate => candidate.StartDistanceMeters)
+            .Select(candidate => candidate.ToDiagnostic("已淘汰"))
+            .Concat(automaticMatchCandidates.Values
+                .Where(candidate => !candidate.IsEliminated && !candidate.IsFineCandidate)
+                .OrderBy(candidate => candidate.CoarseQuality)
+                .Select(candidate => candidate.ToDiagnostic(
+                    "粗筛候补",
+                    "方向/曲率/起点距离排名未进入精匹配集合（当前最多 12 条）")))
+            .Concat(automaticMatchCoarseEliminated)
+            .Take(3)
+            .ToArray();
+
+        Volatile.Write(ref trackMatchDiagnostics, new TrackMatchDiagnostics(
+            updatedAt,
+            state,
+            compatibleTracks.Count,
+            automaticMatchCoarseEligibleCount,
+            automaticMatchCandidates.Values.Count(candidate =>
+                candidate.IsFineCandidate && !candidate.IsEliminated),
+            orderedActive,
+            eliminated));
+    }
+
     private void UpdateAutomaticMatchGeometryPlausibility(Vector3F position)
     {
         if (automaticMatchStarted || automaticMatchRejected) return;
@@ -922,12 +1046,13 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     {
         if (track is null) return false;
         var position = frame.Raw.Position;
-        var nearestDistance = TrackAlgorithms.MinimumDistanceMeters(
-            track.Points,
+        var deviationDistance = SevereDeviationDistanceMeters(track);
+        var nearest = trackSpatialIndex?.ProjectNearest(
             position.X,
             position.Y,
-            position.Z);
-        if (nearestDistance <= SevereDeviationDistanceMeters(track))
+            position.Z,
+            deviationDistance) ?? ProjectionResult.Invalid;
+        if (nearest.IsValid && nearest.DistanceMeters <= deviationDistance)
         {
             ResetSevereDeviationEvidence();
             return false;
@@ -967,8 +1092,10 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             $"{duration.TotalSeconds:0.0}s/{severeDeviationTravelMeters:0}m; restarting identification from the current route.");
 
         track = null;
+        trackSpatialIndex = null;
         sectors = [];
         sectorStartTimes = [];
+        completedSectorTimes = [];
         currentSamples.Clear();
         lock (lapGate)
         {
@@ -983,7 +1110,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         lapArmed = false;
         waitingForInitialStartLine = true;
         heldComparisons = null;
-        heldCumulativeHistoricalDeltaSeconds = null;
+        ClearCumulativeHistoricalDeltaDisplay();
         currentLapInvalidated = false;
         observedSectorIndex = 0;
         trackMatchEverPlausible = false;
@@ -1027,9 +1154,12 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         };
         sectors = TrackAlgorithms.CreateSectors(track);
         sectorStartTimes = new double[sectors.Count];
+        completedSectorTimes = new double?[sectors.Count];
         store.SaveTrack(track, sectors);
         compatibleTracks.RemoveAll(candidate => candidate.Track.Id == track.Id);
-        compatibleTracks.Add(new CompatibleTrack(track, sectors));
+        var compatibleTrack = new CompatibleTrack(track, sectors);
+        compatibleTracks.Add(compatibleTrack);
+        trackSpatialIndex = compatibleTrack.RouteSpatialIndex;
         store.SetAppSetting(selectionSettingKey, track.Id.ToString());
         forceTrackLearning = false;
         automaticMatchLocked = true;
@@ -1050,8 +1180,10 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         projectionIndex = 0;
         lastS = 0;
         sectorStartTimes = new double[sectors.Count];
+        completedSectorTimes = new double?[sectors.Count];
         if (sectorStartTimes.Length > 0) sectorStartTimes[0] = currentLap;
         observedSectorIndex = 0;
+        ResetLiveCumulativeHistoricalDelta();
         validProjectionSamples = 0;
         invalidProjectionSamples = 0;
         currentLapInvalidated = false;
@@ -1108,8 +1240,12 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             throw new InvalidOperationException("所选赛道与当前遥测来源或分段算法版本不兼容。");
 
         track = saved.Track;
+        var compatibleTrack = compatibleTracks.FirstOrDefault(candidate => candidate.Track.Id == saved.Track.Id) ??
+                              new CompatibleTrack(saved.Track, saved.Sectors);
+        trackSpatialIndex = compatibleTrack.RouteSpatialIndex;
         sectors = saved.Sectors;
         sectorStartTimes = new double[sectors.Count];
+        completedSectorTimes = new double?[sectors.Count];
         forceTrackLearning = false;
         incompatibleTrackName = null;
         store.SetAppSetting(selectionSettingKey, track.Id.ToString());
@@ -1124,8 +1260,10 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     public void ClearTrackSelection()
     {
         track = null;
+        trackSpatialIndex = null;
         sectors = [];
         sectorStartTimes = [];
+        completedSectorTimes = [];
         forceTrackLearning = false;
         incompatibleTrackName = null;
         lock (lapGate)
@@ -1212,7 +1350,10 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     {
         forceTrackLearning = true;
         track = null;
+        trackSpatialIndex = null;
         sectors = [];
+        sectorStartTimes = [];
+        completedSectorTimes = [];
         capture.Clear();
         currentSamples.Clear();
         lock (lapGate)
@@ -1240,7 +1381,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         validProjectionSamples = 0;
         invalidProjectionSamples = 0;
         heldComparisons = null;
-        heldCumulativeHistoricalDeltaSeconds = null;
+        ClearCumulativeHistoricalDeltaDisplay();
         currentLapInvalidated = false;
         incompatibleTrackName = null;
         ClearRecentCompetition();
@@ -1315,7 +1456,27 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         if (!showingPreviousLap)
         {
             heldComparisons = null;
+        }
+
+        var performanceClass = PerformanceClassCatalog.Resolve(frame.Raw.CarClass, frame.Raw.CarPerformanceIndex);
+        if (currentSector > 0 && currentSector != liveCumulativeHistoricalDeltaSector)
+        {
+            liveCumulativeHistoricalDeltaSector = currentSector;
+            liveCumulativeHistoricalDeltaSeconds =
+                CurrentCumulativeHistoricalDelta(currentSector, performanceClass);
+            liveCumulativeHistoricalDeltaUntil = liveCumulativeHistoricalDeltaSeconds is null
+                ? DateTimeOffset.MinValue
+                : frame.ArrivalTime + CumulativeHistoricalDeltaDisplayDuration;
+        }
+        if (heldCumulativeHistoricalDeltaSeconds is not null &&
+            frame.ArrivalTime >= heldCumulativeHistoricalDeltaUntil)
+        {
             heldCumulativeHistoricalDeltaSeconds = null;
+        }
+        if (liveCumulativeHistoricalDeltaSeconds is not null &&
+            frame.ArrivalTime >= liveCumulativeHistoricalDeltaUntil)
+        {
+            liveCumulativeHistoricalDeltaSeconds = null;
         }
 
         IReadOnlyList<SectorComparison> comparisons;
@@ -1331,7 +1492,6 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             {
                 var complete = index < currentSector;
                 var current = complete ? EstimateSectorTime(index) : null;
-                var performanceClass = PerformanceClassCatalog.Resolve(frame.Raw.CarClass, frame.Raw.CarPerformanceIndex);
                 var (sessionBest, allTimeBest) = BestVisibleSectorTimes(index, performanceClass);
                 var pointToPoint = track.LayoutKind == TrackLayoutKind.PointToPoint;
                 var state = SectorColorClassifier.Classify(
@@ -1349,11 +1509,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             comparisons = liveComparisons;
         }
 
-        var cumulativeDelta = showingPreviousLap
-            ? heldCumulativeHistoricalDeltaSeconds
-            : CurrentCumulativeHistoricalDelta(
-                currentSector,
-                PerformanceClassCatalog.Resolve(frame.Raw.CarClass, frame.Raw.CarPerformanceIndex));
+        var cumulativeDelta = heldCumulativeHistoricalDeltaSeconds ?? liveCumulativeHistoricalDeltaSeconds;
         PublishCompetitionState(new LapHudState(
             frame.ArrivalTime, frame.Source, true,
             matchState == TrackMatchState.Confirmed ? TrackLearningPhase.ComparingLaps : TrackLearningPhase.MatchingTrack,
@@ -1391,7 +1547,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         validProjectionSamples = 0;
         invalidProjectionSamples = 0;
         heldComparisons = null;
-        heldCumulativeHistoricalDeltaSeconds = null;
+        ClearCumulativeHistoricalDeltaDisplay();
         currentLapInvalidated = false;
         observedSectorIndex = 0;
         trackMatchEverPlausible = false;
@@ -1428,6 +1584,9 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         lapArmed = false;
         heldComparisons = BuildCompletedComparisons(completedLap);
         heldCumulativeHistoricalDeltaSeconds = CompletedLapDelta(completedLap, historicalReference);
+        heldCumulativeHistoricalDeltaUntil = heldCumulativeHistoricalDeltaSeconds is null
+            ? DateTimeOffset.MinValue
+            : frame.ArrivalTime + CumulativeHistoricalDeltaDisplayDuration;
         holdComparisonsUntil = frame.ArrivalTime + CompletedLapHoldDuration();
         return completedLap;
     }
@@ -1560,7 +1719,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         validProjectionSamples = 0;
         invalidProjectionSamples = 0;
         heldComparisons = null;
-        heldCumulativeHistoricalDeltaSeconds = null;
+        ClearCumulativeHistoricalDeltaDisplay();
         currentLapInvalidated = false;
         observedSectorIndex = 0;
         trackMatchEverPlausible = false;
@@ -1575,10 +1734,20 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         automaticMatchStartedMidLap = false;
         automaticMatchStartedAtConfirmedLine = false;
         automaticMatchTravelMeters = 0;
+        automaticMatchCoarseEligibleCount = 0;
         automaticMatchPreviousPosition = null;
         automaticMatchStartedAt = default;
         automaticMatchFrames.Clear();
         automaticMatchCandidates.Clear();
+        automaticMatchCoarseEliminated.Clear();
+        Volatile.Write(ref trackMatchDiagnostics, new TrackMatchDiagnostics(
+            DateTimeOffset.MinValue,
+            "等待比赛或起点",
+            compatibleTracks.Count,
+            0,
+            0,
+            [],
+            []));
         ResetSevereDeviationEvidence();
     }
 
@@ -1697,13 +1866,17 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         if (rewound)
         {
             for (var index = currentSector + 1; index < sectorStartTimes.Length; index++) sectorStartTimes[index] = 0;
+            for (var index = currentSector; index < completedSectorTimes.Length; index++) completedSectorTimes[index] = null;
             observedSectorIndex = currentSector;
             return;
         }
 
         if (currentSector <= observedSectorIndex) return;
         for (var index = observedSectorIndex + 1; index <= currentSector; index++)
+        {
+            completedSectorTimes[index - 1] = EstimateSectorTimeFromSamples(index - 1);
             sectorStartTimes[index] = currentLapSeconds;
+        }
         observedSectorIndex = currentSector;
     }
 
@@ -1887,7 +2060,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     {
         if (track is null) return;
         heldComparisons = null;
-        heldCumulativeHistoricalDeltaSeconds = null;
+        ClearCumulativeHistoricalDeltaDisplay();
 
         var stayedInLap = previousLapNumber == frame.Raw.LapNumber;
         if (stayedInLap)
@@ -1969,6 +2142,13 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     private double? EstimateSectorTime(int index)
     {
+        if (index >= 0 && index < completedSectorTimes.Length && index < observedSectorIndex)
+            return completedSectorTimes[index];
+        return EstimateSectorTimeFromSamples(index);
+    }
+
+    private double? EstimateSectorTimeFromSamples(int index)
+    {
         var samples = currentSamples.Where(sample => sample.S >= sectors[index].StartS && sample.S <= sectors[index].EndS).ToArray();
         if (samples.Length < 2) return null;
         var sectorLength = sectors[index].EndS - sectors[index].StartS;
@@ -1983,28 +2163,147 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         return duration > 0 ? duration : null;
     }
 
-    private sealed record CompatibleTrack(
-        TrackTemplate Track,
-        IReadOnlyList<SectorDefinition> Sectors);
+    private void ResetLiveCumulativeHistoricalDelta()
+    {
+        liveCumulativeHistoricalDeltaSeconds = null;
+        liveCumulativeHistoricalDeltaUntil = DateTimeOffset.MinValue;
+        liveCumulativeHistoricalDeltaSector = -1;
+    }
+
+    private void ClearCumulativeHistoricalDeltaDisplay()
+    {
+        heldCumulativeHistoricalDeltaSeconds = null;
+        heldCumulativeHistoricalDeltaUntil = DateTimeOffset.MinValue;
+        ResetLiveCumulativeHistoricalDelta();
+    }
+
+    private sealed class CompatibleTrack
+    {
+        private readonly TrackSpatialIndex startSpatialIndex;
+
+        public CompatibleTrack(
+            TrackTemplate track,
+            IReadOnlyList<SectorDefinition> sectors)
+        {
+            Track = track;
+            Sectors = sectors;
+            MatchingRoute = track.LayoutKind == TrackLayoutKind.Circuit
+                ? BuildWrappedCircuit(track)
+                : track.Points;
+            RouteSpatialIndex = new TrackSpatialIndex(track.Points);
+            startSpatialIndex = new TrackSpatialIndex(
+                track.Points,
+                includedSegmentIndices: StartSegmentIndices(track));
+        }
+
+        public TrackTemplate Track { get; }
+        public IReadOnlyList<SectorDefinition> Sectors { get; }
+        public IReadOnlyList<TrackPoint> MatchingRoute { get; }
+        public TrackSpatialIndex RouteSpatialIndex { get; }
+
+        public bool IsStartEligible(Vector3F position, bool allowMidRouteStart)
+        {
+            var projection = InitialProjection(position, allowMidRouteStart);
+            return projection.IsValid &&
+                   projection.DistanceMeters <= AutomaticMatchCandidate.InitialGateMeters(Track);
+        }
+
+        public ProjectionResult InitialProjection(Vector3F position, bool allowMidRouteStart)
+        {
+            var radius = AutomaticMatchCandidate.InitialGateMeters(Track);
+            var index = allowMidRouteStart ? RouteSpatialIndex : startSpatialIndex;
+            return index.ProjectNearest(position.X, position.Y, position.Z, radius);
+        }
+
+        private static IEnumerable<int> StartSegmentIndices(TrackTemplate track)
+        {
+            if (track.Points.Count < 2) return [];
+            var windowMeters = Math.Clamp(track.LengthMeters * 0.12, 200, 450);
+            var indices = new HashSet<int>();
+            for (var index = 0; index < track.Points.Count - 1; index++)
+            {
+                if (track.Points[index].S <= windowMeters) indices.Add(index);
+            }
+            if (track.LayoutKind == TrackLayoutKind.Circuit)
+            {
+                var suffixBoundary = Math.Max(0, track.LengthMeters - windowMeters);
+                for (var index = 0; index < track.Points.Count - 1; index++)
+                {
+                    if (track.Points[index + 1].S >= suffixBoundary) indices.Add(index);
+                }
+            }
+            return indices;
+        }
+
+        private static IReadOnlyList<TrackPoint> BuildWrappedCircuit(TrackTemplate track)
+        {
+            var points = new List<TrackPoint>(track.Points.Count * 2 - 1);
+            points.AddRange(track.Points);
+            points.AddRange(track.Points
+                .Skip(1)
+                .Select(point => point with { S = point.S + track.LengthMeters }));
+            return points;
+        }
+    }
 
     private sealed class AutomaticMatchCandidate
     {
         private readonly IReadOnlyList<TrackPoint> matchingRoute;
-        private readonly bool allowMidRouteStart;
+        private readonly Vector3F initialPosition;
+        private readonly RouteFeature expectedEarlyFeature;
+        private readonly double initialS;
+        private readonly double startTangentX;
+        private readonly double startTangentZ;
         private double distanceTotal;
-        private double initialS;
+        private Vector3F lastObservedPosition;
+        private Vector3F lastFeaturePosition;
+        private double observedTravelMeters;
+        private double observedSignedTurn;
+        private double observedAbsoluteTurn;
+        private double? previousObservedHeading;
+        private double directionPenalty;
+        private double curvaturePenalty;
+        private bool directionEvaluated;
+        private bool curvatureEvaluated;
 
-        public AutomaticMatchCandidate(CompatibleTrack saved, bool allowMidRouteStart)
+        public AutomaticMatchCandidate(
+            CompatibleTrack saved,
+            bool allowMidRouteStart,
+            Fh6RawTelemetry initialFrame)
         {
             Saved = saved;
-            this.allowMidRouteStart = allowMidRouteStart;
-            matchingRoute = saved.Track.LayoutKind == TrackLayoutKind.Circuit
-                ? BuildWrappedCircuit(saved.Track)
-                : saved.Track.Points;
+            matchingRoute = saved.MatchingRoute;
+            initialPosition = initialFrame.Position;
+            lastObservedPosition = initialFrame.Position;
+            lastFeaturePosition = initialFrame.Position;
+            var initialProjection = saved.InitialProjection(initialFrame.Position, allowMidRouteStart);
+            StartDistanceMeters = initialProjection.IsValid
+                ? initialProjection.DistanceMeters
+                : double.PositiveInfinity;
+            StartEligible = initialProjection.IsValid &&
+                            initialProjection.DistanceMeters <= InitialGateMeters(saved.Track);
+            if (!StartEligible)
+            {
+                EliminationReason = initialProjection.IsValid
+                    ? $"起点距离 {initialProjection.DistanceMeters:0.0} m 超出 {InitialGateMeters(saved.Track):0} m"
+                    : "起点区域空间索引无相邻路线";
+                return;
+            }
+
+            ProjectionIndex = initialProjection.SegmentIndex;
+            initialS = initialProjection.S;
+            var tangent = SegmentDirection(matchingRoute, ProjectionIndex);
+            startTangentX = tangent.X;
+            startTangentZ = tangent.Z;
+            expectedEarlyFeature = CalculateRouteFeature(matchingRoute, ProjectionIndex, 120);
         }
 
         public CompatibleTrack Saved { get; }
-        public bool StartEligible { get; private set; }
+        public bool StartEligible { get; }
+        public bool IsEliminated => !StartEligible || EliminationReason is not null;
+        public bool IsFineCandidate { get; set; }
+        public string? EliminationReason { get; private set; }
+        public double StartDistanceMeters { get; }
         public int Observations { get; private set; }
         public int ValidObservations { get; private set; }
         public int ProjectionIndex { get; private set; }
@@ -2018,56 +2317,56 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             : distanceTotal / ValidObservations;
         public double ValidRatio => ValidObservations / (double)Math.Max(1, Observations);
         public double Quality => MeanDistanceMeters + ((1 - ValidRatio) * 80);
+        public double CoarseQuality => StartDistanceMeters + directionPenalty + curvaturePenalty;
+        public double EffectiveToleranceMeters => FineToleranceMeters(Saved.Track);
 
-        public static bool IsStartEligible(TrackTemplate track, Vector3F position)
+        public void ObserveCoarse(Vector3F position)
         {
-            var projection = InitialProjection(track, position, allowMidRouteStart: false);
-            return projection.IsValid &&
-                   projection.DistanceMeters <= InitialGateMeters(track);
+            if (IsEliminated) return;
+            UpdateCoarseGeometry(position);
         }
 
-        public void Observe(Vector3F position)
+        public void ObserveProjection(Fh6RawTelemetry raw)
         {
+            if (IsEliminated || !IsFineCandidate) return;
             Observations++;
-            if (Observations == 1)
-            {
-                var initialProjection = InitialProjection(
-                    Saved.Track,
-                    position,
-                    allowMidRouteStart);
-                StartEligible = initialProjection.IsValid &&
-                                initialProjection.DistanceMeters <= InitialGateMeters(Saved.Track);
-                if (!StartEligible) return;
-                ProjectionIndex = initialProjection.SegmentIndex;
-                initialS = initialProjection.S;
-            }
-            else if (!StartEligible)
-            {
-                return;
-            }
-
             var projection = TrackAlgorithms.ProjectConstrained(
                 matchingRoute,
-                position.X,
-                position.Y,
-                position.Z,
+                raw.Position.X,
+                raw.Position.Y,
+                raw.Position.Z,
                 ProjectionIndex,
                 searchBehind: 8,
                 searchAhead: 96);
             var valid = projection.IsValid &&
-                        projection.DistanceMeters <= Saved.Track.MatchingToleranceMeters &&
-                        projection.ElevationErrorMeters <= 10;
-            if (!valid) return;
+                        projection.DistanceMeters <= FineToleranceMeters(Saved.Track) &&
+                        projection.ElevationErrorMeters <= ElevationToleranceMeters(Saved.Track);
+            if (!valid)
+            {
+                if (Observations >= 16 && ValidRatio < 0.25)
+                    EliminationReason = $"连续三维投影不匹配（有效率 {ValidRatio:P0}）";
+                return;
+            }
 
             ProjectionIndex = projection.SegmentIndex;
             ProgressMeters = Math.Max(ProgressMeters, projection.S - initialS);
             ValidObservations++;
             distanceTotal += projection.DistanceMeters;
+
+            var lengthLimit = Math.Min(
+                AutomaticMatchMaximumTravelMeters,
+                Math.Max(300, Saved.Track.LengthMeters * 1.15));
+            if (observedTravelMeters >= lengthLimit &&
+                ProgressMeters < Math.Min(RequiredProgressMeters, observedTravelMeters * 0.35))
+            {
+                EliminationReason =
+                    $"长度/进度范围不兼容（行驶 {observedTravelMeters:0} m，路线进度 {ProgressMeters:0} m）";
+            }
         }
 
         public double Confidence(AutomaticMatchCandidate? runnerUp)
         {
-            var tolerance = Math.Max(1, Saved.Track.MatchingToleranceMeters);
+            var tolerance = Math.Max(1, FineToleranceMeters(Saved.Track));
             var distanceConfidence = Math.Clamp(1 - (MeanDistanceMeters / tolerance), 0, 1);
             var progressConfidence = Math.Clamp(ProgressMeters / RequiredProgressMeters, 0, 1);
             var separationConfidence = runnerUp is null
@@ -2082,65 +2381,189 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 1);
         }
 
-        private static double InitialGateMeters(TrackTemplate track) =>
+        public bool SharesStartWith(AutomaticMatchCandidate other)
+        {
+            var first = matchingRoute[Math.Clamp(ProjectionIndex, 0, matchingRoute.Count - 1)];
+            var second = other.matchingRoute[Math.Clamp(other.ProjectionIndex, 0, other.matchingRoute.Count - 1)];
+            var dx = first.X - second.X;
+            var dy = first.Y - second.Y;
+            var dz = first.Z - second.Z;
+            var startDistance = Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+            var directionDot = (startTangentX * other.startTangentX) +
+                               (startTangentZ * other.startTangentZ);
+            return startDistance <= 60 && directionDot >= 0.75;
+        }
+
+        public TrackMatchCandidateDiagnostic ToDiagnostic(
+            string stage,
+            string? eliminationReason = null) =>
+            new(
+                Saved.Track.Name,
+                Saved.Track.LayoutKind,
+                Saved.Track.Category,
+                Saved.Track.LengthMeters,
+                stage,
+                double.IsFinite(StartDistanceMeters) ? StartDistanceMeters : null,
+                double.IsFinite(MeanDistanceMeters) ? MeanDistanceMeters : null,
+                ProgressMeters,
+                ValidRatio,
+                eliminationReason ?? EliminationReason);
+
+        public static double InitialGateMeters(TrackTemplate track) =>
             Math.Max(80, track.MatchingToleranceMeters * 4);
 
-        private static ProjectionResult InitialProjection(
-            TrackTemplate track,
-            Vector3F position,
-            bool allowMidRouteStart)
+        private void UpdateCoarseGeometry(Vector3F position)
         {
-            if (allowMidRouteStart)
+            var dx = position.X - lastObservedPosition.X;
+            var dy = position.Y - lastObservedPosition.Y;
+            var dz = position.Z - lastObservedPosition.Z;
+            var movement = Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+            if (movement is > 0.05 and < 100)
+                observedTravelMeters += movement;
+            lastObservedPosition = position;
+
+            var fromStartX = position.X - initialPosition.X;
+            var fromStartZ = position.Z - initialPosition.Z;
+            var fromStartMagnitude = Math.Sqrt((fromStartX * fromStartX) + (fromStartZ * fromStartZ));
+            if (!directionEvaluated && observedTravelMeters >= 20 && fromStartMagnitude >= 10)
             {
-                return TrackAlgorithms.ProjectRange(
-                    track.Points,
-                    position.X,
-                    position.Y,
-                    position.Z,
-                    0,
-                    track.Points.Count - 2);
+                directionEvaluated = true;
+                var directionDot = ((fromStartX / fromStartMagnitude) * startTangentX) +
+                                   ((fromStartZ / fromStartMagnitude) * startTangentZ);
+                directionPenalty = (1 - Math.Clamp(directionDot, -1, 1)) * 20;
+                if (directionDot < -0.2)
+                {
+                    EliminationReason = $"行驶方向相反（方向相似度 {directionDot:0.00}）";
+                    return;
+                }
             }
 
-            var windowMeters = Math.Clamp(track.LengthMeters * 0.12, 200, 450);
-            var prefixEnd = 0;
-            while (prefixEnd < track.Points.Count - 2 &&
-                   track.Points[prefixEnd + 1].S <= windowMeters)
+            var featureDx = position.X - lastFeaturePosition.X;
+            var featureDz = position.Z - lastFeaturePosition.Z;
+            var featureDistance = Math.Sqrt((featureDx * featureDx) + (featureDz * featureDz));
+            if (featureDistance >= 4)
             {
-                prefixEnd++;
+                var heading = Math.Atan2(featureDz, featureDx);
+                if (previousObservedHeading is double previousHeading)
+                {
+                    var turn = NormalizeAngle(heading - previousHeading);
+                    observedSignedTurn += turn;
+                    observedAbsoluteTurn += Math.Abs(turn);
+                }
+                previousObservedHeading = heading;
+                lastFeaturePosition = position;
             }
 
-            var best = TrackAlgorithms.ProjectRange(
-                track.Points,
-                position.X,
-                position.Y,
-                position.Z,
-                0,
-                prefixEnd);
-            if (track.LayoutKind != TrackLayoutKind.Circuit) return best;
+            if (!curvatureEvaluated && observedTravelMeters >= 120)
+            {
+                curvatureEvaluated = true;
+                var curvatureTolerance = Saved.Track.Category switch
+                {
+                    "越野" => 3.0,
+                    "泥地" => 2.6,
+                    _ => 2.2
+                };
+                var signedError = Math.Abs(observedSignedTurn - expectedEarlyFeature.SignedTurn);
+                var absoluteError = Math.Abs(observedAbsoluteTurn - expectedEarlyFeature.AbsoluteTurn);
+                curvaturePenalty = (signedError + absoluteError) * 5;
+                if (signedError > curvatureTolerance ||
+                    absoluteError > curvatureTolerance * 1.35)
+                {
+                    EliminationReason =
+                        $"早期曲率不匹配（方向变化差 {signedError:0.00} rad，曲率差 {absoluteError:0.00} rad）";
+                    return;
+                }
+            }
 
-            var suffixStart = track.Points.Count - 2;
-            var suffixBoundary = Math.Max(0, track.LengthMeters - windowMeters);
-            while (suffixStart > 0 && track.Points[suffixStart].S >= suffixBoundary)
-                suffixStart--;
-            var suffix = TrackAlgorithms.ProjectRange(
-                track.Points,
-                position.X,
-                position.Y,
-                position.Z,
-                suffixStart,
-                track.Points.Count - 2);
-            return !best.IsValid || suffix.DistanceMeters < best.DistanceMeters ? suffix : best;
+            if (Saved.Track.LayoutKind == TrackLayoutKind.PointToPoint &&
+                observedTravelMeters >= 300)
+            {
+                var startDx = position.X - initialPosition.X;
+                var startDy = position.Y - initialPosition.Y;
+                var startDz = position.Z - initialPosition.Z;
+                var distanceToStart = Math.Sqrt(
+                    (startDx * startDx) + (startDy * startDy) + (startDz * startDz));
+                if (distanceToStart <= 35)
+                    EliminationReason = "观测到闭环返回起点，路线类型与定点赛不符";
+            }
         }
 
-        private static IReadOnlyList<TrackPoint> BuildWrappedCircuit(TrackTemplate track)
+        private static RouteFeature CalculateRouteFeature(
+            IReadOnlyList<TrackPoint> route,
+            int startSegment,
+            double distanceLimit)
         {
-            var points = new List<TrackPoint>(track.Points.Count * 2 - 1);
-            points.AddRange(track.Points);
-            points.AddRange(track.Points
-                .Skip(1)
-                .Select(point => point with { S = point.S + track.LengthMeters }));
-            return points;
+            var accumulated = 0d;
+            var signedTurn = 0d;
+            var absoluteTurn = 0d;
+            double? previousHeading = null;
+            for (var index = Math.Clamp(startSegment, 0, route.Count - 2);
+                 index < route.Count - 1 && accumulated < distanceLimit;
+                 index++)
+            {
+                var start = route[index];
+                var end = route[index + 1];
+                var dx = end.X - start.X;
+                var dz = end.Z - start.Z;
+                var length = Math.Sqrt((dx * dx) + (dz * dz));
+                if (length <= 0.01) continue;
+                var heading = Math.Atan2(dz, dx);
+                if (previousHeading is double previous)
+                {
+                    var turn = NormalizeAngle(heading - previous);
+                    signedTurn += turn;
+                    absoluteTurn += Math.Abs(turn);
+                }
+                previousHeading = heading;
+                accumulated += length;
+            }
+            return new RouteFeature(signedTurn, absoluteTurn);
         }
+
+        private static (double X, double Z) SegmentDirection(
+            IReadOnlyList<TrackPoint> route,
+            int segmentIndex)
+        {
+            var index = Math.Clamp(segmentIndex, 0, route.Count - 2);
+            for (var offset = 0; offset < 8 && index + offset < route.Count - 1; offset++)
+            {
+                var start = route[index + offset];
+                var end = route[index + offset + 1];
+                var dx = end.X - start.X;
+                var dz = end.Z - start.Z;
+                var magnitude = Math.Sqrt((dx * dx) + (dz * dz));
+                if (magnitude > 0.01) return (dx / magnitude, dz / magnitude);
+            }
+            return (0, 0);
+        }
+
+        private static double FineToleranceMeters(TrackTemplate track) =>
+            Math.Max(
+                track.MatchingToleranceMeters,
+                track.Category switch
+                {
+                    "越野" => 55,
+                    "泥地" => 35,
+                    "山道" => 28,
+                    _ => 22
+                });
+
+        private static double ElevationToleranceMeters(TrackTemplate track) =>
+            track.Category switch
+            {
+                "越野" => 18,
+                "泥地" => 14,
+                _ => 10
+            };
+
+        private static double NormalizeAngle(double angle)
+        {
+            while (angle > Math.PI) angle -= Math.PI * 2;
+            while (angle < -Math.PI) angle += Math.PI * 2;
+            return angle;
+        }
+
+        private readonly record struct RouteFeature(double SignedTurn, double AbsoluteTurn);
     }
 
     private readonly record struct PersistenceCommand(

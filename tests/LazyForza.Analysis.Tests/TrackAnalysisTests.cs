@@ -220,6 +220,35 @@ public sealed class TrackAnalysisTests
     }
 
     [TestMethod]
+    public void SpatialIndexNarrowsLongRoutesAndKeepsStackedRoadsDistinct()
+    {
+        var longRoute = Enumerable.Range(0, 1_001)
+            .Select(index => new TrackPoint(index * 5, 0, 0, index * 5, 1, 0))
+            .ToArray();
+        var longIndex = new TrackSpatialIndex(longRoute, 50);
+        var nearbySegments = longIndex.QuerySegmentIndices(2_500, 0, 20);
+        Assert.IsTrue(nearbySegments.Count < 30,
+            $"A local grid query should not scan all {longIndex.IndexedSegmentCount} route segments.");
+        Assert.IsTrue(nearbySegments.Contains(499) || nearbySegments.Contains(500));
+
+        var stackedRoute = new[]
+        {
+            new TrackPoint(-20, 0, 0, 0, 1, 0),
+            new TrackPoint(20, 0, 0, 40, 1, 0),
+            new TrackPoint(20, 20, 20, 60, -1, 0),
+            new TrackPoint(-20, 20, 0, 100, -1, 0)
+        };
+        var stackedIndex = new TrackSpatialIndex(stackedRoute, 40);
+        var lower = stackedIndex.ProjectNearest(0, 0.2, 0, 10);
+        var upper = stackedIndex.ProjectNearest(0, 19.8, 0, 10);
+
+        Assert.AreEqual(0, lower.SegmentIndex);
+        Assert.AreEqual(2, upper.SegmentIndex);
+        Assert.IsTrue(lower.ElevationErrorMeters < 1);
+        Assert.IsTrue(upper.ElevationErrorMeters < 1);
+    }
+
+    [TestMethod]
     public void SectorGenerationIsVersionedDeterministicAndBounded()
     {
         var points = Enumerable.Range(0, 281).Select(index => new TrackPoint(index * 5, 0, 0, index * 5, 1, 0)).ToArray();
