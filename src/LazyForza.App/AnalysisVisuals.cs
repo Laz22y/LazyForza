@@ -31,6 +31,193 @@ internal static class LapSeriesPalette
     public static SolidColorBrush BrushAt(int index) => Brushes[Math.Abs(index) % Brushes.Length];
 }
 
+internal sealed record LapSeriesLegendEntry(
+    string PrimaryText,
+    string SecondaryText);
+
+internal sealed record CornerMapAnnotation(
+    Guid LapId,
+    CornerWindow Window,
+    string Context,
+    string Title,
+    string Details,
+    string Hint,
+    string Footer,
+    Color Accent);
+
+internal enum AnalysisLegendCorner
+{
+    TopLeft,
+    TopRight,
+    BottomRight,
+    BottomLeft
+}
+
+internal static class LapAnalysisVisualLayout
+{
+    public static double AdaptiveMapHeight(double windowHeight)
+    {
+        var safeWindowHeight = double.IsFinite(windowHeight) && windowHeight > 0
+            ? windowHeight
+            : 800;
+        var preferred = Math.Clamp(safeWindowHeight * 0.72, 420, 900);
+        var available = Math.Max(320, safeWindowHeight - 48);
+        return Math.Min(preferred, available);
+    }
+}
+
+internal static class AnalysisOverlayDrawing
+{
+    private static readonly FontFamily Font = new("Microsoft YaHei UI");
+
+    public static Rect SelectSeriesLegendBounds(
+        Rect renderBounds,
+        int entryCount,
+        IReadOnlyList<Point> seriesPoints,
+        IReadOnlyList<Rect>? reservedBounds,
+        params AnalysisLegendCorner[] preferredCorners)
+    {
+        if (entryCount <= 0 || renderBounds.Width < 120 || renderBounds.Height < 80)
+            return Rect.Empty;
+
+        var corners = preferredCorners.Length == 0
+            ?
+            [
+                AnalysisLegendCorner.BottomLeft,
+                AnalysisLegendCorner.BottomRight,
+                AnalysisLegendCorner.TopRight,
+                AnalysisLegendCorner.TopLeft
+            ]
+            : preferredCorners;
+        var best = Rect.Empty;
+        var bestScore = double.PositiveInfinity;
+        for (var index = 0; index < corners.Length; index++)
+        {
+            var candidate = SeriesLegendBounds(renderBounds, entryCount, corners[index]);
+            var probe = candidate;
+            probe.Inflate(7, 7);
+            var score = index * 0.025;
+            if (reservedBounds is not null)
+            {
+                foreach (var reserved in reservedBounds)
+                {
+                    if (probe.IntersectsWith(reserved))
+                        score += 10_000;
+                }
+            }
+
+            foreach (var point in seriesPoints)
+            {
+                if (probe.Contains(point)) score += 1;
+            }
+
+            if (score >= bestScore) continue;
+            bestScore = score;
+            best = candidate;
+        }
+
+        return best;
+    }
+
+    public static void DrawSeriesLegend(
+        DrawingContext drawingContext,
+        Rect chrome,
+        IReadOnlyList<LapSeriesLegendEntry> entries,
+        double pixelsPerDip)
+    {
+        if (entries.Count == 0 || chrome.IsEmpty) return;
+
+        const double entryHeight = 30;
+        drawingContext.DrawRoundedRectangle(
+            new SolidColorBrush(Color.FromArgb(194, 14, 21, 29)),
+            new Pen(new SolidColorBrush(Color.FromArgb(190, 67, 84, 101)), 1),
+            chrome,
+            8,
+            8);
+
+        for (var index = 0; index < entries.Count; index++)
+        {
+            var entry = entries[index];
+            var color = LapSeriesPalette.At(index);
+            var centerY = chrome.Top + 4 + index * entryHeight + entryHeight / 2;
+            var linePen = new Pen(new SolidColorBrush(color), 2.5)
+            {
+                StartLineCap = PenLineCap.Round,
+                EndLineCap = PenLineCap.Round
+            };
+            drawingContext.DrawLine(
+                linePen,
+                new Point(chrome.Left + 9, centerY),
+                new Point(chrome.Left + 27, centerY));
+
+            var textWidth = Math.Max(40, chrome.Width - 46);
+            var primary = OneLineText(
+                entry.PrimaryText,
+                9.5,
+                FontWeights.SemiBold,
+                Color.FromRgb(244, 247, 250),
+                textWidth,
+                pixelsPerDip);
+            var secondary = OneLineText(
+                entry.SecondaryText,
+                8,
+                FontWeights.Normal,
+                Color.FromRgb(160, 174, 188),
+                textWidth,
+                pixelsPerDip);
+            drawingContext.DrawText(
+                primary,
+                new Point(chrome.Left + 35, centerY - 13));
+            drawingContext.DrawText(
+                secondary,
+                new Point(chrome.Left + 35, centerY + 0.5));
+        }
+    }
+
+    private static Rect SeriesLegendBounds(
+        Rect renderBounds,
+        int entryCount,
+        AnalysisLegendCorner corner)
+    {
+        var width = Math.Min(
+            entryCount == 1 ? 258 : 286,
+            Math.Max(176, renderBounds.Width * 0.34));
+        var height = 8 + Math.Min(4, entryCount) * 30;
+        const double margin = 9;
+        var left = corner is AnalysisLegendCorner.TopRight or AnalysisLegendCorner.BottomRight
+            ? renderBounds.Right - width - margin
+            : renderBounds.Left + margin;
+        var top = corner is AnalysisLegendCorner.BottomLeft or AnalysisLegendCorner.BottomRight
+            ? renderBounds.Bottom - height - margin
+            : renderBounds.Top + margin;
+        return new Rect(left, top, width, height);
+    }
+
+    private static FormattedText OneLineText(
+        string text,
+        double fontSize,
+        FontWeight fontWeight,
+        Color color,
+        double maximumWidth,
+        double pixelsPerDip)
+    {
+        var formatted = new FormattedText(
+            text,
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            new Typeface(Font, FontStyles.Normal, fontWeight, FontStretches.Normal),
+            fontSize,
+            new SolidColorBrush(color),
+            pixelsPerDip)
+        {
+            MaxTextWidth = maximumWidth,
+            MaxLineCount = 1,
+            Trimming = TextTrimming.CharacterEllipsis
+        };
+        return formatted;
+    }
+}
+
 internal sealed record LapVisualHit(
     LapRecord Lap,
     LapSample Sample,
@@ -40,6 +227,7 @@ internal sealed record LapVisualHit(
 internal sealed class LapTelemetryChart : FrameworkElement
 {
     private readonly LapRecord[] laps;
+    private readonly LapSeriesLegendEntry[] legendEntries;
     private readonly double maximumSpeed;
     private readonly double progressExtent;
     private readonly ToolTip hoverToolTip;
@@ -49,9 +237,13 @@ internal sealed class LapTelemetryChart : FrameworkElement
 
     public LapTelemetryChart(
         IReadOnlyList<LapRecord> laps,
-        double? trackLengthMeters = null)
+        double? trackLengthMeters = null,
+        IReadOnlyList<LapSeriesLegendEntry>? legendEntries = null)
     {
         this.laps = laps.Where(lap => lap.Samples.Count >= 2).Take(4).ToArray();
+        this.legendEntries = (legendEntries ?? [])
+            .Take(this.laps.Length)
+            .ToArray();
         maximumSpeed = Math.Max(
             1,
             this.laps
@@ -161,11 +353,40 @@ internal sealed class LapTelemetryChart : FrameworkElement
             DrawChartGrid(drawingContext, metrics.Bounds);
             for (var index = 0; index < laps.Length; index++)
                 DrawSeries(drawingContext, laps[index].Samples, index, metrics);
+            var legendBounds = AnalysisOverlayDrawing.SelectSeriesLegendBounds(
+                metrics.Bounds,
+                legendEntries.Length,
+                ChartLegendPoints(metrics),
+                reservedBounds: null,
+                AnalysisLegendCorner.BottomLeft,
+                AnalysisLegendCorner.BottomRight,
+                AnalysisLegendCorner.TopRight,
+                AnalysisLegendCorner.TopLeft);
+            AnalysisOverlayDrawing.DrawSeriesLegend(
+                drawingContext,
+                legendBounds,
+                legendEntries,
+                VisualTreeHelper.GetDpi(this).PixelsPerDip);
         }
 
         if (drawing.CanFreeze) drawing.Freeze();
         baseDrawing = drawing;
         baseDrawingKey = key;
+    }
+
+    private IReadOnlyList<Point> ChartLegendPoints(ChartMetrics metrics)
+    {
+        var points = new List<Point>(laps.Length * 256);
+        foreach (var lap in laps)
+        {
+            var samples = ChartInteractionAlgorithms.DownsampleSpeedEnvelope(
+                lap.Samples,
+                256);
+            foreach (var sample in samples)
+                points.Add(ChartPoint(sample, metrics));
+        }
+
+        return points;
     }
 
     private void SetHover(LapVisualHit? next, Point pointer, bool includePosition)
@@ -332,6 +553,8 @@ internal sealed class TrackMapView : FrameworkElement
     private const double HoverRadius = 11;
     private const double HoverCellSize = 24;
     private readonly LapRecord[] laps;
+    private readonly LapSeriesLegendEntry[] legendEntries;
+    private readonly CornerMapAnnotation[] cornerAnnotations;
     private readonly TrackPoint[] trackPoints;
     private readonly TrackLayoutKind layoutKind;
     private readonly TrackEndpointSummary? endpoints;
@@ -342,16 +565,32 @@ internal sealed class TrackMapView : FrameworkElement
     private readonly double mapSpanZ;
     private ChartViewport viewport = new(MinimumZoom, 0, 0);
     private LapVisualHit? hover;
+    private CornerMapAnnotation? cornerHover;
     private ScreenHitGrid? hoverGrid;
     private MapViewportKey? hoverGridKey;
+    private CornerMarkerLayout[] cornerMarkerLayouts = [];
+    private CornerMarkerLayoutKey? cornerMarkerLayoutKey;
     private DrawingGroup? baseDrawing;
     private MapDrawingKey? baseDrawingKey;
     private bool dragging;
     private Point dragStart;
+    private bool showEndpoints = true;
+    private bool showCornerAnnotations = true;
+    private bool showLegend = true;
 
-    public TrackMapView(IReadOnlyList<LapRecord> laps, TrackTemplate? track)
+    public TrackMapView(
+        IReadOnlyList<LapRecord> laps,
+        TrackTemplate? track,
+        IReadOnlyList<LapSeriesLegendEntry>? legendEntries = null,
+        IReadOnlyList<CornerMapAnnotation>? cornerAnnotations = null)
     {
         this.laps = laps.Where(lap => lap.Samples.Count >= 2).Take(4).ToArray();
+        this.legendEntries = (legendEntries ?? [])
+            .Take(this.laps.Length)
+            .ToArray();
+        this.cornerAnnotations = (cornerAnnotations ?? [])
+            .Where(annotation => this.laps.Any(lap => lap.Id == annotation.LapId))
+            .ToArray();
         trackPoints = track?.Points.ToArray() ?? [];
         layoutKind = track?.LayoutKind ?? TrackLayoutKind.Circuit;
         endpoints = ChartInteractionAlgorithms.SummarizeTrackEndpoints(trackPoints) ??
@@ -375,6 +614,46 @@ internal sealed class TrackMapView : FrameworkElement
         Unloaded += (_, _) => hoverToolTip.IsOpen = false;
     }
 
+    public bool ShowEndpoints
+    {
+        get => showEndpoints;
+        set
+        {
+            if (showEndpoints == value) return;
+            showEndpoints = value;
+            baseDrawing = null;
+            baseDrawingKey = null;
+            InvalidateVisual();
+        }
+    }
+
+    public bool ShowCornerAnnotations
+    {
+        get => showCornerAnnotations;
+        set
+        {
+            if (showCornerAnnotations == value) return;
+            showCornerAnnotations = value;
+            if (!value && cornerHover is not null) ClearHover();
+            InvalidateVisual();
+        }
+    }
+
+    public bool ShowLegend
+    {
+        get => showLegend;
+        set
+        {
+            if (showLegend == value) return;
+            showLegend = value;
+            cornerMarkerLayouts = [];
+            cornerMarkerLayoutKey = null;
+            InvalidateVisual();
+        }
+    }
+
+    public int CornerAnnotationCount => cornerAnnotations.Length;
+
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
@@ -382,6 +661,20 @@ internal sealed class TrackMapView : FrameworkElement
         viewport = ClampViewport(viewport, metrics);
         EnsureBaseDrawing(metrics);
         if (baseDrawing is not null) drawingContext.DrawDrawing(baseDrawing);
+        var legendBounds = showLegend
+            ? MapLegendBounds(metrics)
+            : Rect.Empty;
+        if (showCornerAnnotations)
+            DrawCornerAnnotations(drawingContext, metrics, legendBounds);
+        if (showLegend)
+        {
+            AnalysisOverlayDrawing.DrawSeriesLegend(
+                drawingContext,
+                legendBounds,
+                legendEntries,
+                VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        }
+        DrawZoomBadge(drawingContext, metrics.Bounds);
 
         if (hover is not null)
         {
@@ -430,6 +723,7 @@ internal sealed class TrackMapView : FrameworkElement
             dragStart = pointer;
             hoverToolTip.IsOpen = false;
             hover = null;
+            cornerHover = null;
             Cursor = Cursors.SizeAll;
             InvalidateVisual();
             eventArgs.Handled = true;
@@ -476,6 +770,14 @@ internal sealed class TrackMapView : FrameworkElement
             return;
         }
 
+        if (showCornerAnnotations &&
+            TryFindCornerAnnotation(pointer, metrics, out var annotation))
+        {
+            SetCornerHover(annotation, pointer);
+            return;
+        }
+
+        cornerHover = null;
         EnsureHoverGrid(metrics);
         if (hoverGrid is null ||
             !hoverGrid.TryFindNearest(
@@ -515,8 +817,9 @@ internal sealed class TrackMapView : FrameworkElement
 
     private void ClearHover()
     {
-        if (hover is null && !hoverToolTip.IsOpen) return;
+        if (hover is null && cornerHover is null && !hoverToolTip.IsOpen) return;
         hover = null;
+        cornerHover = null;
         hoverToolTip.IsOpen = false;
         if (!dragging) Cursor = viewport.Zoom > MinimumZoom ? Cursors.Hand : Cursors.Arrow;
         InvalidateVisual();
@@ -571,9 +874,8 @@ internal sealed class TrackMapView : FrameworkElement
             DrawMapGrid(drawingContext, metrics.Bounds);
             for (var index = 0; index < laps.Length; index++)
                 DrawRoute(drawingContext, laps[index].Samples, index, metrics);
-            DrawTrackEndpoints(drawingContext, metrics);
+            if (showEndpoints) DrawTrackEndpoints(drawingContext, metrics);
             drawingContext.Pop();
-            DrawZoomBadge(drawingContext);
         }
 
         if (drawing.CanFreeze) drawing.Freeze();
@@ -614,6 +916,329 @@ internal sealed class TrackMapView : FrameworkElement
         };
         pen.Freeze();
         drawingContext.DrawGeometry(null, pen, geometry);
+    }
+
+    private void DrawCornerAnnotations(
+        DrawingContext drawingContext,
+        MapMetrics metrics,
+        Rect legendBounds)
+    {
+        if (cornerAnnotations.Length == 0) return;
+        drawingContext.PushClip(new RectangleGeometry(metrics.Bounds));
+        foreach (var layout in ResolveCornerMarkerLayouts(metrics, legendBounds))
+        {
+            DrawCornerAnalysisPoint(
+                drawingContext,
+                layout.Marker,
+                layout.Annotation,
+                ReferenceEquals(cornerHover, layout.Annotation),
+                VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        }
+        drawingContext.Pop();
+    }
+
+    private bool TryFindCornerAnnotation(
+        Point pointer,
+        MapMetrics metrics,
+        out CornerMapAnnotation annotation)
+    {
+        var legendBounds = showLegend
+            ? MapLegendBounds(metrics)
+            : Rect.Empty;
+        var layouts = ResolveCornerMarkerLayouts(metrics, legendBounds);
+        for (var index = layouts.Count - 1; index >= 0; index--)
+        {
+            var candidate = layouts[index];
+            var hitArea = candidate.Marker.Bounds;
+            hitArea.Inflate(6, 6);
+            if (!hitArea.Contains(pointer)) continue;
+            annotation = candidate.Annotation;
+            return true;
+        }
+
+        annotation = null!;
+        return false;
+    }
+
+    private Rect MapLegendBounds(MapMetrics metrics)
+    {
+        var reserved = new[]
+        {
+            MapControlsReservedBounds(metrics.Bounds),
+            MapZoomReservedBounds(metrics.Bounds)
+        };
+        return AnalysisOverlayDrawing.SelectSeriesLegendBounds(
+            metrics.Bounds,
+            legendEntries.Length,
+            MapLegendPoints(metrics),
+            reserved,
+            AnalysisLegendCorner.TopLeft,
+            AnalysisLegendCorner.BottomRight,
+            AnalysisLegendCorner.TopRight);
+    }
+
+    private IReadOnlyList<Point> MapLegendPoints(MapMetrics metrics)
+    {
+        var points = new List<Point>(laps.Length * 500);
+        foreach (var lap in laps)
+        {
+            var stride = Math.Max(1, lap.Samples.Count / 500);
+            for (var index = 0; index < lap.Samples.Count; index += stride)
+                points.Add(MapPoint(lap.Samples[index], metrics, viewport));
+        }
+
+        return points;
+    }
+
+    private IReadOnlyList<CornerMarkerLayout> ResolveCornerMarkerLayouts(
+        MapMetrics metrics,
+        Rect legendBounds)
+    {
+        var key = new CornerMarkerLayoutKey(
+            CreateViewportKey(metrics),
+            legendBounds);
+        if (cornerMarkerLayoutKey is { } cachedKey &&
+            cachedKey.Equals(key))
+            return cornerMarkerLayouts;
+
+        var routePoints = MapLegendPoints(metrics);
+        var reserved = new List<Rect>
+        {
+            MapControlsReservedBounds(metrics.Bounds),
+            MapZoomReservedBounds(metrics.Bounds)
+        };
+        if (!legendBounds.IsEmpty) reserved.Add(legendBounds);
+
+        var layouts = new List<CornerMarkerLayout>(cornerAnnotations.Length);
+        foreach (var annotation in cornerAnnotations)
+        {
+            if (!TryCreateCornerMarker(
+                    annotation,
+                    metrics,
+                    routePoints,
+                    reserved,
+                    out var marker))
+                continue;
+            layouts.Add(new CornerMarkerLayout(annotation, marker));
+            var occupied = marker.Bounds;
+            occupied.Inflate(7, 7);
+            reserved.Add(occupied);
+        }
+
+        cornerMarkerLayouts = layouts.ToArray();
+        cornerMarkerLayoutKey = key;
+        return cornerMarkerLayouts;
+    }
+
+    private bool TryCreateCornerMarker(
+        CornerMapAnnotation annotation,
+        MapMetrics metrics,
+        IReadOnlyList<Point> routePoints,
+        IReadOnlyList<Rect> reservedBounds,
+        out CornerMarker marker)
+    {
+        var seriesIndex = Array.FindIndex(laps, lap => lap.Id == annotation.LapId);
+        if (seriesIndex < 0)
+        {
+            marker = default;
+            return false;
+        }
+
+        var samples = laps[seriesIndex].Samples;
+        var sampleIndex = ChartInteractionAlgorithms.FindNearestProgressSample(
+            samples,
+            annotation.Window.ApexS);
+        if (sampleIndex < 0 || sampleIndex >= samples.Count)
+        {
+            marker = default;
+            return false;
+        }
+
+        var anchor = MapPoint(samples[sampleIndex], metrics, viewport);
+        if (!metrics.Bounds.Contains(anchor))
+        {
+            marker = default;
+            return false;
+        }
+
+        var previous = MapPoint(
+            samples[Math.Max(0, sampleIndex - 4)],
+            metrics,
+            viewport);
+        var next = MapPoint(
+            samples[Math.Min(samples.Count - 1, sampleIndex + 4)],
+            metrics,
+            viewport);
+        var tangent = next - previous;
+        if (tangent.Length < 0.5) tangent = new Vector(1, 0);
+        tangent.Normalize();
+        var normal = new Vector(-tangent.Y, tangent.X);
+        var safeBounds = metrics.Bounds;
+        safeBounds.Inflate(-13, -13);
+        var bestScore = double.NegativeInfinity;
+        var best = default(CornerMarker);
+        var found = false;
+        foreach (var distance in new[] { 25d, 33d, 41d })
+        {
+            foreach (var side in new[] { 1d, -1d })
+            {
+                foreach (var along in new[] { 0d, -12d, 12d })
+                {
+                    var center = anchor + normal * (distance * side) + tangent * along;
+                    if (!safeBounds.Contains(center)) continue;
+                    var bounds = new Rect(center.X - 10, center.Y - 10, 20, 20);
+                    if (reservedBounds.Any(reserved => reserved.IntersectsWith(bounds)))
+                        continue;
+
+                    var clearance = MinimumDistance(center, routePoints);
+                    if (clearance < 14) continue;
+                    var score =
+                        Math.Min(clearance, 32) -
+                        Math.Max(0, distance - 25) * 0.6 -
+                        Math.Abs(along) * 0.05;
+                    if (score <= bestScore) continue;
+                    bestScore = score;
+                    best = new CornerMarker(anchor, center, bounds);
+                    found = true;
+                }
+            }
+        }
+
+        marker = best;
+        return found;
+    }
+
+    private static double MinimumDistance(
+        Point point,
+        IReadOnlyList<Point> routePoints)
+    {
+        var minimumSquared = double.PositiveInfinity;
+        foreach (var routePoint in routePoints)
+        {
+            var dx = point.X - routePoint.X;
+            var dy = point.Y - routePoint.Y;
+            minimumSquared = Math.Min(minimumSquared, dx * dx + dy * dy);
+        }
+
+        return double.IsFinite(minimumSquared)
+            ? Math.Sqrt(minimumSquared)
+            : double.PositiveInfinity;
+    }
+
+    private static Rect MapControlsReservedBounds(Rect bounds) =>
+        new(bounds.Left + 8, bounds.Bottom - 62, 150, 54);
+
+    private static Rect MapZoomReservedBounds(Rect bounds) =>
+        new(bounds.Right - 78, bounds.Top + 7, 70, 32);
+
+    private void SetCornerHover(
+        CornerMapAnnotation annotation,
+        Point pointer)
+    {
+        var changed = !ReferenceEquals(cornerHover, annotation);
+        cornerHover = annotation;
+        hover = null;
+        if (changed)
+        {
+            hoverToolTip.BorderBrush = new SolidColorBrush(annotation.Accent);
+            hoverToolTip.Content = CornerTooltip(annotation);
+        }
+        hoverToolTip.HorizontalOffset = Math.Min(pointer.X + 16, Math.Max(8, ActualWidth - 500));
+        hoverToolTip.VerticalOffset = Math.Min(pointer.Y + 16, Math.Max(8, ActualHeight - 265));
+        hoverToolTip.IsOpen = true;
+        Cursor = Cursors.Hand;
+        if (changed) InvalidateVisual();
+    }
+
+    private static TextBlock CornerTooltip(CornerMapAnnotation annotation) => new()
+    {
+        Text =
+            $"{annotation.Context}\n" +
+            $"{annotation.Title}\n" +
+            $"{annotation.Details}\n" +
+            $"{annotation.Hint}\n\n" +
+            annotation.Footer,
+        FontFamily = new FontFamily("Microsoft YaHei UI"),
+        FontSize = 13,
+        Foreground = new SolidColorBrush(Color.FromRgb(244, 247, 250)),
+        LineHeight = 19,
+        TextWrapping = TextWrapping.Wrap,
+        MaxWidth = 470
+    };
+
+    private static void DrawCornerAnalysisPoint(
+        DrawingContext drawingContext,
+        CornerMarker marker,
+        CornerMapAnnotation annotation,
+        bool highlighted,
+        double pixelsPerDip)
+    {
+        var accent = annotation.Accent;
+        var connector = new Pen(
+            new SolidColorBrush(Color.FromArgb(210, accent.R, accent.G, accent.B)),
+            highlighted ? 2 : 1.25)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round
+        };
+        var direction = marker.Anchor - marker.Center;
+        if (direction.Length < 0.5) direction = new Vector(0, 1);
+        direction.Normalize();
+        var connectionPoint = marker.Center + direction * 10;
+        connector.DashStyle = new DashStyle([2, 2], 0);
+        drawingContext.DrawLine(connector, marker.Anchor, connectionPoint);
+        drawingContext.DrawEllipse(
+            null,
+            connector,
+            marker.Anchor,
+            highlighted ? 4 : 3.2,
+            highlighted ? 4 : 3.2);
+
+        drawingContext.DrawEllipse(
+            new SolidColorBrush(Color.FromArgb(105, 0, 0, 0)),
+            null,
+            marker.Center + new Vector(0, 2),
+            10,
+            10);
+        if (highlighted)
+        {
+            drawingContext.DrawEllipse(
+                null,
+                new Pen(new SolidColorBrush(Color.FromArgb(105, accent.R, accent.G, accent.B)), 4),
+                marker.Center,
+                12,
+                12);
+        }
+        drawingContext.DrawEllipse(
+            new SolidColorBrush(Color.FromArgb(238, 14, 21, 29)),
+            new Pen(
+                new SolidColorBrush(highlighted
+                    ? Color.FromRgb(255, 255, 255)
+                    : accent),
+                highlighted ? 1.8 : 1.5),
+            marker.Center,
+            10,
+            10);
+
+        var number = new FormattedText(
+            annotation.Window.Number.ToString(),
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            new Typeface(
+                new FontFamily("Microsoft YaHei UI"),
+                FontStyles.Normal,
+                FontWeights.Bold,
+                FontStretches.Normal),
+            10,
+            new SolidColorBrush(highlighted
+                ? Color.FromRgb(255, 255, 255)
+                : accent),
+            pixelsPerDip);
+        drawingContext.DrawText(
+            number,
+            new Point(
+                marker.Center.X - number.Width / 2,
+                marker.Center.Y - number.Height / 2 - 0.5));
     }
 
     private void EnsureHoverGrid(MapMetrics metrics)
@@ -932,7 +1557,7 @@ internal sealed class TrackMapView : FrameworkElement
         };
     }
 
-    private void DrawZoomBadge(DrawingContext drawingContext)
+    private void DrawZoomBadge(DrawingContext drawingContext, Rect bounds)
     {
         var text = new FormattedText(
             $"{viewport.Zoom:0.00}×",
@@ -942,7 +1567,11 @@ internal sealed class TrackMapView : FrameworkElement
             10,
             new SolidColorBrush(Color.FromRgb(230, 237, 242)),
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
-        var badge = new Rect(8, 8, text.Width + 16, text.Height + 8);
+        var badge = new Rect(
+            bounds.Right - text.Width - 26,
+            bounds.Top + 10,
+            text.Width + 16,
+            text.Height + 8);
         drawingContext.DrawRoundedRectangle(
             new SolidColorBrush(Color.FromArgb(210, 14, 21, 29)),
             new Pen(new SolidColorBrush(Color.FromRgb(62, 79, 94)), 1),
@@ -979,4 +1608,17 @@ internal sealed class TrackMapView : FrameworkElement
     private readonly record struct MapDrawingKey(
         MapViewportKey ViewportKey,
         double PixelsPerDip);
+
+    private readonly record struct CornerMarkerLayoutKey(
+        MapViewportKey ViewportKey,
+        Rect LegendBounds);
+
+    private readonly record struct CornerMarkerLayout(
+        CornerMapAnnotation Annotation,
+        CornerMarker Marker);
+
+    private readonly record struct CornerMarker(
+        Point Anchor,
+        Point Center,
+        Rect Bounds);
 }

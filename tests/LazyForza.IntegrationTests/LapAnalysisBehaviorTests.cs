@@ -583,7 +583,7 @@ public sealed class LapAnalysisBehaviorTests
 
     [TestMethod]
     [TestCategory("CatalogAudit")]
-    public void EveryOfficialTrackOpeningRouteEitherIdentifiesItselfOrRemainsAmbiguous()
+    public void EveryOfficialTrackOpeningRouteIdentifiesItself()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-official-match-audit-{Guid.NewGuid():N}.db");
         try
@@ -603,7 +603,7 @@ public sealed class LapAnalysisBehaviorTests
                 var arrivalTime = DateTimeOffset.UnixEpoch;
                 foreach (var point in expected.Points)
                 {
-                    if (point.S > 1_150) break;
+                    if (point.S > 1_200) break;
                     SendLiveTrackFrame(module, point, ref sequence, ref arrivalTime);
                     if (module.CurrentTrack is not null) break;
                 }
@@ -621,11 +621,79 @@ public sealed class LapAnalysisBehaviorTests
                 wrongMatches,
                 "No official route may be replaced by a different official event: " +
                 string.Join("; ", wrongMatches));
+            Assert.IsEmpty(
+                unresolved,
+                "Every official route must identify itself within the automatic matching travel limit: " +
+                string.Join("; ", unresolved));
             Console.WriteLine(
                 $"Official matching audit: exact={officialTracks.Length - unresolved.Count}, " +
                 $"unresolved={unresolved.Count}, wrong={wrongMatches.Count}.");
-            if (unresolved.Count > 0)
-                Console.WriteLine("Safely unresolved within 1,150 m: " + string.Join("; ", unresolved));
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("CatalogAudit")]
+    public void EveryOfficialTrackIdentifiesAfterLeavingAnOffsetStartingGrid()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-official-offset-grid-audit-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            PlaygroundOfficialTrackCatalog.EnsureImported(store);
+            var officialTracks = store.ListTracks("fh6_udp_live")
+                .Select(summary => store.LoadTrack(summary.Id)!.Value.Track)
+                .ToArray();
+            var wrongMatches = new List<string>();
+            var unresolved = new List<string>();
+
+            foreach (var expected in officialTracks)
+            {
+                var module = new LapAnalysisModule(store, TelemetrySourceKind.Live);
+                long sequence = 0;
+                var arrivalTime = DateTimeOffset.UnixEpoch;
+                var start = expected.Points[0];
+                var startingGrid = start with
+                {
+                    X = start.X - (start.TangentZ * 79),
+                    Z = start.Z + (start.TangentX * 79)
+                };
+
+                for (var frame = 0; frame < 24; frame++)
+                    SendLiveTrackFrame(module, startingGrid, ref sequence, ref arrivalTime);
+                foreach (var point in expected.Points)
+                {
+                    if (point.S > 1_500) break;
+                    SendLiveTrackFrame(module, point, ref sequence, ref arrivalTime);
+                    if (module.CurrentTrack is not null) break;
+                }
+
+                if (module.CurrentTrack is { } actual && actual.Id != expected.Id)
+                {
+                    wrongMatches.Add($"{expected.Name} -> {actual.Name}");
+                    Console.WriteLine($"{expected.Name} -> {actual.Name}: {DescribeMatchDiagnostics(module)}");
+                }
+                else if (module.CurrentTrack is null)
+                {
+                    unresolved.Add(expected.Name);
+                    Console.WriteLine($"{expected.Name} unresolved: {DescribeMatchDiagnostics(module)}");
+                }
+            }
+
+            Assert.IsEmpty(
+                wrongMatches,
+                "No offset-grid replay may identify a different official event: " +
+                string.Join("; ", wrongMatches));
+            Assert.IsEmpty(
+                unresolved,
+                "Every official route must identify after leaving a start-compatible offset grid: " +
+                string.Join("; ", unresolved));
+            Console.WriteLine(
+                $"Official offset-grid audit: exact={officialTracks.Length - unresolved.Count}, " +
+                $"unresolved={unresolved.Count}, wrong={wrongMatches.Count}.");
         }
         finally
         {
@@ -695,6 +763,61 @@ public sealed class LapAnalysisBehaviorTests
                 sharedStart.MatchDiagnostics.TopCandidates.Any(candidate => candidate.TrackName == "歌利亚"));
             Assert.IsTrue(
                 sharedStart.MatchDiagnostics.TopCandidates.Any(candidate => candidate.TrackName == "传奇岛径道赛"));
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
+    public void OfficialShowcaseRoutesWaitForCarsToLeaveOffsetStartingGrids()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-official-showcase-grid-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            PlaygroundOfficialTrackCatalog.EnsureImported(store);
+            var tracks = store.ListTracks("fh6_udp_live")
+                .Select(summary => store.LoadTrack(summary.Id)!.Value.Track)
+                .ToDictionary(track => track.Name, StringComparer.Ordinal);
+
+            foreach (var name in new[] { "巨人对决", "苦行" })
+            {
+                var expected = tracks[name];
+                var start = expected.Points[0];
+                var startingGrid = start with
+                {
+                    X = start.X - (start.TangentZ * 79),
+                    Z = start.Z + (start.TangentX * 79)
+                };
+                var module = new LapAnalysisModule(store, TelemetrySourceKind.Live);
+                long sequence = 0;
+                var arrivalTime = DateTimeOffset.UnixEpoch;
+
+                for (var frame = 0; frame < 24; frame++)
+                    SendLiveTrackFrame(module, startingGrid, ref sequence, ref arrivalTime);
+
+                Assert.IsNull(
+                    module.CurrentTrack,
+                    $"{name} must remain a candidate while the car is staged outside the recorded route corridor.");
+                Assert.IsFalse(
+                    Hud(module).MatchRejectionEligible,
+                    $"{name} must not be rejected before the car can leave its offset starting grid. " +
+                    DescribeMatchDiagnostics(module));
+
+                foreach (var point in expected.Points)
+                {
+                    if (point.S > 400 || module.CurrentTrack is not null) break;
+                    SendLiveTrackFrame(module, point, ref sequence, ref arrivalTime);
+                }
+
+                Assert.AreEqual(
+                    expected.Id,
+                    module.CurrentTrack?.Id,
+                    $"{name} must identify after the car joins the recorded route. " +
+                    DescribeMatchDiagnostics(module));
+            }
         }
         finally
         {

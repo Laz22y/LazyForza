@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using System.Windows;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
@@ -72,6 +73,46 @@ public sealed class ModuleAndOverlayTests
 
         using var coordinator = new OverlayCoordinator(layout with { Scale = 0.206 });
         Assert.AreEqual(0.21, coordinator.CurrentLayout.Scale, 1e-9);
+    }
+
+    [TestMethod]
+    public void LapAnalysisMapHeightAdaptsWithoutExceedingTheWindow()
+    {
+        foreach (var windowHeight in new[] { 640d, 800d, 1_080d, 1_440d })
+        {
+            var previewHeight = LazyForza.App.LapAnalysisVisualLayout.AdaptiveMapHeight(windowHeight);
+            Assert.IsTrue(previewHeight >= 320);
+            Assert.IsTrue(
+                previewHeight + 48 <= windowHeight + 0.001,
+                $"Preview {previewHeight:0.0}px must fit inside a {windowHeight:0.0}px window.");
+        }
+
+        Assert.AreEqual(460.8, LazyForza.App.LapAnalysisVisualLayout.AdaptiveMapHeight(640), 0.01);
+        Assert.AreEqual(576, LazyForza.App.LapAnalysisVisualLayout.AdaptiveMapHeight(800), 0.01);
+        Assert.AreEqual(777.6, LazyForza.App.LapAnalysisVisualLayout.AdaptiveMapHeight(1_080), 0.01);
+        Assert.AreEqual(900, LazyForza.App.LapAnalysisVisualLayout.AdaptiveMapHeight(1_440), 0.01);
+    }
+
+    [TestMethod]
+    public void LapAnalysisLegendIsCompactAndMovesAwayFromTheCurve()
+    {
+        var renderBounds = new Rect(20, 20, 840, 260);
+        var lowerLeftCurve = Enumerable.Range(0, 40)
+            .Select(index => new Point(32 + index * 5, 238))
+            .ToArray();
+
+        var legend = LazyForza.App.AnalysisOverlayDrawing.SelectSeriesLegendBounds(
+            renderBounds,
+            1,
+            lowerLeftCurve,
+            reservedBounds: null,
+            LazyForza.App.AnalysisLegendCorner.BottomLeft,
+            LazyForza.App.AnalysisLegendCorner.BottomRight);
+
+        Assert.IsTrue(legend.Width <= 258);
+        Assert.AreEqual(38, legend.Height, 0.001);
+        Assert.IsTrue(legend.Left > renderBounds.Left + renderBounds.Width / 2);
+        Assert.IsTrue(renderBounds.Contains(legend));
     }
 
     [TestMethod]
