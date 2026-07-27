@@ -88,6 +88,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private bool automaticMatchRejected;
     private bool automaticMatchStartedMidLap;
     private bool automaticMatchStartedAtConfirmedLine;
+    private bool automaticMatchRouteAcquired;
     private double automaticMatchTravelMeters;
     private int automaticMatchCoarseEligibleCount;
     private Vector3F? automaticMatchPreviousPosition;
@@ -688,6 +689,16 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         SelectFineMatchCandidates();
         foreach (var candidate in automaticMatchCandidates.Values.Where(candidate => candidate.IsFineCandidate))
             candidate.ObserveProjection(raw);
+        if (!automaticMatchRouteAcquired &&
+            automaticMatchCandidates.Values.Any(candidate => candidate.RouteAcquired))
+        {
+            automaticMatchRouteAcquired = true;
+            automaticMatchTravelMeters = 0;
+            automaticMatchPreviousPosition = raw.Position;
+            automaticMatchStartedAt = frame.ArrivalTime;
+            automaticMatchFrames.Clear();
+            automaticMatchFrames.Add(frame);
+        }
 
         var ranked = automaticMatchCandidates.Values
             .Where(candidate => candidate.IsFineCandidate &&
@@ -769,6 +780,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         automaticMatchRejected = false;
         automaticMatchStartedMidLap = allowMidRouteStart;
         automaticMatchStartedAtConfirmedLine = startedAtConfirmedLine;
+        automaticMatchRouteAcquired = false;
         automaticMatchTravelMeters = 0;
         automaticMatchPreviousPosition = null;
         automaticMatchStartedAt = frame.ArrivalTime;
@@ -2369,11 +2381,12 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private sealed class AutomaticMatchCandidate
     {
         private readonly IReadOnlyList<TrackPoint> matchingRoute;
-        private readonly Vector3F initialPosition;
-        private readonly RouteFeature expectedEarlyFeature;
-        private readonly double initialS;
-        private readonly double startTangentX;
-        private readonly double startTangentZ;
+        private readonly bool allowMidRouteStart;
+        private Vector3F initialPosition;
+        private RouteFeature expectedEarlyFeature;
+        private double initialS;
+        private double startTangentX;
+        private double startTangentZ;
         private double distanceTotal;
         private Vector3F lastObservedPosition;
         private Vector3F lastFeaturePosition;
@@ -2385,6 +2398,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         private double curvaturePenalty;
         private bool directionEvaluated;
         private bool curvatureEvaluated;
+        private bool routeAcquired;
 
         public AutomaticMatchCandidate(
             CompatibleTrack saved,
@@ -2393,6 +2407,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         {
             Saved = saved;
             matchingRoute = saved.MatchingRoute;
+            this.allowMidRouteStart = allowMidRouteStart;
             initialPosition = initialFrame.Position;
             lastObservedPosition = initialFrame.Position;
             lastFeaturePosition = initialFrame.Position;
@@ -2422,6 +2437,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         public bool StartEligible { get; }
         public bool IsEliminated => !StartEligible || EliminationReason is not null;
         public bool IsFineCandidate { get; set; }
+        public bool RouteAcquired => routeAcquired;
         public string? EliminationReason { get; private set; }
         public double StartDistanceMeters { get; }
         public int Observations { get; private set; }
@@ -2443,24 +2459,36 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         public void ObserveCoarse(Vector3F position)
         {
             if (IsEliminated) return;
+            if (!routeAcquired)
+            {
+                lastObservedPosition = position;
+                lastFeaturePosition = position;
+                return;
+            }
             UpdateCoarseGeometry(position);
         }
 
         public void ObserveProjection(Fh6RawTelemetry raw)
         {
             if (IsEliminated || !IsFineCandidate) return;
+            var projection = routeAcquired
+                ? TrackAlgorithms.ProjectConstrained(
+                    matchingRoute,
+                    raw.Position.X,
+                    raw.Position.Y,
+                    raw.Position.Z,
+                    ProjectionIndex,
+                    searchBehind: 8,
+                    searchAhead: 96)
+                : Saved.InitialProjection(raw.Position, allowMidRouteStart);
+            var valid = IsFineProjectionValid(projection);
+            if (!routeAcquired)
+            {
+                if (!valid) return;
+                AcquireRoute(projection, raw.Position);
+            }
+
             Observations++;
-            var projection = TrackAlgorithms.ProjectConstrained(
-                matchingRoute,
-                raw.Position.X,
-                raw.Position.Y,
-                raw.Position.Z,
-                ProjectionIndex,
-                searchBehind: 8,
-                searchAhead: 96);
-            var valid = projection.IsValid &&
-                        projection.DistanceMeters <= FineToleranceMeters(Saved.Track) &&
-                        projection.ElevationErrorMeters <= ElevationToleranceMeters(Saved.Track);
             if (!valid)
             {
                 if (Observations >= 16 && ValidRatio < 0.25)
@@ -2482,6 +2510,33 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 EliminationReason =
                     $"长度/进度范围不兼容（行驶 {observedTravelMeters:0} m，路线进度 {ProgressMeters:0} m）";
             }
+        }
+
+        private bool IsFineProjectionValid(ProjectionResult projection) =>
+            projection.IsValid &&
+            projection.DistanceMeters <= FineToleranceMeters(Saved.Track) &&
+            projection.ElevationErrorMeters <= ElevationToleranceMeters(Saved.Track);
+
+        private void AcquireRoute(ProjectionResult projection, Vector3F position)
+        {
+            routeAcquired = true;
+            ProjectionIndex = projection.SegmentIndex;
+            initialS = projection.S;
+            initialPosition = position;
+            lastObservedPosition = position;
+            lastFeaturePosition = position;
+            observedTravelMeters = 0;
+            observedSignedTurn = 0;
+            observedAbsoluteTurn = 0;
+            previousObservedHeading = null;
+            directionPenalty = 0;
+            curvaturePenalty = 0;
+            directionEvaluated = false;
+            curvatureEvaluated = false;
+            var tangent = SegmentDirection(matchingRoute, ProjectionIndex);
+            startTangentX = tangent.X;
+            startTangentZ = tangent.Z;
+            expectedEarlyFeature = CalculateRouteFeature(matchingRoute, ProjectionIndex, 120);
         }
 
         public double Confidence(AutomaticMatchCandidate? runnerUp)
