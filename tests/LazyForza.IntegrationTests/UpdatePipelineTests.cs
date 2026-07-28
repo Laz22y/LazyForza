@@ -55,7 +55,10 @@ public sealed class UpdatePipelineTests
         Assert.AreEqual("LazyForza-1.2.3-win-x64.zip", update.Package.Name);
         Assert.IsNull(update.Package.Size);
         Assert.IsNotNull(update.Checksum);
-        Assert.AreEqual("file-cdn.gitcode.com", update.Package.DownloadUri.Host);
+        Assert.AreEqual("api.gitcode.com", update.Package.DownloadUri.Host);
+        Assert.AreEqual(
+            "/Laz22y/LazyForza/releases/download/v1.2.3/LazyForza-1.2.3-win-x64.zip",
+            update.Package.DownloadUri.AbsolutePath);
         Assert.IsNull(current);
     }
 
@@ -548,9 +551,9 @@ public sealed class UpdatePipelineTests
         var version = tag.TrimStart('v');
         var packageName = $"LazyForza-{version}-win-x64.zip";
         packageUrl ??=
-            $"https://file-cdn.gitcode.com/123/releases/{tag}/{packageName}?auth_key=test";
+            $"https://api.gitcode.com/Laz22y/LazyForza/releases/download/{tag}/{packageName}";
         checksumUrl ??=
-            $"https://file-cdn.gitcode.com/123/releases/{tag}/{packageName}.sha256?auth_key=test";
+            $"https://api.gitcode.com/Laz22y/LazyForza/releases/download/{tag}/{packageName}.sha256";
         return JsonSerializer.Serialize(new
         {
             tag_name = tag,
