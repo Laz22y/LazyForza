@@ -76,11 +76,18 @@ public sealed class GitCodeReleaseClient : UpdateReleaseClientBase
             if (packageDto.Size is > MaxArchiveBytes)
                 throw new UpdateException(
                     $"GitCode 发行版文件大小异常：{packageDto.Size:N0} 字节。");
-            var package = ToAsset(
+            var packageMetadata = ToAsset(
                 packageDto.Name,
                 packageDto.BrowserDownloadUrl,
                 packageDto.Size,
                 packageDto.Digest ?? packageDto.Sha256);
+            ValidateReleaseDownloadUri(packageMetadata.DownloadUri);
+            var package = packageMetadata with
+            {
+                DownloadUri = CreateAttachmentDownloadUri(
+                    release.TagName,
+                    packageDto.Name)
+            };
             ValidateReleaseDownloadUri(package.DownloadUri);
 
             var checksumCandidates = release.Assets.Where(asset =>
@@ -91,13 +98,23 @@ public sealed class GitCodeReleaseClient : UpdateReleaseClientBase
             if (checksumCandidates.Length > 1)
                 throw new UpdateException("GitCode 发行版包含重复的校验和文件。");
             var checksumDto = checksumCandidates.SingleOrDefault();
-            var checksum = checksumDto is null
+            var checksumMetadata = checksumDto is null
                 ? null
                 : ToAsset(
                     checksumDto.Name,
                     checksumDto.BrowserDownloadUrl,
                     checksumDto.Size,
                     checksumDto.Digest ?? checksumDto.Sha256);
+            if (checksumMetadata is not null)
+                ValidateReleaseDownloadUri(checksumMetadata.DownloadUri);
+            var checksum = checksumMetadata is null
+                ? null
+                : checksumMetadata with
+                {
+                    DownloadUri = CreateAttachmentDownloadUri(
+                        release.TagName,
+                        checksumMetadata.Name)
+                };
             if (checksum is not null) ValidateReleaseDownloadUri(checksum.DownloadUri);
             if (!TryParseSha256Digest(package.Digest, out _) && checksum is null)
                 throw new UpdateException(
@@ -142,9 +159,17 @@ public sealed class GitCodeReleaseClient : UpdateReleaseClientBase
 
         if (string.Equals(uri.Host, "api.gitcode.com", StringComparison.OrdinalIgnoreCase))
         {
-            var expectedPrefix =
+            var browserPrefix =
                 $"/{RepositoryOwner}/{RepositoryName}/releases/download/";
-            if (!uri.AbsolutePath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+            var attachmentPrefix =
+                $"/api/v5/repos/{RepositoryOwner}/{RepositoryName}/releases/";
+            var isBrowserDownload =
+                uri.AbsolutePath.StartsWith(browserPrefix, StringComparison.OrdinalIgnoreCase);
+            var isAttachmentApi =
+                uri.AbsolutePath.StartsWith(attachmentPrefix, StringComparison.OrdinalIgnoreCase) &&
+                uri.AbsolutePath.Contains("/attach_files/", StringComparison.OrdinalIgnoreCase) &&
+                uri.AbsolutePath.EndsWith("/download", StringComparison.OrdinalIgnoreCase);
+            if (!isBrowserDownload && !isAttachmentApi)
                 throw new UpdateException("GitCode 发行附件地址不属于 LazyForza 仓库。");
         }
 
@@ -155,6 +180,12 @@ public sealed class GitCodeReleaseClient : UpdateReleaseClientBase
                 throw new UpdateException("GitCode 文件下载地址不属于 LazyForza 仓库。");
         }
     }
+
+    private static Uri CreateAttachmentDownloadUri(string tag, string fileName) =>
+        new(
+            $"https://api.gitcode.com/api/v5/repos/{RepositoryOwner}/{RepositoryName}" +
+            $"/releases/{Uri.EscapeDataString(tag)}/attach_files/" +
+            $"{Uri.EscapeDataString(fileName)}/download");
 
     private sealed class ReleaseResponse
     {
