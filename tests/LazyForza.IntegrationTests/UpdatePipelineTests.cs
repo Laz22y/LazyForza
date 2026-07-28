@@ -57,9 +57,68 @@ public sealed class UpdatePipelineTests
         Assert.IsNotNull(update.Checksum);
         Assert.AreEqual("api.gitcode.com", update.Package.DownloadUri.Host);
         Assert.AreEqual(
-            "/Laz22y/LazyForza/releases/download/v1.2.3/LazyForza-1.2.3-win-x64.zip",
+            "/api/v5/repos/Laz22y/LazyForza/releases/v1.2.3/attach_files/LazyForza-1.2.3-win-x64.zip/download",
             update.Package.DownloadUri.AbsolutePath);
         Assert.IsNull(current);
+    }
+
+    [TestMethod]
+    public async Task GitCodeDownloadUsesDocumentedAttachmentEndpoint()
+    {
+        var root = CreateTempDirectory("lazyforza-gitcode-download");
+        try
+        {
+            var archive = BuildPackageArchive(new Dictionary<string, byte[]>
+            {
+                ["LazyForza.App.exe"] = Encoding.UTF8.GetBytes("gitcode-app"),
+                ["BUILDINFO.txt"] = Encoding.UTF8.GetBytes("LazyForza 1.2.3")
+            });
+            var hash = Convert.ToHexString(SHA256.HashData(archive));
+            var packageName = "LazyForza-1.2.3-win-x64.zip";
+            var packageUri = new Uri(
+                $"https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza/releases/v1.2.3/attach_files/{packageName}/download");
+            var checksumUri = new Uri(
+                $"https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza/releases/v1.2.3/attach_files/{packageName}.sha256/download");
+
+            using var http = new HttpClient(new FakeHttpHandler(request =>
+            {
+                if (request.RequestUri == GitCodeReleaseClient.LatestReleaseApi)
+                    return JsonResponse(GitCodeReleaseJson("v1.2.3"));
+                if (request.RequestUri == packageUri)
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new ByteArrayContent(archive)
+                    };
+                if (request.RequestUri == checksumUri)
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            $"{hash}  {packageName}",
+                            Encoding.ASCII)
+                    };
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }));
+            using var client = new GitCodeReleaseClient(http);
+            var release = await client.CheckForUpdateAsync(
+                new Version(1, 2, 2),
+                CancellationToken.None);
+
+            Assert.IsNotNull(release);
+            var prepared = await client.DownloadAndPrepareAsync(
+                release,
+                root,
+                new Progress<UpdateProgress>(),
+                CancellationToken.None);
+
+            Assert.AreEqual(
+                "gitcode-app",
+                await File.ReadAllTextAsync(
+                    Path.Combine(prepared.PackageRoot, "LazyForza.App.exe")));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
     }
 
     [TestMethod]
