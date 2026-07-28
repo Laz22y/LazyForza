@@ -15,6 +15,7 @@ public sealed class GitCodeReleaseClient : UpdateReleaseClientBase
     private static readonly HashSet<string> TrustedDownloadHosts =
         new(StringComparer.OrdinalIgnoreCase)
         {
+            "api.gitcode.com",
             "gitcode.com",
             "raw.gitcode.com",
             "file-cdn.gitcode.com"
@@ -137,6 +138,14 @@ public sealed class GitCodeReleaseClient : UpdateReleaseClientBase
             var expectedPrefix = $"/{RepositoryOwner}/{RepositoryName}/";
             if (!uri.AbsolutePath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
                 throw new UpdateException("GitCode 原始文件下载地址不属于 LazyForza 仓库。");
+        }
+
+        if (string.Equals(uri.Host, "api.gitcode.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var expectedPrefix =
+                $"/{RepositoryOwner}/{RepositoryName}/releases/download/";
+            if (!uri.AbsolutePath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+                throw new UpdateException("GitCode 发行附件地址不属于 LazyForza 仓库。");
         }
 
         if (string.Equals(uri.Host, "gitcode.com", StringComparison.OrdinalIgnoreCase))
