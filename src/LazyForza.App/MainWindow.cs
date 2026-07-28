@@ -25,7 +25,7 @@ using LazyForza.Update;
 
 namespace LazyForza.App;
 
-internal sealed class MainWindow : Window
+internal sealed partial class MainWindow : Window
 {
     private static readonly FontFamily UiFont = new("Microsoft YaHei UI");
     private static readonly (string IconData, string Title)[] Pages =
@@ -82,7 +82,7 @@ internal sealed class MainWindow : Window
         this.sourceKind = sourceKind;
         this.updateManager = updateManager;
         this.diagnosticCapture = diagnosticCapture;
-        Title = "LazyForza";
+        Title = $"LazyForza {ApplicationVersionInfo.Display}";
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForza.png", UriKind.Absolute));
         Width = 1280;
         Height = 800;
@@ -416,6 +416,20 @@ internal sealed class MainWindow : Window
                     Grid.SetRow(text, row); Grid.SetColumn(text, column); lapTable.Children.Add(text);
                 }
             }
+        }
+
+        if (sessionLaps.Count > 0)
+        {
+            var reviewLaps = competitionClass is int reviewClass
+                ? sessionLaps.Where(lap => lap.Vehicle.CarClass == reviewClass).ToArray()
+                : sessionLaps;
+            stack.Children.Add(BuildCompetitionReviewCard(
+                module.CurrentTrack?.Name ?? hud.TrackName,
+                competitionClass,
+                competitionPi,
+                reviewLaps,
+                showingRecent,
+                pointToPointTimingApproximate));
         }
 
         var initialLapCount = sessionLaps.Count;
@@ -1031,6 +1045,33 @@ internal sealed class MainWindow : Window
             }
 
             var visuals = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var exportRow = new Grid();
+            exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var exportHint = Label(
+                visualLaps.Length == 1 ? "导出单圈分析、速度曲线和走线。" : "导出当前多圈对比、速度曲线和走线。",
+                11,
+                FontWeights.Normal,
+                "MutedBrush");
+            exportHint.VerticalAlignment = VerticalAlignment.Center;
+            exportRow.Children.Add(exportHint);
+            var exportPng = new Button
+            {
+                Content = "导出 PNG",
+                Padding = new Thickness(13, 7, 13, 7),
+                Margin = new Thickness(12, 0, 0, 8),
+                ToolTip = "导出固定尺寸的圈速分析图片"
+            };
+            exportPng.Click += (_, _) => ExportLapComparisonPng(
+                activeTrack?.Name ?? hud.TrackName,
+                activeTrack,
+                visualLaps,
+                legendEntries,
+                cornerAnnotations,
+                pointToPointTimingApproximate);
+            Grid.SetColumn(exportPng, 1);
+            exportRow.Children.Add(exportPng);
+            visuals.Children.Add(exportRow);
             var chartPanel = new Grid { Height = 320 };
             chartPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             chartPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -2725,85 +2766,7 @@ internal sealed class MainWindow : Window
         controls.Children.Add(footer);
         stack.Children.Add(Card(controls));
 
-        var updatePanel = new Grid();
-        updatePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        updatePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        updatePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        updatePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        updatePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        var updateHeading = Label("应用更新", 17, FontWeights.SemiBold);
-        updatePanel.Children.Add(updateHeading);
-        var updateToggle = new ToggleButton
-        {
-            IsChecked = updateManager.CheckOnStartup,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Padding = new Thickness(12, 7, 12, 7)
-        };
-        void RefreshUpdateToggle() =>
-            updateToggle.Content = updateToggle.IsChecked == true ? "启动检查：开" : "启动检查：关";
-        RefreshUpdateToggle();
-        updateToggle.Click += (_, _) =>
-        {
-            updateManager.CheckOnStartup = updateToggle.IsChecked == true;
-            RefreshUpdateToggle();
-        };
-        Grid.SetColumn(updateToggle, 1);
-        updatePanel.Children.Add(updateToggle);
-
-        var updateStatus = Label(
-            $"当前版本 {CurrentApplicationVersion()} · " +
-            (updateManager.CanInstallAutomatically
-                ? "发现新版后由你确认，程序不会强制更新。"
-                : "开发构建仅检查版本，不覆盖开发目录。"),
-            12,
-            FontWeights.Normal,
-            "MutedBrush");
-        updateStatus.Margin = new Thickness(0, 8, 18, 12);
-        Grid.SetRow(updateStatus, 1);
-        Grid.SetColumnSpan(updateStatus, 2);
-        updatePanel.Children.Add(updateStatus);
-
-        var checkNow = new Button
-        {
-            Content = "立即检查",
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Padding = new Thickness(16, 8, 16, 8)
-        };
-        checkNow.Click += async (_, _) =>
-        {
-            checkNow.IsEnabled = false;
-            updateStatus.Text = "正在连接 GitCode，必要时使用 GitHub…";
-            try
-            {
-                var release = await updateManager.CheckAsync(lifetimeCancellation.Token);
-                if (release is null)
-                {
-                    updateStatus.Text = $"已是最新版本 {CurrentApplicationVersion()}。";
-                }
-                else
-                {
-                    await OfferUpdateAsync(release, updateStatus);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                updateStatus.Text = "已取消检查。";
-            }
-            catch (Exception exception)
-            {
-                updateManager.ReportFailure("Manual update check failed", exception);
-                updateStatus.Text = $"检查失败：{exception.Message}";
-            }
-            finally
-            {
-                checkNow.IsEnabled = true;
-            }
-        };
-        Grid.SetRow(checkNow, 2);
-        Grid.SetColumnSpan(checkNow, 2);
-        updatePanel.Children.Add(checkNow);
-        stack.Children.Add(Card(updatePanel));
+        stack.Children.Add(BuildUpdateSettingsCard());
 
         return Scroll(stack);
 
@@ -2898,13 +2861,7 @@ internal sealed class MainWindow : Window
     }
 
     private static string CurrentApplicationVersion()
-    {
-        var version = typeof(MainWindow).Assembly.GetName().Version;
-        if (version is null) return "未知";
-        return version.Build >= 0
-            ? version.ToString(3)
-            : version.ToString(2);
-    }
+        => ApplicationVersionInfo.Display;
 
     private UIElement DiagnosticsPage()
     {

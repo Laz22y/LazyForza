@@ -171,6 +171,33 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
+    public async Task MultiSourceCheckCanPreferGitHubAndFallBackToGitCode()
+    {
+        var gitCodeRequests = 0;
+        using var githubHttp = new HttpClient(new FakeHttpHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        using var gitCodeHttp = new HttpClient(new FakeHttpHandler(request =>
+        {
+            gitCodeRequests++;
+            return request.RequestUri == GitCodeReleaseClient.LatestReleaseApi
+                ? JsonResponse(GitCodeReleaseJson("v1.2.3"))
+                : new HttpResponseMessage(HttpStatusCode.NotFound);
+        }));
+        using var client = new MultiSourceUpdateClient(
+            new GitCodeReleaseClient(gitCodeHttp),
+            new GitHubReleaseClient(githubHttp),
+            UpdateSourceKind.GitHub);
+
+        var update = await client.CheckForUpdateAsync(
+            new Version(1, 2, 2),
+            CancellationToken.None);
+
+        Assert.IsNotNull(update);
+        Assert.AreEqual(UpdateSourceKind.GitCode, update.Source);
+        Assert.AreEqual(1, gitCodeRequests);
+    }
+
+    [TestMethod]
     public async Task MultiSourceDownloadFallsBackToSameGitHubReleaseWhenGitCodeFails()
     {
         var root = CreateTempDirectory("lazyforza-update-source-fallback");

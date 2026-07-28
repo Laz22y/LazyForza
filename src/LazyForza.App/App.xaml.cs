@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.IO;
 using System.Windows;
+using System.ComponentModel;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
@@ -21,10 +22,20 @@ public partial class App : Application
     private RollingLog? log;
     private ApplicationUpdateManager? updateManager;
     private DiagnosticCaptureService? diagnosticCapture;
+    private SingleInstanceCoordinator? singleInstance;
+    private TrayIconService? trayIcon;
+    private bool exitRequested;
+    private bool minimizedNoticeShown;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        singleInstance = SingleInstanceCoordinator.TryAcquire(Dispatcher, ShowMainWindow);
+        if (singleInstance is null)
+        {
+            Shutdown();
+            return;
+        }
         try
         {
             var directories = new DataDirectoryService(DataRoot(e.Args));
@@ -108,7 +119,13 @@ public partial class App : Application
                 source.Kind,
                 updateManager,
                 diagnosticCapture);
+            MainWindow.Closing += OnMainWindowClosing;
             MainWindow.Show();
+            trayIcon = new TrayIconService(
+                SourceModeText(source.Kind),
+                $"{listenAddress}:{port}",
+                ShowMainWindow,
+                () => ExitApplication());
             if (captureDirectory is null && recordSeconds is null)
                 _ = ((MainWindow)MainWindow).CheckForUpdatesOnStartupAsync();
             if (captureDirectory is not null) _ = CaptureQaAsync(captureDirectory);
@@ -117,7 +134,7 @@ public partial class App : Application
         catch (Exception exception)
         {
             MessageBox.Show($"LazyForza could not start.\n\n{exception}", "Startup error", MessageBoxButton.OK, MessageBoxImage.Error);
-            Shutdown(-1);
+            ExitApplication(-1);
         }
     }
 
@@ -133,11 +150,61 @@ public partial class App : Application
         if (diagnosticCapture is not null) await diagnosticCapture.DisposeAsync();
         if (telemetry is not null) await telemetry.DisposeAsync();
         overlay?.Dispose();
+        trayIcon?.Dispose();
+        singleInstance?.Dispose();
         updateManager?.Dispose();
         store?.Dispose();
         log?.Dispose();
         base.OnExit(e);
     }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        exitRequested = true;
+        base.OnSessionEnding(e);
+    }
+
+    internal static void RequestExit() =>
+        ((App)Current).ExitApplication();
+
+    private void OnMainWindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (exitRequested) return;
+        e.Cancel = true;
+        MainWindow.Hide();
+        if (!minimizedNoticeShown)
+        {
+            trayIcon?.ShowMinimizedNotice();
+            minimizedNoticeShown = true;
+        }
+    }
+
+    private void ShowMainWindow()
+    {
+        if (MainWindow is null) return;
+        if (!MainWindow.IsVisible) MainWindow.Show();
+        if (MainWindow.WindowState == WindowState.Minimized)
+            MainWindow.WindowState = WindowState.Normal;
+        MainWindow.Activate();
+        MainWindow.Topmost = true;
+        MainWindow.Topmost = false;
+        MainWindow.Focus();
+    }
+
+    private void ExitApplication(int exitCode = 0)
+    {
+        if (exitRequested) return;
+        exitRequested = true;
+        Shutdown(exitCode);
+    }
+
+    private static string SourceModeText(TelemetrySourceKind kind) => kind switch
+    {
+        TelemetrySourceKind.Live => "Live",
+        TelemetrySourceKind.Replay => "Replay",
+        TelemetrySourceKind.Simulator => "Simulator",
+        _ => kind.ToString()
+    };
 
     private static string? ReplayPath(IReadOnlyList<string> arguments)
     {
@@ -186,14 +253,7 @@ public partial class App : Application
     }
 
     private static string ApplicationVersion()
-    {
-        var version = typeof(App).Assembly.GetName().Version;
-        return version is null
-            ? "unknown"
-            : version.Build >= 0
-                ? version.ToString(3)
-                : version.ToString(2);
-    }
+        => ApplicationVersionInfo.Display;
 
     private async Task AutoRecordAndExitAsync(int seconds)
     {
@@ -206,7 +266,7 @@ public partial class App : Application
         }
         finally
         {
-            Shutdown();
+            ExitApplication();
         }
     }
 
@@ -226,7 +286,7 @@ public partial class App : Application
         }
         finally
         {
-            Shutdown();
+            ExitApplication();
         }
     }
 

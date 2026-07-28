@@ -1,7 +1,7 @@
 <Application x:Class="LazyForza.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             ShutdownMode="OnMainWindowClose">
+             ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
         <SolidColorBrush x:Key="WindowBrush" Color="#0B0F14" />
         <SolidColorBrush x:Key="PanelBrush" Color="#111821" />

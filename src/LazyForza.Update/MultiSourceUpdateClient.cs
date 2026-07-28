@@ -2,34 +2,41 @@ namespace LazyForza.Update;
 
 public sealed class MultiSourceUpdateClient : IDisposable
 {
-    private readonly UpdateReleaseClientBase primary;
-    private readonly UpdateReleaseClientBase fallback;
+    private readonly UpdateReleaseClientBase gitCode;
+    private readonly UpdateReleaseClientBase gitHub;
     private readonly Action<string>? log;
 
-    public MultiSourceUpdateClient(Action<string>? log = null)
-        : this(new GitCodeReleaseClient(), new GitHubReleaseClient(), log)
+    public MultiSourceUpdateClient(
+        UpdateSourceKind preferredSource = UpdateSourceKind.GitCode,
+        Action<string>? log = null)
+        : this(new GitCodeReleaseClient(), new GitHubReleaseClient(), preferredSource, log)
     {
     }
 
     public MultiSourceUpdateClient(
-        UpdateReleaseClientBase primary,
-        UpdateReleaseClientBase fallback,
+        UpdateReleaseClientBase gitCode,
+        UpdateReleaseClientBase gitHub,
+        UpdateSourceKind preferredSource = UpdateSourceKind.GitCode,
         Action<string>? log = null)
     {
-        this.primary = primary ?? throw new ArgumentNullException(nameof(primary));
-        this.fallback = fallback ?? throw new ArgumentNullException(nameof(fallback));
+        this.gitCode = gitCode ?? throw new ArgumentNullException(nameof(gitCode));
+        this.gitHub = gitHub ?? throw new ArgumentNullException(nameof(gitHub));
         this.log = log;
-        if (primary.Source != UpdateSourceKind.GitCode)
-            throw new ArgumentException("主更新源必须是 GitCode。", nameof(primary));
-        if (fallback.Source != UpdateSourceKind.GitHub)
-            throw new ArgumentException("备用更新源必须是 GitHub。", nameof(fallback));
+        if (gitCode.Source != UpdateSourceKind.GitCode)
+            throw new ArgumentException("GitCode 客户端类型不匹配。", nameof(gitCode));
+        if (gitHub.Source != UpdateSourceKind.GitHub)
+            throw new ArgumentException("GitHub 客户端类型不匹配。", nameof(gitHub));
+        PreferredSource = NormalizePreferredSource(preferredSource);
     }
+
+    public UpdateSourceKind PreferredSource { get; set; }
 
     public async Task<UpdateReleaseInfo?> CheckForUpdateAsync(
         Version currentVersion,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(currentVersion);
+        var (primary, fallback) = OrderedClients();
         log?.Invoke(
             $"Checking {primary.SourceName} releases. Current version: {currentVersion.ToString(3)}.");
         try
@@ -86,8 +93,14 @@ public sealed class MultiSourceUpdateClient : IDisposable
         ArgumentNullException.ThrowIfNull(release);
         var selectedClient = release.Source switch
         {
-            UpdateSourceKind.GitCode => primary,
-            UpdateSourceKind.GitHub => fallback,
+            UpdateSourceKind.GitCode => gitCode,
+            UpdateSourceKind.GitHub => gitHub,
+            _ => throw new UpdateException($"不支持的更新来源：{release.Source}。")
+        };
+        var alternateClient = release.Source switch
+        {
+            UpdateSourceKind.GitCode => gitHub,
+            UpdateSourceKind.GitHub => gitCode,
             _ => throw new UpdateException($"不支持的更新来源：{release.Source}。")
         };
 
@@ -103,18 +116,18 @@ public sealed class MultiSourceUpdateClient : IDisposable
         {
             throw;
         }
-        catch (Exception primaryException) when (release.Source == UpdateSourceKind.GitCode)
+        catch (Exception primaryException)
         {
             log?.Invoke(
-                $"GitCode update download failed: " +
+                $"{selectedClient.SourceName} update download failed: " +
                 $"{primaryException.GetType().Name}: {primaryException.Message}");
             progress?.Report(new UpdateProgress(
-                "GitCode 下载或校验失败，正在切换到 GitHub…"));
+                $"{selectedClient.SourceName} 下载或校验失败，正在切换到 {alternateClient.SourceName}…"));
 
             UpdateReleaseInfo? fallbackRelease;
             try
             {
-                fallbackRelease = await fallback.CheckForUpdateAsync(
+                fallbackRelease = await alternateClient.CheckForUpdateAsync(
                     new Version(0, 0, 0),
                     cancellationToken).ConfigureAwait(false);
             }
@@ -125,17 +138,17 @@ public sealed class MultiSourceUpdateClient : IDisposable
             catch (Exception fallbackCheckException)
             {
                 throw new UpdateException(
-                    "GitCode 更新下载失败，GitHub 备用源也无法取得发行版信息。",
+                    $"{selectedClient.SourceName} 更新下载失败，{alternateClient.SourceName} 备用源也无法取得发行版信息。",
                     fallbackCheckException);
             }
 
             if (fallbackRelease is null || fallbackRelease.Version != release.Version)
                 throw new UpdateException(
-                    $"GitCode 更新下载失败，GitHub 当前发行版不是同一版本 {release.Version.ToString(3)}。",
+                    $"{selectedClient.SourceName} 更新下载失败，{alternateClient.SourceName} 当前发行版不是同一版本 {release.Version.ToString(3)}。",
                     primaryException);
 
-            log?.Invoke($"Retrying release {release.Tag} from GitHub.");
-            return await fallback.DownloadAndPrepareAsync(
+            log?.Invoke($"Retrying release {release.Tag} from {alternateClient.SourceName}.");
+            return await alternateClient.DownloadAndPrepareAsync(
                 fallbackRelease,
                 updatesRoot,
                 progress,
@@ -145,8 +158,16 @@ public sealed class MultiSourceUpdateClient : IDisposable
 
     public void Dispose()
     {
-        primary.Dispose();
-        fallback.Dispose();
+        gitCode.Dispose();
+        gitHub.Dispose();
         GC.SuppressFinalize(this);
     }
+
+    private (UpdateReleaseClientBase Primary, UpdateReleaseClientBase Fallback) OrderedClients() =>
+        NormalizePreferredSource(PreferredSource) == UpdateSourceKind.GitHub
+            ? (gitHub, gitCode)
+            : (gitCode, gitHub);
+
+    private static UpdateSourceKind NormalizePreferredSource(UpdateSourceKind source) =>
+        source == UpdateSourceKind.GitHub ? UpdateSourceKind.GitHub : UpdateSourceKind.GitCode;
 }
