@@ -1,19 +1,34 @@
 namespace LazyForza.Update;
 
-public sealed record GitHubReleaseAsset(
+public enum UpdateSourceKind
+{
+    GitCode,
+    GitHub
+}
+
+public sealed record UpdateReleaseAsset(
     string Name,
     Uri DownloadUri,
-    long Size,
+    long? Size,
     string? Digest);
 
-public sealed record GitHubReleaseInfo(
+public sealed record UpdateReleaseInfo(
     Version Version,
     string Tag,
     string Name,
     string Notes,
     Uri PageUri,
-    GitHubReleaseAsset Package,
-    GitHubReleaseAsset? Checksum);
+    UpdateReleaseAsset Package,
+    UpdateReleaseAsset? Checksum,
+    UpdateSourceKind Source)
+{
+    public string SourceName => Source switch
+    {
+        UpdateSourceKind.GitCode => "GitCode",
+        UpdateSourceKind.GitHub => "GitHub",
+        _ => Source.ToString()
+    };
+}
 
 public sealed record UpdateProgress(
     string Stage,

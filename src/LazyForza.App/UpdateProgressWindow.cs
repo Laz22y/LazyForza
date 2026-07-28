@@ -34,7 +34,7 @@ internal sealed class UpdateProgressWindow : Window
         });
         status = new TextBlock
         {
-            Text = "正在连接 GitHub…",
+            Text = "正在连接 GitCode，必要时使用 GitHub…",
             FontSize = 12,
             Foreground = (Brush)Application.Current.FindResource("MutedBrush"),
             Margin = new Thickness(0, 7, 0, 10)

@@ -10,7 +10,7 @@ internal sealed class ApplicationUpdateManager : IDisposable
 
     private readonly LazyForzaStore store;
     private readonly DataDirectoryService directories;
-    private readonly GitHubReleaseClient client;
+    private readonly MultiSourceUpdateClient client;
     private readonly Action<string> log;
 
     public ApplicationUpdateManager(
@@ -21,7 +21,7 @@ internal sealed class ApplicationUpdateManager : IDisposable
         this.store = store;
         this.directories = directories;
         this.log = log;
-        client = new GitHubReleaseClient();
+        client = new MultiSourceUpdateClient(log);
         WindowsUpdateLauncher.CleanupCompletedUpdates(directories.UpdatesPath);
     }
 
@@ -52,18 +52,11 @@ internal sealed class ApplicationUpdateManager : IDisposable
     public bool CanInstallAutomatically =>
         WindowsUpdateLauncher.IsPackagedInstall(AppContext.BaseDirectory);
 
-    public async Task<GitHubReleaseInfo?> CheckAsync(CancellationToken cancellationToken)
-    {
-        log($"Checking GitHub releases. Current version: {CurrentVersion.ToString(3)}.");
-        var release = await client.CheckForUpdateAsync(CurrentVersion, cancellationToken);
-        log(release is null
-            ? "No newer stable GitHub release is available."
-            : $"GitHub release {release.Tag} is available.");
-        return release;
-    }
+    public Task<UpdateReleaseInfo?> CheckAsync(CancellationToken cancellationToken) =>
+        client.CheckForUpdateAsync(CurrentVersion, cancellationToken);
 
     public Task<PreparedUpdate> DownloadAsync(
-        GitHubReleaseInfo release,
+        UpdateReleaseInfo release,
         IProgress<UpdateProgress> progress,
         CancellationToken cancellationToken) =>
         client.DownloadAndPrepareAsync(release, directories.UpdatesPath, progress, cancellationToken);
