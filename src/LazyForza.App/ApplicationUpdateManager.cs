@@ -7,6 +7,7 @@ namespace LazyForza.App;
 internal sealed class ApplicationUpdateManager : IDisposable
 {
     internal const string CheckOnStartupSetting = "updates.checkOnStartup";
+    internal const string PreferredSourceSetting = "updates.preferredSource";
 
     private readonly LazyForzaStore store;
     private readonly DataDirectoryService directories;
@@ -21,7 +22,7 @@ internal sealed class ApplicationUpdateManager : IDisposable
         this.store = store;
         this.directories = directories;
         this.log = log;
-        client = new MultiSourceUpdateClient(log);
+        client = new MultiSourceUpdateClient(PreferredSource, log);
         WindowsUpdateLauncher.CleanupCompletedUpdates(directories.UpdatesPath);
     }
 
@@ -48,6 +49,30 @@ internal sealed class ApplicationUpdateManager : IDisposable
         }
         set => store.SetAppSetting(CheckOnStartupSetting, value.ToString());
     }
+
+    public UpdateSourceKind PreferredSource
+    {
+        get
+        {
+            var saved = store.GetAppSetting(PreferredSourceSetting);
+            return Enum.TryParse<UpdateSourceKind>(saved, true, out var source) &&
+                   source == UpdateSourceKind.GitHub
+                ? UpdateSourceKind.GitHub
+                : UpdateSourceKind.GitCode;
+        }
+        set
+        {
+            var normalized = value == UpdateSourceKind.GitHub
+                ? UpdateSourceKind.GitHub
+                : UpdateSourceKind.GitCode;
+            store.SetAppSetting(PreferredSourceSetting, normalized.ToString());
+            client.PreferredSource = normalized;
+        }
+    }
+
+    public string PreferredSourceName => PreferredSource == UpdateSourceKind.GitHub ? "GitHub" : "GitCode";
+
+    public string FallbackSourceName => PreferredSource == UpdateSourceKind.GitHub ? "GitCode" : "GitHub";
 
     public bool CanInstallAutomatically =>
         WindowsUpdateLauncher.IsPackagedInstall(AppContext.BaseDirectory);
@@ -76,7 +101,7 @@ internal sealed class ApplicationUpdateManager : IDisposable
             directories.Root,
             Environment.ProcessId);
         log($"Update installer started as PID {process.Id}. Preparing to exit.");
-        System.Windows.Application.Current.Shutdown();
+        App.RequestExit();
     }
 
     public void ReportFailure(string context, Exception exception) =>
