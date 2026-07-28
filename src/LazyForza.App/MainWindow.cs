@@ -2119,7 +2119,7 @@ internal sealed class MainWindow : Window
         _ => "驱动未知"
     };
 
-    private async Task OfferUpdateAsync(GitHubReleaseInfo release, TextBlock? status = null)
+    private async Task OfferUpdateAsync(UpdateReleaseInfo release, TextBlock? status = null)
     {
         status?.SetCurrentValue(
             TextBlock.TextProperty,
@@ -2773,7 +2773,7 @@ internal sealed class MainWindow : Window
         checkNow.Click += async (_, _) =>
         {
             checkNow.IsEnabled = false;
-            updateStatus.Text = "正在连接 GitHub…";
+            updateStatus.Text = "正在连接 GitCode，必要时使用 GitHub…";
             try
             {
                 var release = await updateManager.CheckAsync(lifetimeCancellation.Token);

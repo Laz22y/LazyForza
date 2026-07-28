@@ -33,6 +33,184 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
+    public async Task GitCodeLatestReleaseAcceptsUploadedAssetsWithoutSizeAndRequiresChecksum()
+    {
+        var json = GitCodeReleaseJson("v1.2.3");
+        using var http = new HttpClient(new FakeHttpHandler(request =>
+            request.RequestUri == GitCodeReleaseClient.LatestReleaseApi
+                ? JsonResponse(json)
+                : new HttpResponseMessage(HttpStatusCode.NotFound)));
+        using var client = new GitCodeReleaseClient(http);
+
+        var update = await client.CheckForUpdateAsync(
+            new Version(1, 2, 2),
+            CancellationToken.None);
+        var current = await client.CheckForUpdateAsync(
+            new Version(1, 2, 3),
+            CancellationToken.None);
+
+        Assert.IsNotNull(update);
+        Assert.AreEqual(UpdateSourceKind.GitCode, update.Source);
+        Assert.AreEqual("GitCode", update.SourceName);
+        Assert.AreEqual("LazyForza-1.2.3-win-x64.zip", update.Package.Name);
+        Assert.IsNull(update.Package.Size);
+        Assert.IsNotNull(update.Checksum);
+        Assert.AreEqual("file-cdn.gitcode.com", update.Package.DownloadUri.Host);
+        Assert.IsNull(current);
+    }
+
+    [TestMethod]
+    public async Task MultiSourceCheckPrefersGitCodeWithoutContactingGitHub()
+    {
+        var githubRequests = 0;
+        using var gitCodeHttp = new HttpClient(new FakeHttpHandler(request =>
+            request.RequestUri == GitCodeReleaseClient.LatestReleaseApi
+                ? JsonResponse(GitCodeReleaseJson("v1.2.3"))
+                : new HttpResponseMessage(HttpStatusCode.NotFound)));
+        using var githubHttp = new HttpClient(new FakeHttpHandler(_ =>
+        {
+            githubRequests++;
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+        }));
+        using var client = new MultiSourceUpdateClient(
+            new GitCodeReleaseClient(gitCodeHttp),
+            new GitHubReleaseClient(githubHttp));
+
+        var update = await client.CheckForUpdateAsync(
+            new Version(1, 2, 2),
+            CancellationToken.None);
+
+        Assert.IsNotNull(update);
+        Assert.AreEqual(UpdateSourceKind.GitCode, update.Source);
+        Assert.AreEqual(0, githubRequests);
+    }
+
+    [TestMethod]
+    public async Task MultiSourceCheckFallsBackToGitHubWhenGitCodeFails()
+    {
+        var packageBytes = Encoding.UTF8.GetBytes("package");
+        var hash = Convert.ToHexString(SHA256.HashData(packageBytes)).ToLowerInvariant();
+        using var gitCodeHttp = new HttpClient(new FakeHttpHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        using var githubHttp = new HttpClient(new FakeHttpHandler(request =>
+            request.RequestUri == GitHubReleaseClient.LatestReleaseApi
+                ? JsonResponse(ReleaseJson("v1.2.3", packageBytes.Length, $"sha256:{hash}"))
+                : new HttpResponseMessage(HttpStatusCode.NotFound)));
+        using var client = new MultiSourceUpdateClient(
+            new GitCodeReleaseClient(gitCodeHttp),
+            new GitHubReleaseClient(githubHttp));
+
+        var update = await client.CheckForUpdateAsync(
+            new Version(1, 2, 2),
+            CancellationToken.None);
+
+        Assert.IsNotNull(update);
+        Assert.AreEqual(UpdateSourceKind.GitHub, update.Source);
+    }
+
+    [TestMethod]
+    public async Task MultiSourceDownloadFallsBackToSameGitHubReleaseWhenGitCodeFails()
+    {
+        var root = CreateTempDirectory("lazyforza-update-source-fallback");
+        try
+        {
+            var archive = BuildPackageArchive(new Dictionary<string, byte[]>
+            {
+                ["LazyForza.App.exe"] = Encoding.UTF8.GetBytes("new-app"),
+                ["BUILDINFO.txt"] = Encoding.UTF8.GetBytes("LazyForza 1.2.3")
+            });
+            var hash = Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant();
+            var packageName = "LazyForza-1.2.3-win-x64.zip";
+            var gitCodePackageUri = new Uri(
+                $"https://file-cdn.gitcode.com/123/releases/v1.2.3/{packageName}?auth_key=test");
+            var gitCodeChecksumUri = new Uri(
+                $"https://file-cdn.gitcode.com/123/releases/v1.2.3/{packageName}.sha256?auth_key=test");
+            var githubPackageUri = new Uri(
+                $"https://github.com/Laz22y/LazyForza/releases/download/v1.2.3/{packageName}");
+
+            using var gitCodeHttp = new HttpClient(new FakeHttpHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.BadGateway)));
+            using var githubHttp = new HttpClient(new FakeHttpHandler(request =>
+            {
+                if (request.RequestUri == GitHubReleaseClient.LatestReleaseApi)
+                    return JsonResponse(ReleaseJson(
+                        "v1.2.3",
+                        archive.Length,
+                        $"sha256:{hash}"));
+                if (request.RequestUri == githubPackageUri)
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new ByteArrayContent(archive)
+                    };
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }));
+            using var client = new MultiSourceUpdateClient(
+                new GitCodeReleaseClient(gitCodeHttp),
+                new GitHubReleaseClient(githubHttp));
+            var gitCodeRelease = new UpdateReleaseInfo(
+                new Version(1, 2, 3),
+                "v1.2.3",
+                "LazyForza 1.2.3",
+                string.Empty,
+                GitCodeReleaseClient.RepositoryPage,
+                new UpdateReleaseAsset(packageName, gitCodePackageUri, null, null),
+                new UpdateReleaseAsset(
+                    $"{packageName}.sha256",
+                    gitCodeChecksumUri,
+                    null,
+                    null),
+                UpdateSourceKind.GitCode);
+
+            var prepared = await client.DownloadAndPrepareAsync(
+                gitCodeRelease,
+                root,
+                new Progress<UpdateProgress>(),
+                CancellationToken.None);
+
+            Assert.AreEqual(new Version(1, 2, 3), prepared.Version);
+            Assert.AreEqual(
+                "new-app",
+                await File.ReadAllTextAsync(
+                    Path.Combine(prepared.PackageRoot, "LazyForza.App.exe")));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task MultiSourceCheckReportsFailureWhenBothSourcesFail()
+    {
+        using var gitCodeHttp = new HttpClient(new FakeHttpHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        using var githubHttp = new HttpClient(new FakeHttpHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.BadGateway)));
+        using var client = new MultiSourceUpdateClient(
+            new GitCodeReleaseClient(gitCodeHttp),
+            new GitHubReleaseClient(githubHttp));
+
+        var exception = await Assert.ThrowsExactlyAsync<UpdateException>(() =>
+            client.CheckForUpdateAsync(new Version(1, 2, 2), CancellationToken.None));
+
+        StringAssert.Contains(exception.Message, "GitCode");
+        StringAssert.Contains(exception.Message, "GitHub");
+    }
+
+    [TestMethod]
+    public async Task GitCodeRejectsReleaseAssetOnUntrustedHost()
+    {
+        var json = GitCodeReleaseJson(
+            "v1.2.3",
+            packageUrl: "https://example.invalid/LazyForza-1.2.3-win-x64.zip");
+        using var http = new HttpClient(new FakeHttpHandler(_ => JsonResponse(json)));
+        using var client = new GitCodeReleaseClient(http);
+
+        await Assert.ThrowsExactlyAsync<UpdateException>(() =>
+            client.CheckForUpdateAsync(new Version(1, 2, 2), CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task DownloadRequiresOuterDigestAndVerifiedInternalManifest()
     {
         var root = CreateTempDirectory("lazyforza-update-download");
@@ -53,18 +231,19 @@ public sealed class UpdatePipelineTests
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
             }));
             using var client = new GitHubReleaseClient(http);
-            var release = new GitHubReleaseInfo(
+            var release = new UpdateReleaseInfo(
                 new Version(1, 2, 3),
                 "v1.2.3",
                 "LazyForza 1.2.3",
                 string.Empty,
                 new Uri("https://github.com/Laz22y/LazyForza/releases/tag/v1.2.3"),
-                new GitHubReleaseAsset(
+                new UpdateReleaseAsset(
                     "LazyForza-1.2.3-win-x64.zip",
                     packageUri,
                     archive.Length,
                     $"sha256:{hash}"),
-                null);
+                null,
+                UpdateSourceKind.GitHub);
 
             var prepared = await client.DownloadAndPrepareAsync(
                 release,
@@ -107,14 +286,19 @@ public sealed class UpdatePipelineTests
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
             }));
             using var client = new GitHubReleaseClient(http);
-            var release = new GitHubReleaseInfo(
+            var release = new UpdateReleaseInfo(
                 new Version(1, 2, 3),
                 "v1.2.3",
                 "LazyForza 1.2.3",
                 string.Empty,
                 new Uri("https://github.com/Laz22y/LazyForza/releases/tag/v1.2.3"),
-                new GitHubReleaseAsset(packageName, packageUri, archive.Length, null),
-                new GitHubReleaseAsset($"{packageName}.sha256", checksumUri, checksumBytes.Length, null));
+                new UpdateReleaseAsset(packageName, packageUri, archive.Length, null),
+                new UpdateReleaseAsset(
+                    $"{packageName}.sha256",
+                    checksumUri,
+                    checksumBytes.Length,
+                    null),
+                UpdateSourceKind.GitHub);
 
             var prepared = await client.DownloadAndPrepareAsync(
                 release,
@@ -351,6 +535,39 @@ public sealed class UpdatePipelineTests
                     size = packageSize,
                     digest,
                     browser_download_url = $"https://github.com/Laz22y/LazyForza/releases/download/{tag}/{name}"
+                }
+            }
+        });
+    }
+
+    private static string GitCodeReleaseJson(
+        string tag,
+        string? packageUrl = null,
+        string? checksumUrl = null)
+    {
+        var version = tag.TrimStart('v');
+        var packageName = $"LazyForza-{version}-win-x64.zip";
+        packageUrl ??=
+            $"https://file-cdn.gitcode.com/123/releases/{tag}/{packageName}?auth_key=test";
+        checksumUrl ??=
+            $"https://file-cdn.gitcode.com/123/releases/{tag}/{packageName}.sha256?auth_key=test";
+        return JsonSerializer.Serialize(new
+        {
+            tag_name = tag,
+            prerelease = false,
+            name = $"LazyForza {version}",
+            body = "Stable",
+            assets = new[]
+            {
+                new
+                {
+                    name = packageName,
+                    browser_download_url = packageUrl
+                },
+                new
+                {
+                    name = $"{packageName}.sha256",
+                    browser_download_url = checksumUrl
                 }
             }
         });
