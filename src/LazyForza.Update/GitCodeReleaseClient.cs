@@ -120,15 +120,20 @@ public sealed class GitCodeReleaseClient : UpdateReleaseClientBase
                 throw new UpdateException(
                     $"GitCode 发行版缺少 {expectedName}.sha256，无法安全验证下载文件。");
 
+            var metadata = UpdateReleaseMetadata.Parse(
+                release.Body,
+                currentVersion,
+                version);
             return new UpdateReleaseInfo(
                 version,
                 release.TagName,
                 string.IsNullOrWhiteSpace(release.Name) ? release.TagName : release.Name,
-                release.Body ?? string.Empty,
+                metadata.Notes,
                 RepositoryPage,
                 package,
                 checksum,
-                Source);
+                Source,
+                metadata.Type);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

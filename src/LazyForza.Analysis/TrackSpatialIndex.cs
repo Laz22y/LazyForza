@@ -9,6 +9,9 @@ namespace LazyForza.Analysis;
 /// </summary>
 public sealed class TrackSpatialIndex
 {
+    [ThreadStatic]
+    private static HashSet<int>? reusableSegmentBuffer;
+
     private readonly IReadOnlyList<TrackPoint> route;
     private readonly Dictionary<GridCell, int[]> segmentsByCell;
     private readonly double cellSizeMeters;
@@ -64,7 +67,10 @@ public sealed class TrackSpatialIndex
         double z,
         double searchRadiusMeters)
     {
-        var segmentIndices = QuerySegmentIndices(x, z, searchRadiusMeters);
+        ValidateSearchRadius(searchRadiusMeters);
+        var segmentIndices = reusableSegmentBuffer ??= [];
+        segmentIndices.Clear();
+        CollectSegmentIndices(x, z, searchRadiusMeters, segmentIndices);
         return segmentIndices.Count == 0
             ? ProjectionResult.Invalid
             : TrackAlgorithms.ProjectSegments(route, x, y, z, segmentIndices);
@@ -75,21 +81,34 @@ public sealed class TrackSpatialIndex
         double z,
         double searchRadiusMeters)
     {
-        if (!double.IsFinite(searchRadiusMeters) || searchRadiusMeters < 0)
-            throw new ArgumentOutOfRangeException(nameof(searchRadiusMeters));
+        ValidateSearchRadius(searchRadiusMeters);
+        var result = new HashSet<int>();
+        CollectSegmentIndices(x, z, searchRadiusMeters, result);
+        return result.Order().ToArray();
+    }
 
+    private void CollectSegmentIndices(
+        double x,
+        double z,
+        double searchRadiusMeters,
+        HashSet<int> result)
+    {
         var minX = Cell(x - searchRadiusMeters);
         var maxX = Cell(x + searchRadiusMeters);
         var minZ = Cell(z - searchRadiusMeters);
         var maxZ = Cell(z + searchRadiusMeters);
-        var result = new HashSet<int>();
         for (var cellX = minX; cellX <= maxX; cellX++)
         for (var cellZ = minZ; cellZ <= maxZ; cellZ++)
         {
             if (!segmentsByCell.TryGetValue(new GridCell(cellX, cellZ), out var segments)) continue;
             foreach (var segment in segments) result.Add(segment);
         }
-        return result.Order().ToArray();
+    }
+
+    private static void ValidateSearchRadius(double searchRadiusMeters)
+    {
+        if (!double.IsFinite(searchRadiusMeters) || searchRadiusMeters < 0)
+            throw new ArgumentOutOfRangeException(nameof(searchRadiusMeters));
     }
 
     private int Cell(double coordinate) => (int)Math.Floor(coordinate / cellSizeMeters);

@@ -7,6 +7,10 @@ param(
     [Parameter(Mandatory)]
     [string]$ReleaseNotesPath,
 
+    [Parameter(Mandatory)]
+    [ValidateSet('MajorFeature', 'Feature', 'Fix')]
+    [string]$UpdateType,
+
     [string]$TagMessage,
 
     [switch]$SkipBuild,
@@ -23,7 +27,41 @@ $tag = "v$Version"
 $packageName = "LazyForza-$Version-win-x64.zip"
 $packagePath = Join-Path $releaseRoot $packageName
 $checksumPath = "$packagePath.sha256"
-$expectedTitle = "LazyForza $Version"
+$majorFeatureLabel = -join @(
+    [char]0x91CD,
+    [char]0x5927,
+    [char]0x529F,
+    [char]0x80FD,
+    [char]0x66F4,
+    [char]0x65B0)
+$featureLabel = -join @(
+    [char]0x529F,
+    [char]0x80FD,
+    [char]0x66F4,
+    [char]0x65B0)
+$fixLabel = -join @(
+    [char]0x4FEE,
+    [char]0x590D,
+    [char]0x66F4,
+    [char]0x65B0)
+$updateTypeMetadata = @{
+    MajorFeature = @{
+        Label = $majorFeatureLabel
+        Marker = 'major-feature'
+    }
+    Feature = @{
+        Label = $featureLabel
+        Marker = 'feature'
+    }
+    Fix = @{
+        Label = $fixLabel
+        Marker = 'fix'
+    }
+}
+$selectedUpdateType = $updateTypeMetadata[$UpdateType]
+$baseTitle = "LazyForza $Version"
+$expectedTitle = "$baseTitle $([char]0x00B7) $($selectedUpdateType.Label)"
+$updateTypeMarker = "<!-- lazyforza-update-type: $($selectedUpdateType.Marker) -->"
 $githubRepository = 'Laz22y/LazyForza'
 $gitCodeRepositoryUri = 'https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza'
 $gitCodeCredentialTarget = 'LazyForza-GitCode-Release'
@@ -331,7 +369,10 @@ $notes = [string](Get-Content -LiteralPath $notesPath -Raw -Encoding UTF8)
 if ([string]::IsNullOrWhiteSpace($notes)) {
     throw 'Release notes are empty.'
 }
-if ($notes -match "(?m)^#\s*$([regex]::Escape($expectedTitle))\s*$") {
+$publishedNotes = "$updateTypeMarker`r`n`r`n$($notes.Trim())"
+$publishedNotesPath = Join-Path $logRoot "release-notes-published-$Version.md"
+Set-Content -LiteralPath $publishedNotesPath -Value $publishedNotes -Encoding UTF8
+if ($notes -match "(?m)^#\s*($([regex]::Escape($baseTitle))|$([regex]::Escape($expectedTitle)))\s*$") {
     throw 'Release notes must not repeat the release title as a top-level heading.'
 }
 $validationHeading = -join @([char]0x9A8C, [char]0x8BC1)
@@ -363,6 +404,7 @@ if ($projectVersion -match '-') {
 if ($ValidateOnly) {
     Write-Output 'RELEASE_INPUTS_OK=True'
     Write-Output "VERSION=$Version"
+    Write-Output "UPDATE_TYPE=$UpdateType"
     Write-Output "NOTES=$notesPath"
     return
 }
@@ -463,7 +505,7 @@ try {
         $checksumPath `
         --repo $githubRepository `
         --title $expectedTitle `
-        --notes-file $notesPath `
+        --notes-file $publishedNotesPath `
         --verify-tag
     Assert-LastExitCode -Operation 'Create GitHub release'
 
@@ -477,6 +519,10 @@ try {
     if ($githubPackage.Count -ne 1 -or
         $githubPackage[0].digest -ne "sha256:$($localHash.ToLowerInvariant())") {
         throw 'GitHub package digest verification failed.'
+    }
+    if ($githubRelease.name -ne $expectedTitle -or
+        -not ([string]$githubRelease.body).Contains($updateTypeMarker)) {
+        throw 'GitHub release update-type metadata verification failed.'
     }
 }
 finally {
@@ -527,7 +573,7 @@ try {
         $gitCodePayload = @{
             tag_name = $tag
             name = $expectedTitle
-            body = $notes
+            body = $publishedNotes
             target_commitish = 'main'
             release_status = 'latest'
         } | ConvertTo-Json
@@ -565,6 +611,7 @@ try {
             Where-Object { $_.name -in @($packageName, "$packageName.sha256") })
         if ($gitCodeRelease.tag_name -ne $tag -or
             $gitCodeRelease.name -ne $expectedTitle -or
+            -not ([string]$gitCodeRelease.body).Contains($updateTypeMarker) -or
             $binaryAssets.Count -ne 2) {
             throw 'GitCode release metadata verification failed.'
         }
