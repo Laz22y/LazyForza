@@ -247,8 +247,7 @@ function Test-ReleaseDestinations {
         if ($githubLogin -ne 'Laz22y') {
             throw "Unexpected GitHub account: $githubLogin"
         }
-        gh release view $tag --repo $githubRepository *> $null
-        if ($LASTEXITCODE -eq 0) {
+        if (Test-GitHubReleaseExists -ReleaseTag $tag) {
             throw "GitHub release $tag already exists; refusing to overwrite it."
         }
     }
@@ -301,6 +300,23 @@ function Test-ReleaseDestinations {
             [LazyForzaReleaseCredentialReader]::CredFree($preflightCredentialPtr)
         }
         $preflightToken = $null
+    }
+}
+
+function Test-GitHubReleaseExists {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ReleaseTag
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'SilentlyContinue'
+        gh release view $ReleaseTag --repo $githubRepository *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
     }
 }
 
@@ -436,8 +452,7 @@ try {
         throw "Unexpected GitHub account: $githubLogin"
     }
 
-    gh release view $tag --repo $githubRepository *> $null
-    if ($LASTEXITCODE -eq 0) {
+    if (Test-GitHubReleaseExists -ReleaseTag $tag) {
         throw "GitHub release $tag already exists; refusing to overwrite it."
     }
     gh release create $tag `
