@@ -16,8 +16,8 @@ public sealed class StorageTests
         {
             using var first = new LazyForzaStore(firstPath);
             using var second = new LazyForzaStore(secondPath);
-            Assert.AreEqual(8, first.SchemaVersion);
-            Assert.AreEqual(8, second.SchemaVersion);
+            Assert.AreEqual(9, first.SchemaVersion);
+            Assert.AreEqual(9, second.SchemaVersion);
             await first.SetAsync("dashboard", "enabled", "True", CancellationToken.None);
             Assert.AreEqual("True", await first.GetAsync("dashboard", "enabled", CancellationToken.None));
             Assert.IsNull(await second.GetAsync("dashboard", "enabled", CancellationToken.None));
@@ -177,7 +177,7 @@ public sealed class StorageTests
         try
         {
             using (var initialized = new LazyForzaStore(path))
-                Assert.AreEqual(8, initialized.SchemaVersion);
+                Assert.AreEqual(9, initialized.SchemaVersion);
 
             using (var raw = new WinSqliteDatabase(path))
             {
@@ -196,7 +196,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(8, migrated.SchemaVersion);
+            Assert.AreEqual(9, migrated.SchemaVersion);
             var profile = migrated.ListVehicleProfiles().Single();
             Assert.AreEqual("2014 Alfa Romeo 4C", profile.CustomName);
             Assert.IsFalse(profile.ShiftRecommendationsEnabled);
@@ -272,6 +272,9 @@ public sealed class StorageTests
                     "CREATE TABLE ShiftTargets(VehicleProfileId TEXT NOT NULL,FromGear INTEGER NOT NULL,ToGear INTEGER NOT NULL,TargetRpm REAL NOT NULL," +
                     "CueRpm REAL NOT NULL,AfterRpm REAL NOT NULL,Confidence REAL NOT NULL,AlgorithmVersion TEXT NOT NULL," +
                     "PRIMARY KEY(VehicleProfileId,FromGear,ToGear));" +
+                    "CREATE TABLE LapSamples(LapId TEXT NOT NULL,S REAL NOT NULL,ElapsedSeconds REAL NOT NULL," +
+                    "SpeedMps REAL NOT NULL,Rpm REAL NOT NULL,Gear INTEGER NOT NULL,Accel REAL NOT NULL," +
+                    "Brake REAL NOT NULL,DeltaSeconds REAL NOT NULL,X REAL NOT NULL,Y REAL NOT NULL,Z REAL NOT NULL);" +
                     "CREATE TABLE TrackTemplates(Id TEXT PRIMARY KEY,Name TEXT NOT NULL,Direction INTEGER NOT NULL," +
                     "Source TEXT NOT NULL,GameBuild TEXT,LengthMeters REAL NOT NULL,ToleranceMeters REAL NOT NULL," +
                     "Confidence REAL NOT NULL,CaptureLapCount INTEGER NOT NULL,CreatedAt TEXT NOT NULL,UpdatedAt TEXT NOT NULL);" +
@@ -283,7 +286,7 @@ public sealed class StorageTests
 
             using (var store = new LazyForzaStore(path))
             {
-                Assert.AreEqual(8, store.SchemaVersion);
+                Assert.AreEqual(9, store.SchemaVersion);
                 var databaseField = typeof(LazyForzaStore).GetField(
                     "database",
                     System.Reflection.BindingFlags.Instance |
@@ -356,6 +359,114 @@ public sealed class StorageTests
             store.DeleteTrack(track.Id);
             Assert.AreEqual(0, store.CountTracks());
             Assert.AreEqual(0, store.CountLaps());
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public void SavesQuantizedDynamicsAndKeepsLegacySamplesReadable()
+    {
+        var path = TempDatabasePath();
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var raw = Enumerable.Range(0, 80)
+                .Select(index => new TrackPoint(index * 8, 0, Math.Sin(index / 8d) * 15, 0, 0, 0))
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("Dynamics storage", raw);
+            var sectors = TrackAlgorithms.CreateSectors(track);
+            store.SaveTrack(track, sectors);
+            var vehicle = new VehicleProfileFingerprint(10, 5, 850, 1, 8, 8_000, "g", "c");
+            var dynamics = new LapDynamics(
+                -0.376,
+                new WheelValues(0.1f, 0.2f, 0.3f, 0.4f),
+                new WheelValues(-0.05f, 0.06f, -0.07f, 0.08f),
+                new WheelValues(0.2f, 0.3f, 0.4f, 0.5f));
+            var samples = new[]
+            {
+                new LapSample(0, 0, 20, 4_000, 2, 0.4, 0, 0, 0, 0, 0),
+                new LapSample(10, 0.1, 22, 4_500, 2, 0.6, 0, 0, 10, 0, 1, dynamics)
+            };
+            var lap = new LapRecord(
+                Guid.NewGuid(),
+                track.Id,
+                track.Direction,
+                TrackAlgorithms.SectorSchemaVersion,
+                Guid.NewGuid(),
+                vehicle,
+                DateTimeOffset.UtcNow,
+                1,
+                true,
+                null,
+                [],
+                samples);
+            store.SaveLap(lap);
+
+            var loaded = store.LoadLap(lap.Id);
+            Assert.IsNotNull(loaded);
+            var loadedLap = loaded!;
+            Assert.IsNull(loadedLap.Samples[0].Dynamics);
+            Assert.IsNotNull(loadedLap.Samples[1].Dynamics);
+            var loadedDynamics = loadedLap.Samples[1].Dynamics!;
+            Assert.AreEqual(dynamics.Steering, loadedDynamics.Steering, 0.0001);
+            Assert.AreEqual(
+                dynamics.TireCombinedSlip.RearRight,
+                loadedDynamics.TireCombinedSlip.RearRight,
+                0.0003);
+            var databaseField = typeof(LazyForzaStore).GetField(
+                "database",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            var database = (WinSqliteDatabase?)databaseField?.GetValue(store);
+            Assert.IsNotNull(database);
+            Assert.AreEqual(
+                LapDynamicsCodec.EncodedSize.ToString(),
+                database.QueryText("SELECT length(Dynamics) FROM LapSamples WHERE Dynamics IS NOT NULL;"));
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public void MigratesSchemaEightLapSamplesWithoutBackfillingDynamics()
+    {
+        var path = TempDatabasePath();
+        try
+        {
+            using (var store = new LazyForzaStore(path))
+            {
+                var databaseField = typeof(LazyForzaStore).GetField(
+                    "database",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic);
+                var database = (WinSqliteDatabase?)databaseField?.GetValue(store);
+                Assert.IsNotNull(database);
+                database.Execute(
+                    "ALTER TABLE LapSamples DROP COLUMN Dynamics;" +
+                    "UPDATE SchemaVersion SET Version=8;");
+            }
+
+            using var migrated = new LazyForzaStore(path);
+            Assert.AreEqual(9, migrated.SchemaVersion);
+            var migratedField = typeof(LazyForzaStore).GetField(
+                "database",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            var migratedDatabase = (WinSqliteDatabase?)migratedField?.GetValue(migrated);
+            Assert.IsNotNull(migratedDatabase);
+            Assert.AreEqual(
+                "Dynamics",
+                migratedDatabase.QueryText(
+                    "SELECT name FROM pragma_table_info('LapSamples') WHERE name='Dynamics';"));
+            Assert.AreEqual(
+                "0",
+                migratedDatabase.QueryText(
+                    "SELECT COUNT(*) FROM LapSamples WHERE Dynamics IS NOT NULL;"));
         }
         finally
         {

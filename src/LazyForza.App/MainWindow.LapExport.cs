@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using LazyForza.Analysis;
 using LazyForza.Domain;
 
 namespace LazyForza.App;
@@ -13,7 +14,9 @@ internal sealed partial class MainWindow
         IReadOnlyList<LapRecord> laps,
         IReadOnlyList<LapSeriesLegendEntry> legendEntries,
         IReadOnlyList<CornerMapAnnotation> cornerAnnotations,
-        bool approximateTiming)
+        bool approximateTiming,
+        DrivingDynamicsLayer dynamicsLayer,
+        Guid dynamicsLapId)
     {
         try
         {
@@ -23,7 +26,9 @@ internal sealed partial class MainWindow
                 laps,
                 legendEntries,
                 cornerAnnotations,
-                approximateTiming);
+                approximateTiming,
+                dynamicsLayer,
+                dynamicsLapId);
             var path = PngReportExporter.Export(
                 this,
                 report,
@@ -43,7 +48,9 @@ internal sealed partial class MainWindow
         IReadOnlyList<LapRecord> laps,
         IReadOnlyList<LapSeriesLegendEntry> legendEntries,
         IReadOnlyList<CornerMapAnnotation> cornerAnnotations,
-        bool approximateTiming)
+        bool approximateTiming,
+        DrivingDynamicsLayer dynamicsLayer,
+        Guid dynamicsLapId)
     {
         var stack = new StackPanel();
         stack.Children.Add(Label(
@@ -73,7 +80,12 @@ internal sealed partial class MainWindow
             Child = new LapTelemetryChart(laps, track?.LengthMeters, legendEntries)
         });
 
-        var mapTitle = Label("走线预览", 17, FontWeights.SemiBold);
+        var mapTitle = Label(
+            dynamicsLayer == DrivingDynamicsLayer.Default
+                ? "走线预览"
+                : $"走线预览 · {DrivingDynamicsAnalyzer.LayerName(dynamicsLayer)}",
+            17,
+            FontWeights.SemiBold);
         mapTitle.Margin = new Thickness(0, 20, 0, 8);
         stack.Children.Add(mapTitle);
         stack.Children.Add(new Border
@@ -84,7 +96,15 @@ internal sealed partial class MainWindow
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(8),
-            Child = new TrackMapView(laps, track, legendEntries, cornerAnnotations)
+            Child = new TrackMapView(
+                laps,
+                track,
+                legendEntries,
+                cornerAnnotations,
+                dynamicsLapId)
+            {
+                DynamicsLayer = dynamicsLayer
+            }
         });
 
         if (cornerAnnotations.Count > 0)

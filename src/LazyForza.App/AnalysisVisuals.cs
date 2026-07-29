@@ -558,6 +558,7 @@ internal sealed class TrackMapView : FrameworkElement
     private readonly TrackPoint[] trackPoints;
     private readonly TrackLayoutKind layoutKind;
     private readonly TrackEndpointSummary? endpoints;
+    private readonly Guid dynamicsLapId;
     private readonly ToolTip hoverToolTip;
     private readonly double mapMinimumX;
     private readonly double mapMinimumZ;
@@ -577,12 +578,15 @@ internal sealed class TrackMapView : FrameworkElement
     private bool showEndpoints = true;
     private bool showCornerAnnotations = true;
     private bool showLegend = true;
+    private DrivingDynamicsLayer dynamicsLayer;
+    private double? playbackElapsedSeconds;
 
     public TrackMapView(
         IReadOnlyList<LapRecord> laps,
         TrackTemplate? track,
         IReadOnlyList<LapSeriesLegendEntry>? legendEntries = null,
-        IReadOnlyList<CornerMapAnnotation>? cornerAnnotations = null)
+        IReadOnlyList<CornerMapAnnotation>? cornerAnnotations = null,
+        Guid? dynamicsLapId = null)
     {
         this.laps = laps.Where(lap => lap.Samples.Count >= 2).Take(4).ToArray();
         this.legendEntries = (legendEntries ?? [])
@@ -591,6 +595,9 @@ internal sealed class TrackMapView : FrameworkElement
         this.cornerAnnotations = (cornerAnnotations ?? [])
             .Where(annotation => this.laps.Any(lap => lap.Id == annotation.LapId))
             .ToArray();
+        this.dynamicsLapId = dynamicsLapId ??
+                             this.laps.FirstOrDefault()?.Id ??
+                             Guid.Empty;
         trackPoints = track?.Points.ToArray() ?? [];
         layoutKind = track?.LayoutKind ?? TrackLayoutKind.Circuit;
         endpoints = ChartInteractionAlgorithms.SummarizeTrackEndpoints(trackPoints) ??
@@ -654,6 +661,35 @@ internal sealed class TrackMapView : FrameworkElement
 
     public int CornerAnnotationCount => cornerAnnotations.Length;
 
+    public DrivingDynamicsLayer DynamicsLayer
+    {
+        get => dynamicsLayer;
+        set
+        {
+            if (dynamicsLayer == value) return;
+            dynamicsLayer = value;
+            baseDrawing = null;
+            baseDrawingKey = null;
+            ClearHover();
+            InvalidateVisual();
+        }
+    }
+
+    public double? PlaybackElapsedSeconds
+    {
+        get => playbackElapsedSeconds;
+        set
+        {
+            if (playbackElapsedSeconds == value) return;
+            playbackElapsedSeconds = value;
+            InvalidateVisual();
+        }
+    }
+
+    public bool HasExtendedDynamics =>
+        laps.FirstOrDefault(lap => lap.Id == dynamicsLapId)?
+            .Samples.Any(sample => sample.Dynamics is not null) == true;
+
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
@@ -666,7 +702,7 @@ internal sealed class TrackMapView : FrameworkElement
             : Rect.Empty;
         if (showCornerAnnotations)
             DrawCornerAnnotations(drawingContext, metrics, legendBounds);
-        if (showLegend)
+        if (showLegend && dynamicsLayer == DrivingDynamicsLayer.Default)
         {
             AnalysisOverlayDrawing.DrawSeriesLegend(
                 drawingContext,
@@ -674,6 +710,17 @@ internal sealed class TrackMapView : FrameworkElement
                 legendEntries,
                 VisualTreeHelper.GetDpi(this).PixelsPerDip);
         }
+        else if (showLegend)
+        {
+            DrawDynamicsLegend(drawingContext, legendBounds);
+        }
+        if (dynamicsLayer != DrivingDynamicsLayer.Default &&
+            DrivingDynamicsAnalyzer.RequiresExtendedTelemetry(dynamicsLayer) &&
+            !HasExtendedDynamics)
+        {
+            DrawUnavailableNotice(drawingContext, metrics.Bounds);
+        }
+        DrawPlaybackMarker(drawingContext, metrics);
         DrawZoomBadge(drawingContext, metrics.Bounds);
 
         if (hover is not null)
@@ -803,10 +850,16 @@ internal sealed class TrackMapView : FrameworkElement
         if (changed)
         {
             hoverToolTip.BorderBrush = LapSeriesPalette.BrushAt(best.SeriesIndex);
-            hoverToolTip.Content = LapTelemetryChart.TooltipText(
+            var tooltip = LapTelemetryChart.TooltipText(
                 best.Lap,
                 best.Sample,
                 includePosition: true);
+            if (dynamicsLayer != DrivingDynamicsLayer.Default &&
+                best.Lap.Id == dynamicsLapId)
+            {
+                tooltip.Text += "\n" + DynamicsTooltip(best.Sample, best.Lap.Vehicle);
+            }
+            hoverToolTip.Content = tooltip;
         }
         hoverToolTip.HorizontalOffset = Math.Min(pointer.X + 14, Math.Max(8, ActualWidth - 245));
         hoverToolTip.VerticalOffset = Math.Min(pointer.Y + 14, Math.Max(8, ActualHeight - 165));
@@ -857,7 +910,8 @@ internal sealed class TrackMapView : FrameworkElement
         var viewportKey = CreateViewportKey(metrics);
         var drawingKey = new MapDrawingKey(
             viewportKey,
-            VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            VisualTreeHelper.GetDpi(this).PixelsPerDip,
+            dynamicsLayer);
         if (baseDrawing is not null &&
             baseDrawingKey is { } cachedKey &&
             cachedKey.Equals(drawingKey))
@@ -873,7 +927,7 @@ internal sealed class TrackMapView : FrameworkElement
             drawingContext.PushClip(new RectangleGeometry(metrics.Bounds));
             DrawMapGrid(drawingContext, metrics.Bounds);
             for (var index = 0; index < laps.Length; index++)
-                DrawRoute(drawingContext, laps[index].Samples, index, metrics);
+                DrawRoute(drawingContext, laps[index], index, metrics);
             if (showEndpoints) DrawTrackEndpoints(drawingContext, metrics);
             drawingContext.Pop();
         }
@@ -885,11 +939,20 @@ internal sealed class TrackMapView : FrameworkElement
 
     private void DrawRoute(
         DrawingContext drawingContext,
-        IReadOnlyList<LapSample> samples,
+        LapRecord lap,
         int seriesIndex,
         MapMetrics metrics)
     {
+        var samples = lap.Samples;
         if (samples.Count < 2) return;
+        if (dynamicsLayer != DrivingDynamicsLayer.Default)
+        {
+            if (lap.Id == dynamicsLapId)
+                DrawDynamicsRoute(drawingContext, lap, metrics);
+            else
+                DrawDimmedRoute(drawingContext, samples, metrics);
+            return;
+        }
 
         var geometry = new StreamGeometry();
         using (var geometryContext = geometry.Open())
@@ -916,6 +979,100 @@ internal sealed class TrackMapView : FrameworkElement
         };
         pen.Freeze();
         drawingContext.DrawGeometry(null, pen, geometry);
+    }
+
+    private void DrawDimmedRoute(
+        DrawingContext drawingContext,
+        IReadOnlyList<LapSample> samples,
+        MapMetrics metrics)
+    {
+        var geometry = RouteGeometry(samples, metrics);
+        var pen = new Pen(
+            new SolidColorBrush(Color.FromArgb(100, 145, 158, 170)),
+            1.4);
+        pen.Freeze();
+        drawingContext.DrawGeometry(null, pen, geometry);
+    }
+
+    private void DrawDynamicsRoute(
+        DrawingContext drawingContext,
+        LapRecord lap,
+        MapMetrics metrics)
+    {
+        var samples = lap.Samples;
+        var outline = new Pen(
+            new SolidColorBrush(Color.FromArgb(230, 7, 11, 16)),
+            5.2)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round
+        };
+        outline.Freeze();
+        drawingContext.DrawGeometry(null, outline, RouteGeometry(samples, metrics));
+
+        var segments = new Dictionary<int, List<(Point Start, Point End)>>();
+        for (var index = 1; index < samples.Count; index++)
+        {
+            var point = DrivingDynamicsAnalyzer.Evaluate(
+                samples[index],
+                lap.Vehicle,
+                dynamicsLayer);
+            var bucket = DynamicsBucket(point);
+            if (!segments.TryGetValue(bucket, out var bucketSegments))
+            {
+                bucketSegments = [];
+                segments[bucket] = bucketSegments;
+            }
+            bucketSegments.Add((
+                MapPoint(samples[index - 1], metrics, viewport),
+                MapPoint(samples[index], metrics, viewport)));
+        }
+
+        foreach (var (bucket, bucketSegments) in segments)
+        {
+            var geometry = new StreamGeometry();
+            using (var context = geometry.Open())
+            {
+                foreach (var segment in bucketSegments)
+                {
+                    context.BeginFigure(segment.Start, isFilled: false, isClosed: false);
+                    context.LineTo(segment.End, isStroked: true, isSmoothJoin: true);
+                }
+            }
+            geometry.Freeze();
+            var pen = new Pen(
+                new SolidColorBrush(DynamicsColor(bucket)),
+                3.2)
+            {
+                StartLineCap = PenLineCap.Round,
+                EndLineCap = PenLineCap.Round,
+                LineJoin = PenLineJoin.Round
+            };
+            pen.Freeze();
+            drawingContext.DrawGeometry(null, pen, geometry);
+        }
+    }
+
+    private StreamGeometry RouteGeometry(
+        IReadOnlyList<LapSample> samples,
+        MapMetrics metrics)
+    {
+        var geometry = new StreamGeometry();
+        using (var context = geometry.Open())
+        {
+            context.BeginFigure(
+                MapPoint(samples[0], metrics, viewport),
+                isFilled: false,
+                isClosed: false);
+            for (var index = 1; index < samples.Count; index++)
+                context.LineTo(
+                    MapPoint(samples[index], metrics, viewport),
+                    isStroked: true,
+                    isSmoothJoin: true);
+        }
+        geometry.Freeze();
+        return geometry;
     }
 
     private void DrawCornerAnnotations(
@@ -967,14 +1124,291 @@ internal sealed class TrackMapView : FrameworkElement
             MapControlsReservedBounds(metrics.Bounds),
             MapZoomReservedBounds(metrics.Bounds)
         };
-        return AnalysisOverlayDrawing.SelectSeriesLegendBounds(
+        var selected = AnalysisOverlayDrawing.SelectSeriesLegendBounds(
             metrics.Bounds,
-            legendEntries.Length,
+            dynamicsLayer == DrivingDynamicsLayer.Default
+                ? legendEntries.Length
+                : 1,
             MapLegendPoints(metrics),
             reserved,
             AnalysisLegendCorner.TopLeft,
             AnalysisLegendCorner.BottomRight,
             AnalysisLegendCorner.TopRight);
+        if (dynamicsLayer == DrivingDynamicsLayer.Default || selected.IsEmpty)
+            return selected;
+
+        var targetWidth = Math.Min(
+            dynamicsLayer == DrivingDynamicsLayer.HandlingBalance ? 206 : 220,
+            Math.Max(176, metrics.Bounds.Width - 24));
+        const double targetHeight = 44;
+        var alignRight = selected.Left + selected.Width / 2 >
+                         metrics.Bounds.Left + metrics.Bounds.Width / 2;
+        var alignBottom = selected.Top + selected.Height / 2 >
+                          metrics.Bounds.Top + metrics.Bounds.Height / 2;
+        return new Rect(
+            alignRight ? selected.Right - targetWidth : selected.Left,
+            alignBottom ? selected.Bottom - targetHeight : selected.Top,
+            targetWidth,
+            targetHeight);
+    }
+
+    private void DrawDynamicsLegend(
+        DrawingContext drawingContext,
+        Rect bounds)
+    {
+        if (bounds.IsEmpty) return;
+        var pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        drawingContext.DrawRoundedRectangle(
+            new SolidColorBrush(Color.FromArgb(205, 14, 21, 29)),
+            new Pen(new SolidColorBrush(Color.FromArgb(205, 67, 84, 101)), 1),
+            bounds,
+            8,
+            8);
+        var title = new FormattedText(
+            DrivingDynamicsAnalyzer.LayerName(dynamicsLayer),
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            new Typeface(
+                new FontFamily("Microsoft YaHei UI"),
+                FontStyles.Normal,
+                FontWeights.SemiBold,
+                FontStretches.Normal),
+            10,
+            new SolidColorBrush(Color.FromRgb(242, 247, 250)),
+            pixelsPerDip);
+        drawingContext.DrawText(title, new Point(bounds.Left + 10, bounds.Top + 6));
+
+        if (dynamicsLayer == DrivingDynamicsLayer.HandlingBalance)
+        {
+            DrawLegendChip(
+                drawingContext,
+                bounds.Left + 10,
+                bounds.Top + 25,
+                Color.FromRgb(242, 184, 39),
+                "疑似不足",
+                pixelsPerDip);
+            DrawLegendChip(
+                drawingContext,
+                bounds.Left + 91,
+                bounds.Top + 25,
+                Color.FromRgb(222, 90, 220),
+                "疑似过度",
+                pixelsPerDip);
+            return;
+        }
+
+        var gradientBounds = new Rect(
+            bounds.Left + 10,
+            bounds.Top + 28,
+            Math.Max(60, bounds.Width - 64),
+            7);
+        var brush = new LinearGradientBrush(
+            DynamicsColor(0),
+            DynamicsColor(15),
+            new Point(0, 0),
+            new Point(1, 0));
+        drawingContext.DrawRoundedRectangle(brush, null, gradientBounds, 3, 3);
+        var scale = new FormattedText(
+            dynamicsLayer == DrivingDynamicsLayer.Steering ? "左  ↔  右" : "低  →  高",
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            new Typeface(
+                new FontFamily("Microsoft YaHei UI"),
+                FontStyles.Normal,
+                FontWeights.Normal,
+                FontStretches.Normal),
+            8.5,
+            new SolidColorBrush(Color.FromRgb(166, 181, 191)),
+            pixelsPerDip);
+        drawingContext.DrawText(
+            scale,
+            new Point(bounds.Right - scale.Width - 9, bounds.Top + 24));
+    }
+
+    private static void DrawLegendChip(
+        DrawingContext drawingContext,
+        double x,
+        double y,
+        Color color,
+        string text,
+        double pixelsPerDip)
+    {
+        drawingContext.DrawEllipse(new SolidColorBrush(color), null, new Point(x + 4, y + 6), 4, 4);
+        var formatted = new FormattedText(
+            text,
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            new Typeface(
+                new FontFamily("Microsoft YaHei UI"),
+                FontStyles.Normal,
+                FontWeights.Normal,
+                FontStretches.Normal),
+            8.5,
+            new SolidColorBrush(Color.FromRgb(207, 217, 224)),
+            pixelsPerDip);
+        drawingContext.DrawText(formatted, new Point(x + 11, y));
+    }
+
+    private static void DrawUnavailableNotice(
+        DrawingContext drawingContext,
+        Rect bounds)
+    {
+        var text = new FormattedText(
+            "该圈由旧版本记录，未包含此图层所需的动态遥测。",
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            new Typeface(
+                new FontFamily("Microsoft YaHei UI"),
+                FontStyles.Normal,
+                FontWeights.SemiBold,
+                FontStretches.Normal),
+            11,
+            new SolidColorBrush(Color.FromRgb(242, 184, 39)),
+            1);
+        var chrome = new Rect(
+            bounds.Left + (bounds.Width - text.Width - 28) / 2,
+            bounds.Top + (bounds.Height - text.Height - 20) / 2,
+            text.Width + 28,
+            text.Height + 20);
+        drawingContext.DrawRoundedRectangle(
+            new SolidColorBrush(Color.FromArgb(235, 14, 21, 29)),
+            new Pen(new SolidColorBrush(Color.FromRgb(151, 112, 28)), 1),
+            chrome,
+            8,
+            8);
+        drawingContext.DrawText(text, new Point(chrome.Left + 14, chrome.Top + 10));
+    }
+
+    private string DynamicsTooltip(
+        LapSample sample,
+        VehicleProfileFingerprint vehicle)
+    {
+        var point = DrivingDynamicsAnalyzer.Evaluate(sample, vehicle, dynamicsLayer);
+        if (!point.IsAvailable) return "当前圈没有此图层所需的动态遥测";
+        return dynamicsLayer switch
+        {
+            DrivingDynamicsLayer.Throttle => $"图层 · 油门 {sample.Accel:P0}",
+            DrivingDynamicsLayer.Brake => $"图层 · 制动 {sample.Brake:P0}",
+            DrivingDynamicsLayer.Steering =>
+                $"图层 · 方向输入 {point.SignedValue:+0.00;-0.00;0.00}",
+            DrivingDynamicsLayer.TireSlip =>
+                $"图层 · 轮胎滑移强度 {point.Intensity:P0}",
+            DrivingDynamicsLayer.HandlingBalance => point.Balance switch
+            {
+                HandlingBalanceState.SuspectedUndersteer =>
+                    $"图层 · 疑似转向不足 · 证据强度 {point.Intensity:P0}",
+                HandlingBalanceState.SuspectedOversteer =>
+                    $"图层 · 疑似转向过度 · 证据强度 {point.Intensity:P0}",
+                _ => "图层 · 未发现明显转向平衡异常"
+            },
+            DrivingDynamicsLayer.ExitWheelspin =>
+                $"图层 · 出弯空转证据 {point.Intensity:P0}",
+            DrivingDynamicsLayer.BrakingInstability =>
+                $"图层 · 制动轮胎失稳证据 {point.Intensity:P0}",
+            _ => DrivingDynamicsAnalyzer.LayerName(dynamicsLayer)
+        };
+    }
+
+    private int DynamicsBucket(DrivingDynamicsPoint point)
+    {
+        if (!point.IsAvailable) return -1;
+        var intensity = Math.Clamp((int)Math.Round(point.Intensity * 15), 0, 15);
+        if (dynamicsLayer == DrivingDynamicsLayer.Steering)
+            return Math.Clamp((int)Math.Round((point.SignedValue + 1) * 7.5), 0, 15);
+        if (dynamicsLayer == DrivingDynamicsLayer.HandlingBalance)
+            return point.Balance switch
+            {
+                HandlingBalanceState.SuspectedUndersteer => 100 + intensity,
+                HandlingBalanceState.SuspectedOversteer => 200 + intensity,
+                _ => 0
+            };
+        return intensity;
+    }
+
+    private Color DynamicsColor(int bucket)
+    {
+        if (bucket < 0) return Color.FromRgb(91, 103, 113);
+        if (dynamicsLayer == DrivingDynamicsLayer.HandlingBalance)
+        {
+            if (bucket >= 200)
+                return Blend(Color.FromRgb(92, 60, 102), Color.FromRgb(246, 76, 219), (bucket - 200) / 15d);
+            if (bucket >= 100)
+                return Blend(Color.FromRgb(91, 78, 45), Color.FromRgb(255, 188, 35), (bucket - 100) / 15d);
+            return Color.FromRgb(76, 91, 101);
+        }
+        var amount = Math.Clamp(bucket / 15d, 0, 1);
+        return dynamicsLayer switch
+        {
+            DrivingDynamicsLayer.Throttle =>
+                Blend(Color.FromRgb(54, 78, 78), Color.FromRgb(51, 232, 144), amount),
+            DrivingDynamicsLayer.Brake =>
+                Blend(Color.FromRgb(76, 66, 72), Color.FromRgb(255, 75, 87), amount),
+            DrivingDynamicsLayer.Steering when bucket < 8 =>
+                Blend(Color.FromRgb(51, 151, 226), Color.FromRgb(116, 126, 145), bucket / 7d),
+            DrivingDynamicsLayer.Steering =>
+                Blend(Color.FromRgb(116, 126, 145), Color.FromRgb(206, 83, 255), (bucket - 8) / 7d),
+            DrivingDynamicsLayer.TireSlip =>
+                Blend(Color.FromRgb(68, 101, 112), Color.FromRgb(255, 89, 51), amount),
+            DrivingDynamicsLayer.ExitWheelspin =>
+                Blend(Color.FromRgb(79, 79, 68), Color.FromRgb(255, 160, 33), amount),
+            DrivingDynamicsLayer.BrakingInstability =>
+                Blend(Color.FromRgb(77, 67, 85), Color.FromRgb(255, 58, 118), amount),
+            _ => LapSeriesPalette.At(0)
+        };
+    }
+
+    private static Color Blend(Color start, Color end, double amount)
+    {
+        amount = Math.Clamp(amount, 0, 1);
+        return Color.FromRgb(
+            (byte)Math.Round(start.R + (end.R - start.R) * amount),
+            (byte)Math.Round(start.G + (end.G - start.G) * amount),
+            (byte)Math.Round(start.B + (end.B - start.B) * amount));
+    }
+
+    private void DrawPlaybackMarker(
+        DrawingContext drawingContext,
+        MapMetrics metrics)
+    {
+        if (playbackElapsedSeconds is not double elapsed) return;
+        var lap = laps.FirstOrDefault(candidate => candidate.Id == dynamicsLapId) ??
+                  laps.FirstOrDefault();
+        if (lap is null || lap.Samples.Count == 0) return;
+        var index = FindNearestElapsedSample(lap.Samples, elapsed);
+        var point = MapPoint(lap.Samples[index], metrics, viewport);
+        drawingContext.PushClip(new RectangleGeometry(metrics.Bounds));
+        drawingContext.DrawEllipse(
+            new SolidColorBrush(Color.FromArgb(95, 32, 184, 207)),
+            null,
+            point,
+            12,
+            12);
+        drawingContext.DrawEllipse(
+            new SolidColorBrush(Color.FromRgb(242, 247, 250)),
+            new Pen(new SolidColorBrush(Color.FromRgb(32, 184, 207)), 3),
+            point,
+            6,
+            6);
+        drawingContext.Pop();
+    }
+
+    private static int FindNearestElapsedSample(
+        IReadOnlyList<LapSample> samples,
+        double elapsed)
+    {
+        var low = 0;
+        var high = samples.Count - 1;
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+            if (samples[middle].ElapsedSeconds < elapsed) low = middle + 1;
+            else high = middle;
+        }
+        if (low == 0) return 0;
+        return Math.Abs(samples[low].ElapsedSeconds - elapsed) <
+               Math.Abs(samples[low - 1].ElapsedSeconds - elapsed)
+            ? low
+            : low - 1;
     }
 
     private IReadOnlyList<Point> MapLegendPoints(MapMetrics metrics)
@@ -1607,7 +2041,8 @@ internal sealed class TrackMapView : FrameworkElement
 
     private readonly record struct MapDrawingKey(
         MapViewportKey ViewportKey,
-        double PixelsPerDip);
+        double PixelsPerDip,
+        DrivingDynamicsLayer DynamicsLayer);
 
     private readonly record struct CornerMarkerLayoutKey(
         MapViewportKey ViewportKey,

@@ -165,7 +165,18 @@ public sealed record LapSample(
     double DeltaSeconds,
     double X,
     double Y,
-    double Z);
+    double Z,
+    LapDynamics? Dynamics = null);
+
+/// <summary>
+/// Compact per-sample driving inputs retained for saved-lap dynamics analysis.
+/// A null value means the lap was recorded by a build that predates dynamics capture.
+/// </summary>
+public sealed record LapDynamics(
+    double Steering,
+    WheelValues TireSlipRatio,
+    WheelValues TireSlipAngle,
+    WheelValues TireCombinedSlip);
 
 public sealed record LapSegment(int Index, double TimeSeconds, bool IsValid);
 

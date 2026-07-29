@@ -29,7 +29,7 @@ public sealed record VehicleProfileSummary(
 
 public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisposable
 {
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
     public const int MaxLapsPerTrack = 50;
     private readonly WinSqliteDatabase database;
     private bool disposed;
@@ -245,7 +245,10 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
 
         foreach (var sample in lap.Samples)
         {
-            sql += $"INSERT INTO LapSamples(LapId,S,ElapsedSeconds,SpeedMps,Rpm,Gear,Accel,Brake,DeltaSeconds,X,Y,Z) VALUES({Quote(lap.Id.ToString())},{N(sample.S)},{N(sample.ElapsedSeconds)},{N(sample.SpeedMps)},{N(sample.Rpm)},{sample.Gear},{N(sample.Accel)},{N(sample.Brake)},{N(sample.DeltaSeconds)},{N(sample.X)},{N(sample.Y)},{N(sample.Z)});\n";
+            var dynamics = sample.Dynamics is null
+                ? "NULL"
+                : $"X'{LapDynamicsCodec.EncodeHex(sample.Dynamics)}'";
+            sql += $"INSERT INTO LapSamples(LapId,S,ElapsedSeconds,SpeedMps,Rpm,Gear,Accel,Brake,DeltaSeconds,X,Y,Z,Dynamics) VALUES({Quote(lap.Id.ToString())},{N(sample.S)},{N(sample.ElapsedSeconds)},{N(sample.SpeedMps)},{N(sample.Rpm)},{sample.Gear},{N(sample.Accel)},{N(sample.Brake)},{N(sample.DeltaSeconds)},{N(sample.X)},{N(sample.Y)},{N(sample.Z)},{dynamics});\n";
         }
 
         database.Execute(sql + "COMMIT;");
@@ -425,7 +428,7 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
         var idList = string.Join(',', summaries.Select(summary => Quote(summary.Id.ToString())));
         var samplesByLap = summaries.ToDictionary(summary => summary.Id, _ => new List<LapSample>());
         foreach (var sample in database.QueryRows(
-                     "SELECT LapId,S,ElapsedSeconds,SpeedMps,Rpm,Gear,Accel,Brake,DeltaSeconds,X,Y,Z " +
+                     "SELECT LapId,S,ElapsedSeconds,SpeedMps,Rpm,Gear,Accel,Brake,DeltaSeconds,X,Y,Z,hex(Dynamics) " +
                      $"FROM LapSamples WHERE LapId IN ({idList}) ORDER BY LapId,S;"))
         {
             var lapId = Guid.Parse(sample[0]!);
@@ -441,7 +444,8 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
                 double.Parse(sample[8]!, CultureInfo.InvariantCulture),
                 double.Parse(sample[9]!, CultureInfo.InvariantCulture),
                 double.Parse(sample[10]!, CultureInfo.InvariantCulture),
-                double.Parse(sample[11]!, CultureInfo.InvariantCulture)));
+                double.Parse(sample[11]!, CultureInfo.InvariantCulture),
+                LapDynamicsCodec.DecodeHex(sample[12])));
         }
 
         return summaries
@@ -627,6 +631,21 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
                 "UPDATE SchemaVersion SET Version=8;\n" +
                 "COMMIT;");
             version = 8;
+        }
+
+        if (version < 9)
+        {
+            var hasDynamicsColumn =
+                database.QueryText(
+                    "SELECT COUNT(*) FROM pragma_table_info('LapSamples') WHERE name='Dynamics';") == "1";
+            database.Execute(
+                "BEGIN IMMEDIATE;\n" +
+                (hasDynamicsColumn
+                    ? string.Empty
+                    : "ALTER TABLE LapSamples ADD COLUMN Dynamics BLOB;\n") +
+                "UPDATE SchemaVersion SET Version=9;\n" +
+                "COMMIT;");
+            version = 9;
         }
 
         if (SchemaVersion != CurrentSchemaVersion) throw new InvalidOperationException("Database schema version is newer than this LazyForza build.");

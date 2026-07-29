@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -41,7 +40,6 @@ internal sealed class TelemetryOverlayWindow : Window
         Content = surface;
         ApplyLayout(initialLayout);
         SourceInitialized += OnSourceInitialized;
-        MouseLeftButtonDown += OnMouseLeftButtonDown;
     }
 
     public void ApplyLayout(OverlayLayout newLayout)
@@ -49,6 +47,8 @@ internal sealed class TelemetryOverlayWindow : Window
         layout = newLayout with
         {
             Scale = OverlayScaleSettings.Normalize(newLayout.Scale),
+            ClickThrough = true,
+            IsLocked = true,
             DashboardMotionIntensity = Math.Clamp(newLayout.DashboardMotionIntensity, 0, 1),
             DashboardIdleWaitSeconds = Math.Clamp(newLayout.DashboardIdleWaitSeconds, 0, 60),
             DashboardVisibilityFadeSeconds = Math.Clamp(newLayout.DashboardVisibilityFadeSeconds, 0.05, 10),
@@ -101,11 +101,6 @@ internal sealed class TelemetryOverlayWindow : Window
         UpdateNativeStyles();
     }
 
-    private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (!layout.IsLocked && e.ButtonState == MouseButtonState.Pressed) DragMove();
-    }
-
     private IntPtr WindowProcedure(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (message == WmMouseActivate)
@@ -114,7 +109,7 @@ internal sealed class TelemetryOverlayWindow : Window
             return new IntPtr(MaNoActivate);
         }
 
-        if (message == WmNcHitTest && layout.ClickThrough)
+        if (message == WmNcHitTest)
         {
             handled = true;
             return new IntPtr(HtTransparent);
@@ -127,7 +122,7 @@ internal sealed class TelemetryOverlayWindow : Window
     {
         if (source is null) return;
         var current = GetWindowLongPtr(source.Handle, GwlExStyle).ToInt64();
-        var updated = OverlayNativeStyles.Apply(current, layout.ClickThrough || layout.IsLocked);
+        var updated = OverlayNativeStyles.Apply(current);
         _ = SetWindowLongPtr(source.Handle, GwlExStyle, new IntPtr(updated));
     }
 
@@ -150,6 +145,7 @@ internal sealed class HudSurface : FrameworkElement
     private static readonly Brush Cyan = BrushOf(0x20, 0xB8, 0xCF);
     private readonly Func<IReadOnlyList<IHudContribution>> getContributions;
     private readonly Func<OverlayLayout> getLayout;
+    private readonly bool layoutPreview;
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly FrameRateLimiter limiter = new();
     private readonly DashboardHudDynamics dashboardDynamics = new();
@@ -158,11 +154,15 @@ internal sealed class HudSurface : FrameworkElement
     private double previousPedalRenderSeconds;
     private bool pedalAnimationInitialized;
 
-    public HudSurface(Func<IReadOnlyList<IHudContribution>> getContributions, Func<OverlayLayout> getLayout)
+    public HudSurface(
+        Func<IReadOnlyList<IHudContribution>> getContributions,
+        Func<OverlayLayout> getLayout,
+        bool layoutPreview = false)
     {
         this.getContributions = getContributions;
         this.getLayout = getLayout;
-        IsHitTestVisible = true;
+        this.layoutPreview = layoutPreview;
+        IsHitTestVisible = false;
         Loaded += (_, _) => CompositionTarget.Rendering += OnRendering;
         Unloaded += (_, _) => CompositionTarget.Rendering -= OnRendering;
     }
@@ -180,6 +180,16 @@ internal sealed class HudSurface : FrameworkElement
         var lap = contributions.Select(item => item.Snapshot).OfType<Modules.LapAnalysis.LapHudState>().LastOrDefault();
         var now = DateTimeOffset.UtcNow;
         var layout = getLayout();
+        if (layoutPreview)
+        {
+            dashboard = OverlayLayoutPreviewState.Dashboard(dashboard, now);
+            lap = OverlayLayoutPreviewState.Lap(lap, now);
+            DrawDashboard(drawingContext, dashboard);
+            DrawCumulativeLapDelta(drawingContext, lap);
+            DrawLapArc(drawingContext, lap, dashboardVisible: true);
+            return;
+        }
+
         var dashboardVisible = OverlayVisibilityPolicy.ShouldShowDashboard(dashboard, now, layout.LiveHudStaleSeconds);
         var lapVisible = OverlayVisibilityPolicy.ShouldShowLap(lap, now, layout.LiveHudStaleSeconds);
         var nowSeconds = clock.Elapsed.TotalSeconds;
@@ -565,5 +575,107 @@ internal sealed class HudSurface : FrameworkElement
         var brush = new SolidColorBrush(Color.FromRgb(r, g, b)) { Opacity = opacity };
         brush.Freeze();
         return brush;
+    }
+}
+
+public static class OverlayLayoutPreviewState
+{
+    private static readonly IReadOnlyList<SectorComparison> PreviewSectors =
+    [
+        new(0, 18.420, 18.680, 18.510, -0.090, SectorColorState.Green, false),
+        new(1, 21.735, 21.910, 21.650, 0.085, SectorColorState.Yellow, true),
+        new(2, 19.220, 19.540, 19.220, 0, SectorColorState.Purple, false),
+        new(3, null, 20.130, 19.980, null, SectorColorState.Gray, false)
+    ];
+
+    public static DashboardHudState Dashboard(
+        DashboardHudState? state,
+        DateTimeOffset now) =>
+        state is null
+            ? new DashboardHudState(
+                now,
+                TelemetrySourceKind.Live,
+                "LIVE",
+                false,
+                true,
+                4,
+                4,
+                "4",
+                false,
+                142,
+                6_280,
+                8_200,
+                268,
+                421,
+                new WheelValues(83, 84, 87, 88),
+                new WheelValues(0.96f, 0.97f, 0.93f, 0.94f),
+                0.24,
+                0.72,
+                2,
+                900,
+                new ShiftLearningSnapshot(
+                    LearningState.Collecting,
+                    0.72,
+                    0.68,
+                    null,
+                    [],
+                    [],
+                    [],
+                    new Dictionary<string, int>(),
+                    "布局预览"))
+            {
+                SpeedMps = 142 / 3.6,
+                Steering = 0.16
+            }
+            : state with
+            {
+                UpdatedAt = now,
+                IsStale = false,
+                IsDriving = true
+            };
+
+    public static Modules.LapAnalysis.LapHudState Lap(
+        Modules.LapAnalysis.LapHudState? state,
+        DateTimeOffset now)
+    {
+        if (state is null)
+        {
+            return new Modules.LapAnalysis.LapHudState(
+                now,
+                TelemetrySourceKind.Live,
+                true,
+                Modules.LapAnalysis.TrackLearningPhase.ComparingLaps,
+                "布局预览",
+                string.Empty,
+                Modules.LapAnalysis.TrackMatchState.Confirmed,
+                0.96,
+                "圈速 HUD 预览",
+                1,
+                PreviewSectors,
+                0.58,
+                2,
+                true)
+            {
+                CurrentLapSeconds = 79.375,
+                CumulativeHistoricalDeltaSeconds = -0.184
+            };
+        }
+
+        return state with
+        {
+            UpdatedAt = now,
+            IsCompetitionActive = true,
+            TrackName = string.IsNullOrWhiteSpace(state.TrackName)
+                ? "圈速 HUD 预览"
+                : state.TrackName,
+            Sectors = state.Sectors.Count == 0 ? PreviewSectors : state.Sectors,
+            CurrentLapSeconds = double.IsFinite(state.CurrentLapSeconds) && state.CurrentLapSeconds > 0
+                ? state.CurrentLapSeconds
+                : 79.375,
+            CumulativeHistoricalDeltaSeconds =
+                state.CumulativeHistoricalDeltaSeconds is double delta && double.IsFinite(delta)
+                    ? delta
+                    : -0.184
+        };
     }
 }
