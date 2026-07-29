@@ -73,10 +73,9 @@ a {
 }
 
 .page-shell {
-  width: min(100%, 1540px);
+  width: 100%;
   min-height: 100vh;
-  margin: 0 auto;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .site-header {
@@ -118,7 +117,7 @@ a {
   border: 1px solid transparent;
   border-radius: 999px;
   color: #c6d3df;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
   transition:
     color 160ms ease,
@@ -136,7 +135,7 @@ a {
 
 .repo-links span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .hero {
@@ -179,7 +178,7 @@ a {
   border-radius: 999px;
   color: #afc1d2;
   background: rgba(15, 25, 36, 0.65);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -220,7 +219,7 @@ a {
   max-width: 680px;
   margin: 0 auto;
   color: var(--muted);
-  font-size: clamp(16px, 2vw, 19px);
+  font-size: clamp(18px, 2vw, 21px);
   line-height: 1.8;
 }
 
@@ -326,25 +325,25 @@ a {
 .download-source strong {
   display: block;
   margin-bottom: 3px;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .download-source small {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .release-meta {
   gap: 8px;
   padding-left: 45px;
   color: #8fa5b9;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .release-meta strong {
   color: #dce7f0;
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.03em;
 }
 
@@ -362,7 +361,7 @@ a {
 .download-note {
   margin: 15px auto 58px;
   color: #6f8498;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .product-frame {
@@ -408,20 +407,23 @@ a {
 .frame-bar b {
   margin-left: auto;
   color: #62768a;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.16em;
 }
 
 .preview-wrap {
   position: relative;
+  aspect-ratio: 1584 / 955;
   overflow: hidden;
   border-radius: 0 0 calc(var(--radius-xl) - 1px) calc(var(--radius-xl) - 1px);
   background: #090e14;
 }
 
 .preview-wrap img {
-  display: block;
+  position: absolute;
+  top: -4%;
+  left: 0;
   width: 100%;
   height: auto;
 }
@@ -444,7 +446,7 @@ a {
 .section-heading p {
   margin: 0 0 14px;
   color: var(--cyan);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
   letter-spacing: 0.18em;
 }
@@ -491,7 +493,7 @@ a {
 
 .feature-card h3 {
   margin: 0 0 12px;
-  font-size: 22px;
+  font-size: 23px;
   letter-spacing: -0.025em;
 }
 
@@ -501,7 +503,7 @@ a {
   max-width: 310px;
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.75;
 }
 
@@ -623,13 +625,13 @@ a {
 .principles strong {
   display: block;
   margin-bottom: 8px;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .principles p {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 footer {
@@ -640,7 +642,7 @@ footer {
   justify-content: space-between;
   border-top: 1px solid var(--line);
   color: #607589;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 footer p {
@@ -707,7 +709,7 @@ footer p {
 
   .repo-links a {
     padding: 8px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .repo-links span {
@@ -719,7 +721,7 @@ footer p {
   }
 
   .eyebrow {
-    font-size: 9px;
+    font-size: 11px;
   }
 
   .hero-logo {
@@ -728,7 +730,7 @@ footer p {
   }
 
   .hero-copy {
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.7;
   }
 
