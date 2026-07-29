@@ -5,6 +5,7 @@ using System.Windows.Threading;
 using System.IO;
 using LazyForza.Analysis;
 using LazyForza.Domain;
+using LazyForza.Telemetry;
 using Microsoft.Win32;
 
 namespace LazyForza.App;
@@ -15,17 +16,31 @@ internal sealed partial class MainWindow
     {
         var stack = PageStack(
             "回放工作台",
-            "回看已保存的单圈走线与遥测；回放只读取本地数据，不会影响实时监听和 HUD。");
+            "打开 .lfztelemetry 录制文件或回看已保存单圈；工作台只读取本地数据，不影响实时监听和 HUD。");
         var tracks = store.ListTracks(CurrentTrackSource)
             .Where(track => track.Laps > 0)
             .OrderByDescending(track => track.Laps)
             .ThenBy(track => track.Name, StringComparer.CurrentCulture)
             .ToArray();
-        if (tracks.Length == 0)
+        var fileControls = new Grid();
+        fileControls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        fileControls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var openRecording = new Button
         {
-            stack.Children.Add(EmptyCard("暂无可回放圈速", "完成并保存至少一圈后，这里会显示回放与导出工具。"));
-            return Scroll(stack);
-        }
+            Content = "打开 .lfztelemetry",
+            Padding = new Thickness(15, 8, 15, 8),
+            Margin = new Thickness(0, 0, 14, 0)
+        };
+        fileControls.Children.Add(openRecording);
+        var fileStatus = Label(
+            "支持自动/手动原始录制，以及由工作台导出的单圈 .lfztelemetry。",
+            11,
+            FontWeights.Normal,
+            "MutedBrush");
+        fileStatus.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(fileStatus, 1);
+        fileControls.Children.Add(fileStatus);
+        stack.Children.Add(Card(fileControls));
 
         var selectorGrid = new Grid();
         selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -33,12 +48,12 @@ internal sealed partial class MainWindow
         selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var trackSelector = new ComboBox { MinWidth = 280, Margin = new Thickness(0, 0, 10, 0) };
         var lapSelector = new ComboBox { MinWidth = 330, Margin = new Thickness(0, 0, 10, 0) };
-        var exportCsv = new Button
+        var exportRecording = new Button
         {
-            Content = "导出遥测 CSV",
+            Content = "导出单圈 .lfztelemetry",
             Padding = new Thickness(13, 7, 13, 7),
             IsEnabled = false,
-            ToolTip = "导出当前圈的逐样本遥测；旧圈不具备的动态字段留空"
+            ToolTip = "导出当前工作台单圈；不会伪造缺失的原始 FH6 UDP 字段"
         };
         foreach (var track in tracks)
         {
@@ -51,9 +66,11 @@ internal sealed partial class MainWindow
         selectorGrid.Children.Add(trackSelector);
         Grid.SetColumn(lapSelector, 1);
         selectorGrid.Children.Add(lapSelector);
-        Grid.SetColumn(exportCsv, 2);
-        selectorGrid.Children.Add(exportCsv);
+        Grid.SetColumn(exportRecording, 2);
+        selectorGrid.Children.Add(exportRecording);
         stack.Children.Add(Card(selectorGrid));
+        if (tracks.Length == 0)
+            stack.Children.Add(EmptyCard("暂无已保存圈速", "仍可从上方打开 .lfztelemetry 录制文件。"));
 
         var host = new Grid { Margin = new Thickness(0, 12, 0, 0) };
         stack.Children.Add(host);
@@ -63,6 +80,7 @@ internal sealed partial class MainWindow
         var previousTick = DateTimeOffset.UtcNow;
         LapRecord? currentLap = null;
         TrackTemplate? currentTrack = null;
+        var currentSourceName = "未知赛道";
         TrackMapView? mapView = null;
         Slider? timeline = null;
         TextBlock? timeValue = null;
@@ -70,6 +88,7 @@ internal sealed partial class MainWindow
         TextBlock? inputValue = null;
         TextBlock? dynamicsValue = null;
         Button? playPause = null;
+        LapAnalysisCursor? replayCursor = null;
         DispatcherTimer timer = null!;
         timer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(40),
@@ -87,6 +106,7 @@ internal sealed partial class MainWindow
             lapSelector.Items.Clear();
             if (trackSelector.SelectedItem is not ComboBoxItem { Tag: Guid trackId }) return;
             currentTrack = store.LoadTrack(trackId)?.Track;
+            currentSourceName = currentTrack?.Name ?? "未知赛道";
             foreach (var lap in store.LoadLapSummaries(trackId)
                          .OrderByDescending(lap => lap.StartedAt))
             {
@@ -110,38 +130,41 @@ internal sealed partial class MainWindow
             {
                 currentLap = null;
                 host.Children.Clear();
-                exportCsv.IsEnabled = false;
+                exportRecording.IsEnabled = false;
                 return;
             }
             currentLap = store.LoadLap(lapId);
             if (currentLap is null) return;
             currentTrack = store.LoadTrack(currentLap.TrackId)?.Track;
+            currentSourceName = currentTrack?.Name ?? "未知赛道";
             elapsed = 0;
             previousTick = DateTimeOffset.UtcNow;
-            exportCsv.IsEnabled = true;
+            exportRecording.IsEnabled = true;
             RenderReplay();
         };
 
-        exportCsv.Click += (_, _) =>
+        exportRecording.Click += async (_, _) =>
         {
             if (currentLap is null) return;
             var dialog = new SaveFileDialog
             {
-                Title = "导出圈速遥测",
-                Filter = "CSV 文件 (*.csv)|*.csv",
-                DefaultExt = ".csv",
+                Title = "导出单圈 LazyForza 遥测",
+                Filter = "LazyForza 单圈遥测 (*.lfztelemetry)|*.lfztelemetry",
+                DefaultExt = ".lfztelemetry",
                 AddExtension = true,
                 FileName =
-                    $"LazyForza-{SafeFileName(currentTrack?.Name ?? "圈速")}-" +
-                    $"{currentLap.StartedAt.ToLocalTime():yyyyMMdd-HHmmss}.csv"
+                    $"LazyForza-{SafeFileName(currentSourceName)}-" +
+                    $"{currentLap.StartedAt.ToLocalTime():yyyyMMdd-HHmmss}.lfztelemetry"
             };
             if (dialog.ShowDialog(this) != true) return;
+            exportRecording.IsEnabled = false;
             try
             {
-                LapTelemetryExporter.WriteCsv(
+                await SingleLapTelemetryRecordingFile.WriteAsync(
                     dialog.FileName,
-                    currentTrack?.Name ?? "未知赛道",
-                    currentLap);
+                    currentSourceName,
+                    currentLap,
+                    lifetimeCancellation.Token);
                 MessageBox.Show(
                     $"已导出：\n{dialog.FileName}",
                     "导出完成",
@@ -151,14 +174,73 @@ internal sealed partial class MainWindow
             catch (Exception exception)
             {
                 MessageBox.Show(
-                    $"无法导出遥测：{exception.Message}",
+                    $"无法导出单圈遥测：{exception.Message}",
                     "导出失败",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
+            finally
+            {
+                exportRecording.IsEnabled = currentLap is not null;
+            }
         };
 
-        trackSelector.SelectedIndex = 0;
+        openRecording.Click += async (_, _) =>
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = "打开 LazyForza 遥测录制",
+                Filter = "LazyForza 遥测录制 (*.lfztelemetry)|*.lfztelemetry|所有文件 (*.*)|*.*",
+                CheckFileExists = true,
+                Multiselect = false
+            };
+            if (dialog.ShowDialog(this) != true) return;
+
+            timer.Stop();
+            playing = false;
+            openRecording.IsEnabled = false;
+            fileStatus.Text = $"正在读取 {Path.GetFileName(dialog.FileName)}…";
+            try
+            {
+                var replay = await TelemetryRecordingAnalysis.LoadAsync(
+                    dialog.FileName,
+                    lifetimeCancellation.Token);
+                trackSelector.SelectedIndex = -1;
+                lapSelector.SelectedIndex = -1;
+                currentLap = replay.Lap;
+                currentTrack = null;
+                currentSourceName = replay.TrackName ??
+                                    Path.GetFileNameWithoutExtension(replay.SourcePath);
+                elapsed = 0;
+                previousTick = DateTimeOffset.UtcNow;
+                exportRecording.IsEnabled = true;
+                fileStatus.Text = replay.Metadata.ContentKind == TelemetryRecordingContentKind.SingleLap
+                    ? $"{Path.GetFileName(replay.SourcePath)} · 单圈分析导出 · " +
+                      $"{replay.Lap.Samples.Count:N0} 样本 · {AnalysisTime(replay.Lap.TotalSeconds, false)}"
+                    : $"{Path.GetFileName(replay.SourcePath)} · 原始 {replay.FrameCount:N0} 帧 · " +
+                      $"工作台 {replay.Lap.Samples.Count:N0} 样本 · {AnalysisTime(replay.Lap.TotalSeconds, false)}";
+                RenderReplay();
+            }
+            catch (OperationCanceledException)
+            {
+                fileStatus.Text = "已取消读取录制文件。";
+            }
+            catch (Exception exception)
+            {
+                fileStatus.Text = "无法读取该录制文件。";
+                MessageBox.Show(
+                    exception.Message,
+                    "回放文件无效",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            finally
+            {
+                openRecording.IsEnabled = true;
+            }
+        };
+
+        if (tracks.Length > 0) trackSelector.SelectedIndex = 0;
         stack.Unloaded += (_, _) => timer.Stop();
         return Scroll(stack);
 
@@ -244,8 +326,62 @@ internal sealed partial class MainWindow
                 "MutedBrush")));
             panel.Children.Add(metrics);
 
+            replayCursor = new LapAnalysisCursor();
+            replayCursor.CommitRequested += (_, position) =>
+            {
+                if (currentLap is null ||
+                    timeline is null)
+                    return;
+                var sampleIndex = ChartInteractionAlgorithms.FindNearestProgressSample(
+                    currentLap.Samples,
+                    position.ProgressMeters);
+                elapsed = currentLap.Samples[sampleIndex].ElapsedSeconds;
+                timeline.Value = elapsed;
+            };
+            LapSeriesLegendEntry[] replayLegend =
+            [
+                new LapSeriesLegendEntry(
+                    AnalysisTime(currentLap.TotalSeconds, false),
+                    $"{PerformanceClassName(currentLap.Vehicle.CarClass)} {currentLap.Vehicle.PerformanceIndex}")
+            ];
+            var speedChartPanel = new Grid { Height = 260 };
+            speedChartPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            speedChartPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            var speedChartTitle = Label(
+                "速度曲线 · 悬停联动查看，按下左键定位时间",
+                13,
+                FontWeights.SemiBold);
+            speedChartTitle.Margin = new Thickness(0, 0, 0, 8);
+            speedChartPanel.Children.Add(speedChartTitle);
+            var speedChart = new LapTelemetryChart(
+                [currentLap],
+                currentLap.Samples.Max(sample => sample.S),
+                replayLegend,
+                replayCursor);
+            Grid.SetRow(speedChart, 1);
+            speedChartPanel.Children.Add(speedChart);
+            panel.Children.Add(Card(speedChartPanel));
+
+            var inputChartPanel = new Grid { Height = 230, Margin = new Thickness(0, 12, 0, 0) };
+            inputChartPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            inputChartPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            var inputChartTitle = Label(
+                "驾驶输入曲线 · 油门 / 制动 / 方向 · 按下左键定位时间",
+                13,
+                FontWeights.SemiBold);
+            inputChartTitle.Margin = new Thickness(0, 0, 0, 8);
+            inputChartPanel.Children.Add(inputChartTitle);
+            var inputChart = new LapInputChart(
+                currentLap,
+                currentLap.Samples.Max(sample => sample.S),
+                replayCursor);
+            Grid.SetRow(inputChart, 1);
+            inputChartPanel.Children.Add(inputChart);
+            panel.Children.Add(Card(inputChartPanel));
+
             var mapPanel = new Grid
             {
+                Margin = new Thickness(0, 12, 0, 0),
                 Height = LapAnalysisVisualLayout.AdaptiveMapHeight(
                     ActualHeight > 0 ? ActualHeight : Height)
             };
@@ -253,7 +389,7 @@ internal sealed partial class MainWindow
             mapPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             var header = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
             header.Children.Add(Label(
-                $"{currentTrack?.Name ?? "未知赛道"} · 回放走线",
+                $"{currentSourceName} · 回放走线 · 按下左键定位时间",
                 13,
                 FontWeights.SemiBold));
             mapView = new TrackMapView(
@@ -262,7 +398,8 @@ internal sealed partial class MainWindow
                 [new LapSeriesLegendEntry(
                     AnalysisTime(currentLap.TotalSeconds, false),
                     $"{PerformanceClassName(currentLap.Vehicle.CarClass)} {currentLap.Vehicle.PerformanceIndex}")],
-                dynamicsLapId: currentLap.Id);
+                dynamicsLapId: currentLap.Id,
+                linkedCursor: replayCursor);
             var layerControls = DynamicsLayerControls(mapView, _ => { });
             layerControls.Margin = new Thickness(0, 7, 0, 0);
             header.Children.Add(layerControls);

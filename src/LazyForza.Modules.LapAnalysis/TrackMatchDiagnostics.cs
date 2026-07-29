@@ -3,6 +3,7 @@ using LazyForza.Domain;
 namespace LazyForza.Modules.LapAnalysis;
 
 public sealed record TrackMatchCandidateDiagnostic(
+    Guid TrackId,
     string TrackName,
     TrackLayoutKind LayoutKind,
     string? Category,
@@ -13,6 +14,22 @@ public sealed record TrackMatchCandidateDiagnostic(
     double ProgressMeters,
     double ValidRatio,
     string? EliminationReason);
+
+public sealed record TrackCorrectionCandidate(
+    Guid TrackId,
+    string TrackName,
+    TrackLayoutKind LayoutKind,
+    string? Category,
+    double LengthMeters,
+    bool IsCurrentTrack,
+    int? SuggestedRank,
+    string Evidence);
+
+public sealed record TrackCorrectionResult(
+    Guid TrackId,
+    string TrackName,
+    string? PreviousTrackName,
+    string Message);
 
 public sealed record TrackMatchDiagnostics(
     DateTimeOffset UpdatedAt,

@@ -224,6 +224,37 @@ internal sealed record LapVisualHit(
     int SeriesIndex,
     Point ScreenPoint);
 
+internal readonly record struct LapAnalysisCursorPosition(Guid LapId, double ProgressMeters);
+
+internal sealed class LapAnalysisCursor
+{
+    public event Action<object, LapAnalysisCursorPosition?>? Changed;
+    public event Action<object, LapAnalysisCursorPosition>? CommitRequested;
+
+    public LapAnalysisCursorPosition? Position { get; private set; }
+
+    public void Set(object source, Guid lapId, double progressMeters)
+    {
+        var next = new LapAnalysisCursorPosition(lapId, Math.Max(0, progressMeters));
+        if (Position == next) return;
+        Position = next;
+        Changed?.Invoke(source, next);
+    }
+
+    public void Clear(object source)
+    {
+        if (Position is null) return;
+        Position = null;
+        Changed?.Invoke(source, null);
+    }
+
+    public void Commit(object source)
+    {
+        if (Position is { } position)
+            CommitRequested?.Invoke(source, position);
+    }
+}
+
 internal sealed class LapTelemetryChart : FrameworkElement
 {
     private readonly LapRecord[] laps;
@@ -231,6 +262,7 @@ internal sealed class LapTelemetryChart : FrameworkElement
     private readonly double maximumSpeed;
     private readonly double progressExtent;
     private readonly ToolTip hoverToolTip;
+    private readonly LapAnalysisCursor? linkedCursor;
     private LapVisualHit? hover;
     private DrawingGroup? baseDrawing;
     private ChartDrawingKey? baseDrawingKey;
@@ -238,7 +270,8 @@ internal sealed class LapTelemetryChart : FrameworkElement
     public LapTelemetryChart(
         IReadOnlyList<LapRecord> laps,
         double? trackLengthMeters = null,
-        IReadOnlyList<LapSeriesLegendEntry>? legendEntries = null)
+        IReadOnlyList<LapSeriesLegendEntry>? legendEntries = null,
+        LapAnalysisCursor? linkedCursor = null)
     {
         this.laps = laps.Where(lap => lap.Samples.Count >= 2).Take(4).ToArray();
         this.legendEntries = (legendEntries ?? [])
@@ -255,12 +288,20 @@ internal sealed class LapTelemetryChart : FrameworkElement
         progressExtent = ChartInteractionAlgorithms.ResolveProgressExtent(
             this.laps.Select(lap => lap.Samples),
             trackLengthMeters);
+        this.linkedCursor = linkedCursor;
+        if (linkedCursor is not null) linkedCursor.Changed += OnLinkedCursorChanged;
         hoverToolTip = CreateToolTip(this);
         ClipToBounds = true;
         SnapsToDevicePixels = true;
         MouseMove += (_, eventArgs) => UpdateHover(eventArgs.GetPosition(this));
         MouseLeave += (_, _) => ClearHover();
-        Unloaded += (_, _) => hoverToolTip.IsOpen = false;
+        PreviewMouseLeftButtonDown += (_, _) => linkedCursor?.Commit(this);
+        Unloaded += (_, _) =>
+        {
+            hoverToolTip.IsOpen = false;
+            if (this.linkedCursor is not null)
+                this.linkedCursor.Changed -= OnLinkedCursorChanged;
+        };
     }
 
     protected override void OnRender(DrawingContext drawingContext)
@@ -409,13 +450,41 @@ internal sealed class LapTelemetryChart : FrameworkElement
         hoverToolTip.VerticalOffset = Math.Min(pointer.Y + 14, Math.Max(8, ActualHeight - 145));
         hoverToolTip.IsOpen = true;
         Cursor = Cursors.Cross;
+        linkedCursor?.Set(this, next.Lap.Id, next.Sample.S);
         if (changed) InvalidateVisual();
     }
 
-    private void ClearHover()
+    private void ClearHover(bool publish = true)
     {
         if (hover is null && !hoverToolTip.IsOpen) return;
         hover = null;
+        hoverToolTip.IsOpen = false;
+        Cursor = Cursors.Arrow;
+        if (publish) linkedCursor?.Clear(this);
+        InvalidateVisual();
+    }
+
+    private void OnLinkedCursorChanged(object source, LapAnalysisCursorPosition? position)
+    {
+        if (ReferenceEquals(source, this)) return;
+        if (position is null)
+        {
+            ClearHover(publish: false);
+            return;
+        }
+
+        var seriesIndex = Array.FindIndex(laps, lap => lap.Id == position.Value.LapId);
+        if (seriesIndex < 0) seriesIndex = 0;
+        if (seriesIndex < 0 || seriesIndex >= laps.Length) return;
+        var lap = laps[seriesIndex];
+        var sampleIndex = ChartInteractionAlgorithms.FindNearestProgressSample(
+            lap.Samples,
+            position.Value.ProgressMeters);
+        hover = new LapVisualHit(
+            lap,
+            lap.Samples[sampleIndex],
+            seriesIndex,
+            default);
         hoverToolTip.IsOpen = false;
         Cursor = Cursors.Arrow;
         InvalidateVisual();
@@ -546,6 +615,286 @@ internal sealed class LapTelemetryChart : FrameworkElement
     }
 }
 
+internal sealed class LapInputChart : FrameworkElement
+{
+    private static readonly Color ThrottleColor = Color.FromRgb(57, 217, 138);
+    private static readonly Color BrakeColor = Color.FromRgb(255, 104, 117);
+    private static readonly Color SteeringColor = Color.FromRgb(32, 184, 207);
+    private readonly LapRecord lap;
+    private readonly double progressExtent;
+    private readonly ToolTip hoverToolTip;
+    private readonly LapAnalysisCursor linkedCursor;
+    private LapSample? hover;
+    private DrawingGroup? baseDrawing;
+    private Rect baseBounds;
+
+    public LapInputChart(
+        LapRecord lap,
+        double? trackLengthMeters,
+        LapAnalysisCursor linkedCursor)
+    {
+        this.lap = lap;
+        this.linkedCursor = linkedCursor;
+        progressExtent = ChartInteractionAlgorithms.ResolveProgressExtent(
+            [lap.Samples],
+            trackLengthMeters);
+        hoverToolTip = LapTelemetryChart.CreateToolTip(this);
+        linkedCursor.Changed += OnLinkedCursorChanged;
+        ClipToBounds = true;
+        SnapsToDevicePixels = true;
+        MouseMove += (_, eventArgs) => UpdateHover(eventArgs.GetPosition(this));
+        MouseLeave += (_, _) => ClearHover();
+        PreviewMouseLeftButtonDown += (_, _) => linkedCursor.Commit(this);
+        Unloaded += (_, _) =>
+        {
+            hoverToolTip.IsOpen = false;
+            linkedCursor.Changed -= OnLinkedCursorChanged;
+        };
+    }
+
+    protected override void OnRender(DrawingContext drawingContext)
+    {
+        base.OnRender(drawingContext);
+        if (!TryBounds(out var bounds)) return;
+        EnsureBaseDrawing(bounds);
+        if (baseDrawing is not null) drawingContext.DrawDrawing(baseDrawing);
+        if (hover is null) return;
+
+        var x = XForProgress(hover.S, bounds);
+        drawingContext.DrawLine(
+            new Pen(new SolidColorBrush(Color.FromArgb(105, 238, 244, 248)), 1)
+            {
+                DashStyle = DashStyles.Dash
+            },
+            new Point(x, bounds.Top),
+            new Point(x, bounds.Bottom));
+        DrawValueMarker(drawingContext, x, ValueY(hover.Accel, bounds), ThrottleColor);
+        DrawValueMarker(drawingContext, x, ValueY(hover.Brake, bounds), BrakeColor);
+        if (hover.Dynamics is { } dynamics)
+            DrawValueMarker(
+                drawingContext,
+                x,
+                ValueY((dynamics.Steering + 1) / 2, bounds),
+                SteeringColor);
+    }
+
+    private void EnsureBaseDrawing(Rect bounds)
+    {
+        if (baseDrawing is not null && baseBounds == bounds) return;
+        var drawing = new DrawingGroup();
+        using (var context = drawing.Open())
+        {
+            context.DrawRectangle(
+                new SolidColorBrush(Color.FromRgb(18, 23, 30)),
+                new Pen(new SolidColorBrush(Color.FromRgb(48, 58, 72)), 1),
+                bounds);
+            var gridPen = new Pen(new SolidColorBrush(Color.FromArgb(24, 122, 155, 174)), 1);
+            for (var index = 1; index < 5; index++)
+            {
+                var x = bounds.Left + bounds.Width * index / 5;
+                context.DrawLine(gridPen, new Point(x, bounds.Top), new Point(x, bounds.Bottom));
+            }
+            for (var index = 1; index < 4; index++)
+            {
+                var y = bounds.Top + bounds.Height * index / 4;
+                context.DrawLine(gridPen, new Point(bounds.Left, y), new Point(bounds.Right, y));
+            }
+            context.DrawLine(
+                new Pen(new SolidColorBrush(Color.FromArgb(90, SteeringColor.R, SteeringColor.G, SteeringColor.B)), 1)
+                {
+                    DashStyle = DashStyles.Dash
+                },
+                new Point(bounds.Left, ValueY(0.5, bounds)),
+                new Point(bounds.Right, ValueY(0.5, bounds)));
+            DrawCurve(context, bounds, sample => sample.Accel, ThrottleColor, 2.1);
+            DrawCurve(context, bounds, sample => sample.Brake, BrakeColor, 2.1);
+            if (lap.Samples.Any(sample => sample.Dynamics is not null))
+                DrawCurve(
+                    context,
+                    bounds,
+                    sample => sample.Dynamics is { } dynamics ? (dynamics.Steering + 1) / 2 : 0.5,
+                    SteeringColor,
+                    1.7);
+            DrawLegend(context, bounds);
+        }
+        if (drawing.CanFreeze) drawing.Freeze();
+        baseDrawing = drawing;
+        baseBounds = bounds;
+    }
+
+    private void DrawCurve(
+        DrawingContext context,
+        Rect bounds,
+        Func<LapSample, double> value,
+        Color color,
+        double thickness)
+    {
+        if (lap.Samples.Count < 2) return;
+        var geometry = new StreamGeometry();
+        using (var path = geometry.Open())
+        {
+            path.BeginFigure(
+                new Point(
+                    XForProgress(lap.Samples[0].S, bounds),
+                    ValueY(value(lap.Samples[0]), bounds)),
+                isFilled: false,
+                isClosed: false);
+            for (var index = 1; index < lap.Samples.Count; index++)
+            {
+                path.LineTo(
+                    new Point(
+                        XForProgress(lap.Samples[index].S, bounds),
+                        ValueY(value(lap.Samples[index]), bounds)),
+                    isStroked: true,
+                    isSmoothJoin: true);
+            }
+        }
+        geometry.Freeze();
+        var pen = new Pen(new SolidColorBrush(color), thickness)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round
+        };
+        pen.Freeze();
+        context.DrawGeometry(null, pen, geometry);
+    }
+
+    private static void DrawLegend(DrawingContext context, Rect bounds)
+    {
+        var pixelsPerDip = 1d;
+        var items = new[]
+        {
+            ("油门", ThrottleColor),
+            ("制动", BrakeColor),
+            ("方向（中线为回正）", SteeringColor)
+        };
+        var x = bounds.Left + 10;
+        foreach (var (text, color) in items)
+        {
+            context.DrawLine(
+                new Pen(new SolidColorBrush(color), 2.5),
+                new Point(x, bounds.Top + 14),
+                new Point(x + 17, bounds.Top + 14));
+            var formatted = new FormattedText(
+                text,
+                System.Globalization.CultureInfo.CurrentUICulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Microsoft YaHei UI"),
+                10,
+                new SolidColorBrush(Color.FromRgb(214, 224, 232)),
+                pixelsPerDip);
+            context.DrawText(formatted, new Point(x + 23, bounds.Top + 6));
+            x += 23 + formatted.Width + 18;
+        }
+    }
+
+    private void UpdateHover(Point pointer)
+    {
+        if (!TryBounds(out var bounds) || !bounds.Contains(pointer))
+        {
+            ClearHover();
+            return;
+        }
+        var progress = Math.Clamp(
+            (pointer.X - bounds.Left) / bounds.Width * progressExtent,
+            0,
+            progressExtent);
+        var sampleIndex = ChartInteractionAlgorithms.FindNearestProgressSample(lap.Samples, progress);
+        SetHover(lap.Samples[sampleIndex], pointer, publish: true);
+    }
+
+    private void SetHover(LapSample sample, Point pointer, bool publish)
+    {
+        var changed = !ReferenceEquals(hover, sample);
+        hover = sample;
+        if (publish)
+        {
+            var steering = sample.Dynamics is { } dynamics
+                ? $"{dynamics.Steering:+0.00;-0.00;0.00}"
+                : "旧圈无数据";
+            hoverToolTip.Content = new TextBlock
+            {
+                Text =
+                    $"距离 {sample.S / 1000:0.000} km · 时间 {TimeSpan.FromSeconds(sample.ElapsedSeconds):m\\:ss\\.fff}\n" +
+                    $"速度 {sample.SpeedMps * 3.6:0.0} km/h · 油门 {sample.Accel:P0} · 制动 {sample.Brake:P0}\n" +
+                    $"方向 {steering}",
+                FontFamily = new FontFamily("Microsoft YaHei UI"),
+                FontSize = 13,
+                Foreground = new SolidColorBrush(Color.FromRgb(244, 247, 250)),
+                LineHeight = 18
+            };
+            hoverToolTip.HorizontalOffset = Math.Min(pointer.X + 14, Math.Max(8, ActualWidth - 270));
+            hoverToolTip.VerticalOffset = Math.Min(pointer.Y + 14, Math.Max(8, ActualHeight - 110));
+            hoverToolTip.IsOpen = true;
+            Cursor = Cursors.Cross;
+            linkedCursor.Set(this, lap.Id, sample.S);
+        }
+        else
+        {
+            hoverToolTip.IsOpen = false;
+            Cursor = Cursors.Arrow;
+        }
+        if (changed) InvalidateVisual();
+    }
+
+    private void ClearHover(bool publish = true)
+    {
+        if (hover is null && !hoverToolTip.IsOpen) return;
+        hover = null;
+        hoverToolTip.IsOpen = false;
+        Cursor = Cursors.Arrow;
+        if (publish) linkedCursor.Clear(this);
+        InvalidateVisual();
+    }
+
+    private void OnLinkedCursorChanged(object source, LapAnalysisCursorPosition? position)
+    {
+        if (ReferenceEquals(source, this)) return;
+        if (position is null)
+        {
+            ClearHover(publish: false);
+            return;
+        }
+        var sampleIndex = ChartInteractionAlgorithms.FindNearestProgressSample(
+            lap.Samples,
+            position.Value.ProgressMeters);
+        SetHover(lap.Samples[sampleIndex], default, publish: false);
+    }
+
+    private bool TryBounds(out Rect bounds)
+    {
+        if (lap.Samples.Count < 2 || ActualWidth <= 0 || ActualHeight <= 0)
+        {
+            bounds = Rect.Empty;
+            return false;
+        }
+        bounds = new Rect(42, 10, Math.Max(1, ActualWidth - 58), Math.Max(1, ActualHeight - 24));
+        return true;
+    }
+
+    private double XForProgress(double progress, Rect bounds) =>
+        bounds.Left + bounds.Width * Math.Clamp(progress / Math.Max(1, progressExtent), 0, 1);
+
+    private static double ValueY(double value, Rect bounds) =>
+        bounds.Bottom - bounds.Height * Math.Clamp(value, 0, 1);
+
+    private static void DrawValueMarker(
+        DrawingContext context,
+        double x,
+        double y,
+        Color color)
+    {
+        context.DrawEllipse(
+            new SolidColorBrush(Color.FromRgb(14, 21, 29)),
+            new Pen(Brushes.White, 1.2),
+            new Point(x, y),
+            4.5,
+            4.5);
+        context.DrawEllipse(new SolidColorBrush(color), null, new Point(x, y), 2.5, 2.5);
+    }
+}
+
 internal sealed class TrackMapView : FrameworkElement
 {
     private const double MinimumZoom = 1;
@@ -560,6 +909,7 @@ internal sealed class TrackMapView : FrameworkElement
     private readonly TrackEndpointSummary? endpoints;
     private readonly Guid dynamicsLapId;
     private readonly ToolTip hoverToolTip;
+    private readonly LapAnalysisCursor? linkedCursor;
     private readonly double mapMinimumX;
     private readonly double mapMinimumZ;
     private readonly double mapSpanX;
@@ -586,7 +936,8 @@ internal sealed class TrackMapView : FrameworkElement
         TrackTemplate? track,
         IReadOnlyList<LapSeriesLegendEntry>? legendEntries = null,
         IReadOnlyList<CornerMapAnnotation>? cornerAnnotations = null,
-        Guid? dynamicsLapId = null)
+        Guid? dynamicsLapId = null,
+        LapAnalysisCursor? linkedCursor = null)
     {
         this.laps = laps.Where(lap => lap.Samples.Count >= 2).Take(4).ToArray();
         this.legendEntries = (legendEntries ?? [])
@@ -598,6 +949,8 @@ internal sealed class TrackMapView : FrameworkElement
         this.dynamicsLapId = dynamicsLapId ??
                              this.laps.FirstOrDefault()?.Id ??
                              Guid.Empty;
+        this.linkedCursor = linkedCursor;
+        if (linkedCursor is not null) linkedCursor.Changed += OnLinkedCursorChanged;
         trackPoints = track?.Points.ToArray() ?? [];
         layoutKind = track?.LayoutKind ?? TrackLayoutKind.Circuit;
         endpoints = ChartInteractionAlgorithms.SummarizeTrackEndpoints(trackPoints) ??
@@ -611,6 +964,7 @@ internal sealed class TrackMapView : FrameworkElement
         Focusable = true;
         MouseWheel += OnMouseWheel;
         MouseMove += OnMouseMove;
+        PreviewMouseLeftButtonDown += (_, _) => linkedCursor?.Commit(this);
         MouseLeftButtonDown += OnMouseLeftButtonDown;
         MouseLeftButtonUp += OnMouseLeftButtonUp;
         MouseLeave += (_, _) =>
@@ -618,7 +972,12 @@ internal sealed class TrackMapView : FrameworkElement
             if (!dragging) ClearHover();
         };
         LostMouseCapture += (_, _) => dragging = false;
-        Unloaded += (_, _) => hoverToolTip.IsOpen = false;
+        Unloaded += (_, _) =>
+        {
+            hoverToolTip.IsOpen = false;
+            if (this.linkedCursor is not null)
+                this.linkedCursor.Changed -= OnLinkedCursorChanged;
+        };
     }
 
     public bool ShowEndpoints
@@ -865,13 +1224,42 @@ internal sealed class TrackMapView : FrameworkElement
         hoverToolTip.VerticalOffset = Math.Min(pointer.Y + 14, Math.Max(8, ActualHeight - 165));
         hoverToolTip.IsOpen = true;
         Cursor = Cursors.None;
+        linkedCursor?.Set(this, best.Lap.Id, best.Sample.S);
         if (changed) InvalidateVisual();
     }
 
-    private void ClearHover()
+    private void ClearHover(bool publish = true)
     {
         if (hover is null && cornerHover is null && !hoverToolTip.IsOpen) return;
         hover = null;
+        cornerHover = null;
+        hoverToolTip.IsOpen = false;
+        if (!dragging) Cursor = viewport.Zoom > MinimumZoom ? Cursors.Hand : Cursors.Arrow;
+        if (publish) linkedCursor?.Clear(this);
+        InvalidateVisual();
+    }
+
+    private void OnLinkedCursorChanged(object source, LapAnalysisCursorPosition? position)
+    {
+        if (ReferenceEquals(source, this)) return;
+        if (position is null)
+        {
+            ClearHover(publish: false);
+            return;
+        }
+
+        var seriesIndex = Array.FindIndex(laps, lap => lap.Id == position.Value.LapId);
+        if (seriesIndex < 0) seriesIndex = 0;
+        if (seriesIndex < 0 || seriesIndex >= laps.Length) return;
+        var lap = laps[seriesIndex];
+        var sampleIndex = ChartInteractionAlgorithms.FindNearestProgressSample(
+            lap.Samples,
+            position.Value.ProgressMeters);
+        hover = new LapVisualHit(
+            lap,
+            lap.Samples[sampleIndex],
+            seriesIndex,
+            default);
         cornerHover = null;
         hoverToolTip.IsOpen = false;
         if (!dragging) Cursor = viewport.Zoom > MinimumZoom ? Cursors.Hand : Cursors.Arrow;
@@ -1572,6 +1960,7 @@ internal sealed class TrackMapView : FrameworkElement
         var changed = !ReferenceEquals(cornerHover, annotation);
         cornerHover = annotation;
         hover = null;
+        linkedCursor?.Set(this, annotation.LapId, annotation.Window.ApexS);
         if (changed)
         {
             hoverToolTip.BorderBrush = new SolidColorBrush(annotation.Accent);

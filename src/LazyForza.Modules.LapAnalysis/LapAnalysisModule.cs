@@ -162,6 +162,38 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         ? Volatile.Read(ref currentCompetitionSnapshot)
         : GetRecentCompetition()?.Snapshot;
     public TrackTemplate? CurrentTrack => track;
+    public IReadOnlyList<TrackCorrectionCandidate> CorrectionCandidates
+    {
+        get
+        {
+            var diagnostics = MatchDiagnostics;
+            var suggested = diagnostics.TopCandidates
+                .Select((candidate, index) => (candidate, rank: index + 1))
+                .ToDictionary(item => item.candidate.TrackId, item => item);
+            return compatibleTracks
+                .Select(candidate =>
+                {
+                    suggested.TryGetValue(candidate.Track.Id, out var match);
+                    var evidence = match.candidate is null
+                        ? "未进入当前前三候选，可按官方赛事名称人工核对。"
+                        : $"候选 {match.rank} · 平均偏差 " +
+                          $"{(match.candidate.MeanDistanceMeters is double mean ? $"{mean:0.0} m" : "—")} · " +
+                          $"路线进度 {match.candidate.ProgressMeters:0} m · 有效率 {match.candidate.ValidRatio:P0}";
+                    return new TrackCorrectionCandidate(
+                        candidate.Track.Id,
+                        candidate.Track.Name,
+                        candidate.Track.LayoutKind,
+                        candidate.Track.Category,
+                        candidate.Track.LengthMeters,
+                        track?.Id == candidate.Track.Id,
+                        match.candidate is null ? null : match.rank,
+                        evidence);
+                })
+                .OrderBy(candidate => candidate.SuggestedRank ?? int.MaxValue)
+                .ThenBy(candidate => candidate.TrackName, StringComparer.CurrentCulture)
+                .ToArray();
+        }
+    }
     public IReadOnlyList<LapSummary> VisibleLaps
     {
         get { lock (lapGate) return visibleLaps.ToArray(); }
@@ -1348,6 +1380,101 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         PublishWaitingForCompetition();
     }
 
+    public TrackCorrectionResult CorrectTrackMatch(Guid trackId)
+    {
+        if (!competitionActive)
+            throw new InvalidOperationException("赛道识别纠错只能应用于当前正在进行的比赛。");
+        if (store.LoadTrack(trackId) is not { } saved || !IsCompatible(saved.Track, saved.Sectors))
+            throw new InvalidOperationException("所选赛道与当前遥测来源或分段算法版本不兼容。");
+
+        var previousTrackName = track?.Name;
+        var compatibleTrack = compatibleTracks.FirstOrDefault(candidate => candidate.Track.Id == saved.Track.Id) ??
+                              new CompatibleTrack(saved.Track, saved.Sectors);
+        track = saved.Track;
+        trackSpatialIndex = compatibleTrack.RouteSpatialIndex;
+        sectors = saved.Sectors;
+        sectorStartTimes = new double[sectors.Count];
+        completedSectorTimes = new double?[sectors.Count];
+        forceTrackLearning = false;
+        incompatibleTrackName = null;
+        automaticMatchLocked = true;
+        automaticMatchRejected = false;
+        automaticMatchStarted = false;
+        automaticMatchCandidates.Clear();
+        automaticMatchCoarseEliminated.Clear();
+        automaticMatchFrames.Clear();
+        currentSamples.Clear();
+        projectionIndex = 0;
+        confidentProjectionCount = 0;
+        validProjectionSamples = 0;
+        invalidProjectionSamples = 0;
+        lastS = 0;
+        lapArmed = false;
+        waitingForInitialStartLine = true;
+        currentLapInvalidated = false;
+        observedSectorIndex = 0;
+        trackMatchEverPlausible = true;
+        currentTrackGeometryPlausible = true;
+        ResetSevereDeviationEvidence();
+        store.SetAppSetting(selectionSettingKey, string.Empty);
+        ReloadVisibleLaps();
+
+        var selectedDiagnostic = new TrackMatchCandidateDiagnostic(
+            saved.Track.Id,
+            saved.Track.Name,
+            saved.Track.LayoutKind,
+            saved.Track.Category,
+            saved.Track.LengthMeters,
+            "用户纠正",
+            null,
+            null,
+            0,
+            1,
+            null);
+        Volatile.Write(ref trackMatchDiagnostics, new TrackMatchDiagnostics(
+            DateTimeOffset.UtcNow,
+            "已由用户纠正",
+            compatibleTracks.Count,
+            1,
+            1,
+            [selectedDiagnostic],
+            []));
+        if (Volatile.Read(ref currentCompetitionSnapshot) is { } current)
+        {
+            PublishCompetitionState(current with
+            {
+                Phase = TrackLearningPhase.ComparingLaps,
+                Status = "赛道已由用户纠正。",
+                Instruction = "为保证圈速完整，将从下次经过起点后开始记录。",
+                MatchState = TrackMatchState.Confirmed,
+                MatchConfidence = 1,
+                TrackName = saved.Track.Name,
+                CurrentSector = 0,
+                Sectors = []
+            });
+        }
+
+        LogIfInitialized(
+            $"Track identification corrected by user: from={previousTrackName ?? "none"}, " +
+            $"to={saved.Track.Name} ({saved.Track.Id}), session={sessionId}; recording=next-start.");
+        RecordDiagnostic(
+            "track.user-correction",
+            $"用户将当前比赛赛道纠正为“{saved.Track.Name}”。",
+            true,
+            DateTimeOffset.UtcNow,
+            new Dictionary<string, string>
+            {
+                ["trackId"] = saved.Track.Id.ToString(),
+                ["previousTrack"] = previousTrackName ?? string.Empty,
+                ["sessionId"] = sessionId.ToString()
+            });
+        return new TrackCorrectionResult(
+            saved.Track.Id,
+            saved.Track.Name,
+            previousTrackName,
+            $"已纠正为“{saved.Track.Name}”。为避免保存不完整圈速，将从下次经过起点后开始记录。");
+    }
+
     public void ClearTrackSelection()
     {
         track = null;
@@ -2454,6 +2581,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             string stage,
             string? eliminationReason = null) =>
             new(
+                Saved.Track.Id,
                 Saved.Track.Name,
                 Saved.Track.LayoutKind,
                 Saved.Track.Category,

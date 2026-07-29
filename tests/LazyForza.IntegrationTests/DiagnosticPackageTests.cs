@@ -42,6 +42,7 @@ public sealed class DiagnosticPackageTests
             3,
             [
                 new LazyForza.Modules.LapAnalysis.TrackMatchCandidateDiagnostic(
+                    Guid.NewGuid(),
                     "歌利亚",
                     TrackLayoutKind.PointToPoint,
                     "公路竞速",

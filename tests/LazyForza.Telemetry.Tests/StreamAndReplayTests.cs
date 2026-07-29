@@ -63,6 +63,20 @@ public sealed class StreamAndReplayTests
                 }
             }
 
+            var streamed = new List<TelemetryFrame>();
+            var metadata = await TelemetryRecordingReader.ReadAsync(
+                path,
+                frame =>
+                {
+                    streamed.Add(frame);
+                    return ValueTask.CompletedTask;
+                },
+                CancellationToken.None);
+            Assert.AreEqual("LazyForza.Tests", metadata.Product);
+            Assert.AreEqual("deterministic", metadata.Note);
+            Assert.HasCount(8, streamed);
+            Assert.IsTrue(streamed.All(frame => frame.Source == TelemetrySourceKind.Replay));
+
             var replayed = new List<TelemetryFrame>();
             await new TelemetryReplaySource(path, speed: 0).RunAsync(frame => { replayed.Add(frame); return ValueTask.CompletedTask; }, Assert.Fail, CancellationToken.None);
             Assert.AreEqual(8, replayed.Count);
@@ -127,5 +141,80 @@ public sealed class StreamAndReplayTests
         {
             File.Delete(path);
         }
+    }
+
+    [TestMethod]
+    public async Task SingleLapRecordingRoundTripsAndRejectsRawReplay()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-single-lap-{Guid.NewGuid():N}.lfztelemetry");
+        var corruptPath = Path.Combine(Path.GetTempPath(), $"lazyforza-single-lap-corrupt-{Guid.NewGuid():N}.lfztelemetry");
+        try
+        {
+            var lap = SingleLap();
+            await SingleLapTelemetryRecordingFile.WriteAsync(
+                path,
+                "测试官方赛事",
+                lap,
+                CancellationToken.None);
+
+            var loaded = await SingleLapTelemetryRecordingFile.TryReadAsync(
+                path,
+                CancellationToken.None);
+            Assert.IsNotNull(loaded);
+            Assert.AreEqual(TelemetryRecordingContentKind.SingleLap, loaded.Metadata.ContentKind);
+            Assert.AreEqual("测试官方赛事", loaded.TrackName);
+            Assert.AreEqual(lap.Id, loaded.Lap.Id);
+            Assert.AreEqual(lap.Vehicle, loaded.Lap.Vehicle);
+            Assert.HasCount(lap.Samples.Count, loaded.Lap.Samples);
+            Assert.AreEqual(lap.Samples[1].Dynamics, loaded.Lap.Samples[1].Dynamics);
+
+            var rawReplayError = await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+                await TelemetryRecordingReader.ReadAsync(
+                    path,
+                    _ => ValueTask.CompletedTask,
+                    CancellationToken.None));
+            StringAssert.Contains(rawReplayError.Message, "Replay Workbench");
+
+            File.Copy(path, corruptPath);
+            var corruptBytes = await File.ReadAllBytesAsync(corruptPath);
+            corruptBytes[^1] ^= 0xFF;
+            await File.WriteAllBytesAsync(corruptPath, corruptBytes);
+            var checksumError = await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+                await SingleLapTelemetryRecordingFile.TryReadAsync(
+                    corruptPath,
+                    CancellationToken.None));
+            StringAssert.Contains(checksumError.Message, "checksum");
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+            if (File.Exists(corruptPath)) File.Delete(corruptPath);
+        }
+    }
+
+    private static LapRecord SingleLap()
+    {
+        var dynamics = new LapDynamics(
+            -0.18,
+            new WheelValues(0.1f, 0.2f, 0.3f, 0.4f),
+            new WheelValues(0.05f, 0.06f, 0.07f, 0.08f),
+            new WheelValues(0.12f, 0.22f, 0.32f, 0.42f));
+        return new LapRecord(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            1,
+            3,
+            Guid.NewGuid(),
+            new VehicleProfileFingerprint(6001, 6, 917, 2, 8, 8500, "g", "c"),
+            DateTimeOffset.UnixEpoch,
+            52.345,
+            true,
+            null,
+            [new LapSegment(0, 52.345, true)],
+            [
+                new LapSample(0, 0, 40, 4_500, 4, 1, 0, 0, 10, 2, 20),
+                new LapSample(500, 20, 45, 5_200, 5, 0.8, 0.1, -0.2, 100, 3, 80, dynamics),
+                new LapSample(1_000, 52.345, 38, 4_200, 4, 0.5, 0.4, 0.1, 10, 2, 20, dynamics)
+            ]);
     }
 }

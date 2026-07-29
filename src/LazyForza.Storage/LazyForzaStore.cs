@@ -76,6 +76,20 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
 
     public string? GetAppSetting(string key) => database.QueryText($"SELECT Value FROM AppSettings WHERE Key={Quote(key)} LIMIT 1;");
 
+    public void AttachRawRecording(
+        Guid sessionId,
+        string source,
+        DateTimeOffset startedAt,
+        string recordingPath) =>
+        database.Execute(
+            $"INSERT INTO Sessions(Id,Source,StartedAt,RawRecordingPath) VALUES(" +
+            $"{Quote(sessionId.ToString())},{Quote(source)},{Quote(startedAt.ToString("O", CultureInfo.InvariantCulture))},{Quote(Path.GetFullPath(recordingPath))}) " +
+            "ON CONFLICT(Id) DO UPDATE SET RawRecordingPath=excluded.RawRecordingPath;");
+
+    public string? GetSessionRawRecordingPath(Guid sessionId) =>
+        database.QueryText(
+            $"SELECT RawRecordingPath FROM Sessions WHERE Id={Quote(sessionId.ToString())} LIMIT 1;");
+
     public ValueTask<string?> SaveShiftLearningAsync(
         ShiftLearningSnapshot snapshot,
         CancellationToken cancellationToken)
