@@ -33,6 +33,84 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
+    public async Task GitHubReleaseParsesExplicitUpdateTypeAndHidesMetadataMarker()
+    {
+        var packageBytes = Encoding.UTF8.GetBytes("package");
+        var hash = Convert.ToHexString(SHA256.HashData(packageBytes)).ToLowerInvariant();
+        var json = ReleaseJson(
+            "v1.4.0",
+            packageBytes.Length,
+            $"sha256:{hash}",
+            "<!-- lazyforza-update-type: major-feature -->\n\n## 更新内容\n\n- 新增功能");
+        using var http = new HttpClient(new FakeHttpHandler(request =>
+            request.RequestUri == GitHubReleaseClient.LatestReleaseApi
+                ? JsonResponse(json)
+                : new HttpResponseMessage(HttpStatusCode.NotFound)));
+        using var client = new GitHubReleaseClient(http);
+
+        var update = await client.CheckForUpdateAsync(
+            new Version(1, 3, 1),
+            CancellationToken.None);
+
+        Assert.IsNotNull(update);
+        Assert.AreEqual(UpdateReleaseType.MajorFeature, update.Type);
+        Assert.AreEqual("重大功能更新", update.Type.DisplayName());
+        Assert.IsFalse(update.Notes.Contains("lazyforza-update-type", StringComparison.Ordinal));
+        StringAssert.Contains(update.Notes, "新增功能");
+    }
+
+    [TestMethod]
+    public async Task GitCodeReleaseParsesExplicitFeatureUpdateType()
+    {
+        var json = GitCodeReleaseJson(
+            "v1.3.2",
+            body: "<!-- lazyforza-update-type: feature -->\n\n- 增加设置");
+        using var http = new HttpClient(new FakeHttpHandler(request =>
+            request.RequestUri == GitCodeReleaseClient.LatestReleaseApi
+                ? JsonResponse(json)
+                : new HttpResponseMessage(HttpStatusCode.NotFound)));
+        using var client = new GitCodeReleaseClient(http);
+
+        var update = await client.CheckForUpdateAsync(
+            new Version(1, 3, 1),
+            CancellationToken.None);
+
+        Assert.IsNotNull(update);
+        Assert.AreEqual(UpdateReleaseType.Feature, update.Type);
+        Assert.AreEqual("- 增加设置", update.Notes);
+    }
+
+    [TestMethod]
+    public void ReleaseMetadataFallsBackByVersionAndFormatsMarkdownForDisplay()
+    {
+        var major = UpdateReleaseMetadata.Parse(
+            "重大升级",
+            new Version(1, 9, 0),
+            new Version(2, 0, 0));
+        var feature = UpdateReleaseMetadata.Parse(
+            "新增功能",
+            new Version(1, 2, 4),
+            new Version(1, 3, 0));
+        var fix = UpdateReleaseMetadata.Parse(
+            "修复问题",
+            new Version(1, 3, 0),
+            new Version(1, 3, 1));
+        var display = UpdateReleaseMetadata.ToDisplayText(
+            "## 更新内容\n\n- **新增** 回放功能\n> 可以稍后安装");
+
+        Assert.AreEqual(UpdateReleaseType.MajorFeature, major.Type);
+        Assert.AreEqual(UpdateReleaseType.Feature, feature.Type);
+        Assert.AreEqual(UpdateReleaseType.Fix, fix.Type);
+        Assert.AreEqual(
+            $"更新内容{Environment.NewLine}{Environment.NewLine}" +
+            $"• 新增 回放功能{Environment.NewLine}可以稍后安装",
+            display);
+        Assert.AreEqual(
+            "本次发行暂未提供更新说明。",
+            UpdateReleaseMetadata.ToDisplayText(" "));
+    }
+
+    [TestMethod]
     public async Task GitCodeLatestReleaseAcceptsUploadedAssetsWithoutSizeAndRequiresChecksum()
     {
         var json = GitCodeReleaseJson("v1.2.3");
@@ -603,7 +681,11 @@ public sealed class UpdatePipelineTests
             files.OrderBy(pair => pair.Key, StringComparer.Ordinal)
                 .Select(pair => $"{Convert.ToHexString(SHA256.HashData(pair.Value))}  {pair.Key.Replace('\\', '/')}"));
 
-    private static string ReleaseJson(string tag, int packageSize, string digest)
+    private static string ReleaseJson(
+        string tag,
+        int packageSize,
+        string digest,
+        string body = "Stable")
     {
         var version = tag.TrimStart('v');
         var name = $"LazyForza-{version}-win-x64.zip";
@@ -611,7 +693,7 @@ public sealed class UpdatePipelineTests
         {
             tag_name = tag,
             name = $"LazyForza {version}",
-            body = "Stable",
+            body,
             html_url = $"https://github.com/Laz22y/LazyForza/releases/tag/{tag}",
             draft = false,
             prerelease = false,
@@ -632,7 +714,8 @@ public sealed class UpdatePipelineTests
     private static string GitCodeReleaseJson(
         string tag,
         string? packageUrl = null,
-        string? checksumUrl = null)
+        string? checksumUrl = null,
+        string body = "Stable")
     {
         var version = tag.TrimStart('v');
         var packageName = $"LazyForza-{version}-win-x64.zip";
@@ -645,7 +728,7 @@ public sealed class UpdatePipelineTests
             tag_name = tag,
             prerelease = false,
             name = $"LazyForza {version}",
-            body = "Stable",
+            body,
             assets = new[]
             {
                 new

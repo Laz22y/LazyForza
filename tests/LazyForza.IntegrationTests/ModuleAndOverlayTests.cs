@@ -55,7 +55,7 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(8, layout.LapNoMatchConfirmationSeconds);
         Assert.AreEqual(0.5, layout.LapNoMatchFadeSeconds);
         Assert.AreEqual(0.8, layout.LiveHudStaleSeconds);
-        Assert.AreEqual("1.3.1", LazyForza.App.ApplicationVersionInfo.Display);
+        Assert.AreEqual("1.3.2", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]

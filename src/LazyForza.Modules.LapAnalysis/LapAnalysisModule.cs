@@ -2,7 +2,6 @@ using LazyForza.Analysis;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Storage;
-using System.Threading.Channels;
 
 namespace LazyForza.Modules.LapAnalysis;
 
@@ -22,20 +21,19 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private readonly LazyForzaStore store;
     private readonly Func<OverlayLayout> getOverlayLayout;
     private readonly Action<DiagnosticSignal>? diagnosticSink;
+    private readonly LapPersistenceWorker persistence;
+    private readonly LapLifecycleStateMachine lifecycle = new();
+    private readonly AutomaticTrackMatchStateMachine automaticMatch = new();
     private readonly List<TrackPoint> capture = [];
-    private readonly List<LapSample> currentSamples = [];
     private readonly List<LapSummary> visibleLaps = [];
     private readonly Dictionary<Guid, LapRecord> visibleLapDetails = [];
     private readonly List<CompatibleTrack> compatibleTracks = [];
-    private readonly List<TelemetryFrame> automaticMatchFrames = [];
     private readonly Dictionary<Guid, AutomaticMatchCandidate> automaticMatchCandidates = [];
     private readonly List<TrackMatchCandidateDiagnostic> automaticMatchCoarseEliminated = [];
     private readonly object lapGate = new();
     private ITelemetrySubscription? subscription;
     private CancellationTokenSource? runCancellation;
     private Task? runTask;
-    private Channel<PersistenceCommand>? persistenceQueue;
-    private Task? persistenceTask;
     private LapHudState? snapshot;
     private LapHudState? currentCompetitionSnapshot;
     private RecentCompetitionState? recentCompetition;
@@ -43,30 +41,9 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private TrackTemplate? track;
     private TrackSpatialIndex? trackSpatialIndex;
     private IReadOnlyList<SectorDefinition> sectors = [];
-    private ushort? previousLapNumber;
-    private float? previousCurrentLap;
-    private float? previousCurrentRaceTime;
-    private float? previousLastLap;
-    private float lastLapValueAtLapStart;
-    private float? lastRewindLapTime;
-    private TelemetryFrame? lastCompetitionFrame;
-    private DateTimeOffset lastCrossingAt = DateTimeOffset.MinValue;
     private bool captureArmed;
     private bool captureStartConfirmed;
     private bool captureEligibleForPointToPointFinish;
-    private bool competitionActive;
-    private bool competitionSignalSuspended;
-    private bool lapArmed;
-    private bool waitingForInitialStartLine;
-    private int projectionIndex;
-    private int confidentProjectionCount;
-    private double lastS;
-    private double[] sectorStartTimes = [];
-    private double?[] completedSectorTimes = [];
-    private Guid sessionId = Guid.NewGuid();
-    private int validProjectionSamples;
-    private int invalidProjectionSamples;
-    private DateTimeOffset lapStartedAt;
     private IReadOnlyList<SectorComparison>? heldComparisons;
     private DateTimeOffset holdComparisonsUntil;
     private double? heldCumulativeHistoricalDeltaSeconds;
@@ -74,30 +51,56 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private double? liveCumulativeHistoricalDeltaSeconds;
     private DateTimeOffset liveCumulativeHistoricalDeltaUntil;
     private int liveCumulativeHistoricalDeltaSector = -1;
-    private bool currentLapInvalidated;
     private readonly string? expectedTrackSource;
     private readonly string selectionSettingKey;
     private string? incompatibleTrackName;
-    private DateTimeOffset? nonCompetitionDrivingSince;
-    private int observedSectorIndex;
     private bool trackMatchEverPlausible;
     private bool currentTrackGeometryPlausible = true;
     private bool forceTrackLearning;
-    private bool automaticMatchStarted;
-    private bool automaticMatchLocked;
-    private bool automaticMatchRejected;
-    private bool automaticMatchStartedMidLap;
-    private bool automaticMatchStartedAtConfirmedLine;
-    private bool automaticMatchRouteAcquired;
-    private double automaticMatchTravelMeters;
-    private int automaticMatchCoarseEligibleCount;
-    private Vector3F? automaticMatchPreviousPosition;
-    private DateTimeOffset automaticMatchStartedAt;
     private DateTimeOffset? severeDeviationStartedAt;
     private double severeDeviationTravelMeters;
     private Vector3F? severeDeviationPreviousPosition;
     private DateTimeOffset? lastInferredCompetitionEndAt;
     private float lastInferredCompetitionRaceTime;
+
+    // Transitional aliases keep the telemetry algorithm readable while state
+    // ownership and transition rules live in LapLifecycleStateMachine.
+    private List<LapSample> currentSamples => lifecycle.Samples;
+    private ushort? previousLapNumber { get => lifecycle.PreviousLapNumber; set => lifecycle.PreviousLapNumber = value; }
+    private float? previousCurrentLap { get => lifecycle.PreviousCurrentLap; set => lifecycle.PreviousCurrentLap = value; }
+    private float? previousCurrentRaceTime { get => lifecycle.PreviousCurrentRaceTime; set => lifecycle.PreviousCurrentRaceTime = value; }
+    private float? previousLastLap { get => lifecycle.PreviousLastLap; set => lifecycle.PreviousLastLap = value; }
+    private float lastLapValueAtLapStart { get => lifecycle.LastLapValueAtLapStart; set => lifecycle.LastLapValueAtLapStart = value; }
+    private float? lastRewindLapTime { get => lifecycle.LastRewindLapTime; set => lifecycle.LastRewindLapTime = value; }
+    private TelemetryFrame? lastCompetitionFrame { get => lifecycle.LastCompetitionFrame; set => lifecycle.LastCompetitionFrame = value; }
+    private DateTimeOffset lastCrossingAt { get => lifecycle.LastCrossingAt; set => lifecycle.LastCrossingAt = value; }
+    private bool competitionActive { get => lifecycle.CompetitionActive; set => lifecycle.CompetitionActive = value; }
+    private bool competitionSignalSuspended { get => lifecycle.CompetitionSignalSuspended; set => lifecycle.CompetitionSignalSuspended = value; }
+    private bool lapArmed { get => lifecycle.LapArmed; set => lifecycle.LapArmed = value; }
+    private bool waitingForInitialStartLine { get => lifecycle.WaitingForInitialStartLine; set => lifecycle.WaitingForInitialStartLine = value; }
+    private int projectionIndex { get => lifecycle.ProjectionIndex; set => lifecycle.ProjectionIndex = value; }
+    private int confidentProjectionCount { get => lifecycle.ConfidentProjectionCount; set => lifecycle.ConfidentProjectionCount = value; }
+    private double lastS { get => lifecycle.LastS; set => lifecycle.LastS = value; }
+    private double[] sectorStartTimes { get => lifecycle.SectorStartTimes; set => lifecycle.SectorStartTimes = value; }
+    private double?[] completedSectorTimes { get => lifecycle.CompletedSectorTimes; set => lifecycle.CompletedSectorTimes = value; }
+    private Guid sessionId { get => lifecycle.SessionId; set => lifecycle.SessionId = value; }
+    private int validProjectionSamples { get => lifecycle.ValidProjectionSamples; set => lifecycle.ValidProjectionSamples = value; }
+    private int invalidProjectionSamples { get => lifecycle.InvalidProjectionSamples; set => lifecycle.InvalidProjectionSamples = value; }
+    private DateTimeOffset lapStartedAt { get => lifecycle.LapStartedAt; set => lifecycle.LapStartedAt = value; }
+    private bool currentLapInvalidated { get => lifecycle.CurrentLapInvalidated; set => lifecycle.CurrentLapInvalidated = value; }
+    private DateTimeOffset? nonCompetitionDrivingSince { get => lifecycle.NonCompetitionDrivingSince; set => lifecycle.NonCompetitionDrivingSince = value; }
+    private int observedSectorIndex { get => lifecycle.ObservedSectorIndex; set => lifecycle.ObservedSectorIndex = value; }
+    private List<TelemetryFrame> automaticMatchFrames => automaticMatch.Frames;
+    private bool automaticMatchStarted { get => automaticMatch.Started; set => automaticMatch.Started = value; }
+    private bool automaticMatchLocked { get => automaticMatch.Locked; set => automaticMatch.Locked = value; }
+    private bool automaticMatchRejected { get => automaticMatch.Rejected; set => automaticMatch.Rejected = value; }
+    private bool automaticMatchStartedMidLap { get => automaticMatch.StartedMidLap; set => automaticMatch.StartedMidLap = value; }
+    private bool automaticMatchStartedAtConfirmedLine { get => automaticMatch.StartedAtConfirmedLine; set => automaticMatch.StartedAtConfirmedLine = value; }
+    private bool automaticMatchRouteAcquired { get => automaticMatch.RouteAcquired; set => automaticMatch.RouteAcquired = value; }
+    private double automaticMatchTravelMeters { get => automaticMatch.TravelMeters; set => automaticMatch.TravelMeters = value; }
+    private int automaticMatchCoarseEligibleCount { get => automaticMatch.CoarseEligibleCount; set => automaticMatch.CoarseEligibleCount = value; }
+    private Vector3F? automaticMatchPreviousPosition { get => automaticMatch.PreviousPosition; set => automaticMatch.PreviousPosition = value; }
+    private DateTimeOffset automaticMatchStartedAt { get => automaticMatch.StartedAt; set => automaticMatch.StartedAt = value; }
 
     public LapAnalysisModule(
         LazyForzaStore store,
@@ -116,6 +119,14 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         this.store = store;
         this.getOverlayLayout = getOverlayLayout ?? (() => new OverlayLayout());
         this.diagnosticSink = diagnosticSink;
+        persistence = new LapPersistenceWorker(
+            store,
+            LogIfInitialized,
+            exception => RecordDiagnostic(
+                "lap.persistence-failed",
+                $"圈速写入失败：{exception.Message}",
+                true,
+                DateTimeOffset.UtcNow));
         expectedTrackSource = expectedSource is null ? null : TelemetryDataPartition.TrackSource(expectedSource.Value);
         selectionSettingKey = $"lap.selectedTrack.{expectedTrackSource ?? "all"}";
         foreach (var candidateId in store.ListTracks(expectedTrackSource).Select(candidate => candidate.Id))
@@ -224,13 +235,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         runCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         subscription = await Context.Telemetry.SubscribeAsync(ModuleId, runCancellation.Token).ConfigureAwait(false);
         await Context.Hud.AttachAsync(this, cancellationToken).ConfigureAwait(false);
-        persistenceQueue = Channel.CreateUnbounded<PersistenceCommand>(new UnboundedChannelOptions
-        {
-            SingleReader = true,
-            SingleWriter = false,
-            AllowSynchronousContinuations = false
-        });
-        persistenceTask = Task.Run(() => PersistAsync(persistenceQueue.Reader), CancellationToken.None);
+        persistence.Start();
         PublishWaitingForCompetition();
         runTask = Task.Run(() => ConsumeAsync(subscription.Frames, runCancellation.Token), CancellationToken.None);
     }
@@ -244,14 +249,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             try { await runTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
         }
 
-        persistenceQueue?.Writer.TryComplete();
-        if (persistenceTask is not null) await persistenceTask.ConfigureAwait(false);
+        await persistence.StopAsync().ConfigureAwait(false);
 
         await Context.Hud.DetachAsync(Id, cancellationToken).ConfigureAwait(false);
         subscription = null;
         runTask = null;
-        persistenceQueue = null;
-        persistenceTask = null;
         runCancellation?.Dispose();
         runCancellation = null;
         ResetCompetitionSession();
@@ -777,15 +779,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         bool startedAtConfirmedLine,
         string reason)
     {
-        automaticMatchStarted = true;
-        automaticMatchRejected = false;
-        automaticMatchStartedMidLap = allowMidRouteStart;
-        automaticMatchStartedAtConfirmedLine = startedAtConfirmedLine;
-        automaticMatchRouteAcquired = false;
-        automaticMatchTravelMeters = 0;
-        automaticMatchPreviousPosition = null;
-        automaticMatchStartedAt = frame.ArrivalTime;
-        automaticMatchFrames.Clear();
+        automaticMatch.Begin(frame, allowMidRouteStart, startedAtConfirmedLine);
         automaticMatchCandidates.Clear();
         automaticMatchCoarseEliminated.Clear();
         var evaluated = compatibleTracks
@@ -1263,20 +1257,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     private void BeginLap(double currentLap, float lastLap, DateTimeOffset arrivalTime)
     {
-        currentSamples.Clear();
-        projectionIndex = 0;
-        lastS = 0;
-        sectorStartTimes = new double[sectors.Count];
-        completedSectorTimes = new double?[sectors.Count];
-        if (sectorStartTimes.Length > 0) sectorStartTimes[0] = currentLap;
-        observedSectorIndex = 0;
+        lifecycle.BeginLap(currentLap, lastLap, arrivalTime, sectors.Count);
         ResetLiveCumulativeHistoricalDelta();
-        validProjectionSamples = 0;
-        invalidProjectionSamples = 0;
-        currentLapInvalidated = false;
-        lastLapValueAtLapStart = lastLap;
-        lastRewindLapTime = null;
-        lapStartedAt = arrivalTime - TimeSpan.FromSeconds(currentLap);
     }
 
     private LapRecord? CompleteLap(TelemetryFrame frame)
@@ -1335,7 +1317,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 lapProjectionValid ? "sector-coverage-incomplete" : $"projection-low-confidence ({projectionRatio:P0})",
             times, persistedSamples);
         RegisterVisibleLap(lap);
-        QueuePersistence(PersistenceCommand.Save(lap));
+        QueuePersistence(LapPersistenceCommand.Save(lap));
         LogIfInitialized(
             $"Queued lap {lap.Id}: session={sessionId}, total={lap.TotalSeconds:0.000}, timing={resolvedTime.Source}, " +
             $"sampled={sampledTotal:0.000}, current={frame.Raw.CurrentLap:0.000}, last={frame.Raw.LastLap:0.000}, race={frame.Raw.CurrentRaceTime:0.000}, " +
@@ -1399,7 +1381,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             visibleLaps.RemoveAll(lap => lap.Id == lapId);
             visibleLapDetails.Remove(lapId);
         }
-        QueuePersistence(PersistenceCommand.Delete(lapId));
+        QueuePersistence(LapPersistenceCommand.Delete(lapId));
     }
 
     public void DeleteTrackLaps(
@@ -1449,7 +1431,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                          .ToArray())
                 visibleLapDetails.Remove(lapId);
         }
-        QueuePersistence(PersistenceCommand.DeleteTrack(
+        QueuePersistence(LapPersistenceCommand.DeleteTrack(
             trackId,
             performanceClasses?.Order().ToArray(),
             preserveLapIds));
@@ -1633,32 +1615,14 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     private void ResetCompetitionSession()
     {
-        competitionSignalSuspended = false;
-        nonCompetitionDrivingSince = null;
         Volatile.Write(ref currentCompetitionSnapshot, null);
         captureArmed = false;
         captureStartConfirmed = false;
         captureEligibleForPointToPointFinish = false;
-        lapArmed = false;
-        previousLapNumber = null;
-        previousCurrentLap = null;
-        previousCurrentRaceTime = null;
-        previousLastLap = null;
-        lastLapValueAtLapStart = 0;
-        lastRewindLapTime = null;
-        lastCompetitionFrame = null;
-        lastCrossingAt = DateTimeOffset.MinValue;
-        waitingForInitialStartLine = false;
-        currentSamples.Clear();
         capture.Clear();
-        projectionIndex = 0;
-        confidentProjectionCount = 0;
-        validProjectionSamples = 0;
-        invalidProjectionSamples = 0;
+        lifecycle.ResetSession();
         heldComparisons = null;
         ClearCumulativeHistoricalDeltaDisplay();
-        currentLapInvalidated = false;
-        observedSectorIndex = 0;
         trackMatchEverPlausible = false;
         currentTrackGeometryPlausible = true;
         ResetAutomaticMatchState();
@@ -1821,50 +1785,22 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         lastInferredCompetitionEndAt = null;
         ResetAutomaticMatchState();
         ClearRecentCompetition();
-        competitionActive = true;
-        competitionSignalSuspended = false;
-        sessionId = Guid.NewGuid();
-        previousLapNumber = raw.LapNumber;
-        previousCurrentLap = raw.CurrentLap;
-        previousCurrentRaceTime = raw.CurrentRaceTime;
-        previousLastLap = raw.LastLap;
-        lastLapValueAtLapStart = raw.LastLap;
-        lastRewindLapTime = null;
-        lastCompetitionFrame = null;
-        lastCrossingAt = DateTimeOffset.MinValue;
-        lapArmed = false;
+        lifecycle.BeginCompetition(raw, track is null);
         captureArmed = false;
         captureStartConfirmed = false;
         captureEligibleForPointToPointFinish = track is null &&
                                                 raw.CurrentRaceTime <= 5 &&
                                                 raw.CurrentLap <= 5;
-        waitingForInitialStartLine = true;
-        currentSamples.Clear();
         capture.Clear();
-        projectionIndex = 0;
-        confidentProjectionCount = 0;
-        validProjectionSamples = 0;
-        invalidProjectionSamples = 0;
         heldComparisons = null;
         ClearCumulativeHistoricalDeltaDisplay();
-        currentLapInvalidated = false;
-        observedSectorIndex = 0;
         trackMatchEverPlausible = false;
         currentTrackGeometryPlausible = track is null;
     }
 
     private void ResetAutomaticMatchState()
     {
-        automaticMatchStarted = false;
-        automaticMatchLocked = false;
-        automaticMatchRejected = false;
-        automaticMatchStartedMidLap = false;
-        automaticMatchStartedAtConfirmedLine = false;
-        automaticMatchTravelMeters = 0;
-        automaticMatchCoarseEligibleCount = 0;
-        automaticMatchPreviousPosition = null;
-        automaticMatchStartedAt = default;
-        automaticMatchFrames.Clear();
+        automaticMatch.Reset();
         automaticMatchCandidates.Clear();
         automaticMatchCoarseEliminated.Clear();
         Volatile.Write(ref trackMatchDiagnostics, new TrackMatchDiagnostics(
@@ -2026,18 +1962,13 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         }
 
         var maximumDistance = SevereDeviationDistanceMeters(track);
-        var maximumDistanceSquared = maximumDistance * maximumDistance;
-        var minimumDistanceSquared = double.MaxValue;
-        foreach (var point in track.Points)
-        {
-            var dx = point.X - position.X;
-            var dy = point.Y - position.Y;
-            var dz = point.Z - position.Z;
-            minimumDistanceSquared = Math.Min(minimumDistanceSquared, dx * dx + dy * dy + dz * dz);
-            if (minimumDistanceSquared <= maximumDistanceSquared) break;
-        }
-
-        currentTrackGeometryPlausible = minimumDistanceSquared <= maximumDistanceSquared;
+        var projection = trackSpatialIndex?.ProjectNearest(
+            position.X,
+            position.Y,
+            position.Z,
+            maximumDistance);
+        currentTrackGeometryPlausible = projection is { IsValid: true, DistanceMeters: var distance } &&
+                                        distance <= maximumDistance;
         if (currentTrackGeometryPlausible) trackMatchEverPlausible = true;
     }
 
@@ -2126,60 +2057,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             visibleLapDetails.Remove(lapId);
     }
 
-    private void QueuePersistence(PersistenceCommand command)
-    {
-        if (persistenceQueue?.Writer.TryWrite(command) == true) return;
-        Persist(command);
-    }
-
-    private async Task PersistAsync(ChannelReader<PersistenceCommand> reader)
-    {
-        await foreach (var command in reader.ReadAllAsync().ConfigureAwait(false))
-        {
-            try
-            {
-                Persist(command);
-            }
-            catch (Exception exception)
-            {
-                LogIfInitialized($"Lap persistence failed: {exception}");
-                RecordDiagnostic(
-                    "lap.persistence-failed",
-                    $"圈速写入失败：{exception.Message}",
-                    true,
-                    DateTimeOffset.UtcNow);
-            }
-        }
-    }
-
-    private void Persist(PersistenceCommand command)
-    {
-        if (command.Lap is { } lap)
-        {
-            store.SaveLap(lap);
-            LogIfInitialized(
-                $"Persisted lap {lap.Id}: total={lap.TotalSeconds:0.000}, samples={lap.Samples.Count}.");
-            return;
-        }
-
-        if (command.DeleteLapId is Guid lapId)
-        {
-            store.DeleteLap(lapId);
-            LogIfInitialized($"Deleted lap {lapId}.");
-            return;
-        }
-
-        if (command.DeleteTrackLapsId is Guid trackId)
-        {
-            store.DeleteTrackLaps(trackId, command.PerformanceClasses, command.PreserveLapIds);
-            var scope = command.PerformanceClasses is { Length: > 0 }
-                ? $"classes [{string.Join(',', command.PerformanceClasses)}]"
-                : "all classes";
-            LogIfInitialized(command.PreserveLapIds is { Length: > 0 }
-                ? $"Deleted saved laps for track {trackId}, scope={scope}, preserving class bests [{string.Join(',', command.PreserveLapIds)}]."
-                : $"Deleted saved laps for track {trackId}, scope={scope}, including class bests.");
-        }
-    }
+    private void QueuePersistence(LapPersistenceCommand command) => persistence.Enqueue(command);
 
     private bool IsCompatible(TrackTemplate candidate, IReadOnlyList<SectorDefinition> candidateSectors) =>
         (expectedTrackSource is null || candidate.Source == expectedTrackSource) &&
@@ -2227,12 +2105,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     }
 
     private void UpdatePrevious(Fh6RawTelemetry raw)
-    {
-        previousLapNumber = raw.LapNumber;
-        previousCurrentLap = raw.CurrentLap;
-        previousCurrentRaceTime = raw.CurrentRaceTime;
-        previousLastLap = raw.LastLap;
-    }
+        => lifecycle.UpdatePrevious(raw);
 
     private bool IsStartLineGeometryPlausible(Vector3F position)
     {
@@ -2747,22 +2620,6 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         }
 
         private readonly record struct RouteFeature(double SignedTurn, double AbsoluteTurn);
-    }
-
-    private readonly record struct PersistenceCommand(
-        LapRecord? Lap,
-        Guid? DeleteLapId,
-        Guid? DeleteTrackLapsId,
-        int[]? PerformanceClasses,
-        Guid[]? PreserveLapIds)
-    {
-        public static PersistenceCommand Save(LapRecord lap) => new(lap, null, null, null, null);
-        public static PersistenceCommand Delete(Guid lapId) => new(null, lapId, null, null, null);
-        public static PersistenceCommand DeleteTrack(
-            Guid trackId,
-            int[]? performanceClasses,
-            Guid[] preserveLapIds) =>
-            new(null, null, trackId, performanceClasses, preserveLapIds);
     }
 
     private sealed record RecentCompetitionState(LapHudState Snapshot, DateTimeOffset ExpiresAt);

@@ -6,6 +6,165 @@ public enum UpdateSourceKind
     GitHub
 }
 
+public enum UpdateReleaseType
+{
+    MajorFeature,
+    Feature,
+    Fix
+}
+
+public static class UpdateReleaseTypeInfo
+{
+    public static string DisplayName(this UpdateReleaseType type) => type switch
+    {
+        UpdateReleaseType.MajorFeature => "重大功能更新",
+        UpdateReleaseType.Feature => "功能更新",
+        UpdateReleaseType.Fix => "修复更新",
+        _ => type.ToString()
+    };
+
+    public static string MarkerValue(this UpdateReleaseType type) => type switch
+    {
+        UpdateReleaseType.MajorFeature => "major-feature",
+        UpdateReleaseType.Feature => "feature",
+        UpdateReleaseType.Fix => "fix",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
+    };
+}
+
+public sealed record ParsedUpdateReleaseNotes(
+    UpdateReleaseType Type,
+    string Notes);
+
+public static class UpdateReleaseMetadata
+{
+    private const string MarkerPrefix = "<!-- lazyforza-update-type:";
+    private const string MarkerSuffix = "-->";
+
+    public static ParsedUpdateReleaseNotes Parse(
+        string? releaseBody,
+        Version currentVersion,
+        Version releaseVersion)
+    {
+        ArgumentNullException.ThrowIfNull(currentVersion);
+        ArgumentNullException.ThrowIfNull(releaseVersion);
+
+        var body = releaseBody ?? string.Empty;
+        var markerStart = body.IndexOf(MarkerPrefix, StringComparison.OrdinalIgnoreCase);
+        if (markerStart >= 0)
+        {
+            var valueStart = markerStart + MarkerPrefix.Length;
+            var markerEnd = body.IndexOf(
+                MarkerSuffix,
+                valueStart,
+                StringComparison.OrdinalIgnoreCase);
+            if (markerEnd >= 0)
+            {
+                var value = body[valueStart..markerEnd].Trim();
+                if (TryParseType(value, out var explicitType))
+                {
+                    var cleaned = string.Concat(
+                        body.AsSpan(0, markerStart),
+                        body.AsSpan(markerEnd + MarkerSuffix.Length)).Trim();
+                    return new ParsedUpdateReleaseNotes(explicitType, cleaned);
+                }
+            }
+        }
+
+        return new ParsedUpdateReleaseNotes(
+            InferType(currentVersion, releaseVersion),
+            body.Trim());
+    }
+
+    public static string Marker(UpdateReleaseType type) =>
+        $"{MarkerPrefix} {type.MarkerValue()} {MarkerSuffix}";
+
+    public static string ToDisplayText(string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes))
+            return "本次发行暂未提供更新说明。";
+
+        var displayLines = notes
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n')
+            .Select(FormatMarkdownLine)
+            .ToList();
+
+        while (displayLines.Count > 0 && displayLines[0].Length == 0)
+            displayLines.RemoveAt(0);
+        while (displayLines.Count > 0 && displayLines[^1].Length == 0)
+            displayLines.RemoveAt(displayLines.Count - 1);
+
+        return displayLines.Count == 0
+            ? "本次发行暂未提供更新说明。"
+            : string.Join(Environment.NewLine, displayLines);
+    }
+
+    private static string FormatMarkdownLine(string line)
+    {
+        var value = line.TrimEnd();
+        var leadingTrimmed = value.TrimStart();
+
+        if (leadingTrimmed.StartsWith('#'))
+        {
+            var index = 0;
+            while (index < leadingTrimmed.Length && leadingTrimmed[index] == '#')
+                index++;
+            if (index < leadingTrimmed.Length && char.IsWhiteSpace(leadingTrimmed[index]))
+                leadingTrimmed = leadingTrimmed[(index + 1)..].TrimStart();
+            value = leadingTrimmed;
+        }
+        else if (leadingTrimmed.StartsWith("- ", StringComparison.Ordinal) ||
+                 leadingTrimmed.StartsWith("* ", StringComparison.Ordinal))
+        {
+            value = $"• {leadingTrimmed[2..]}";
+        }
+        else if (leadingTrimmed.StartsWith("> ", StringComparison.Ordinal))
+        {
+            value = leadingTrimmed[2..];
+        }
+
+        return value
+            .Replace("**", string.Empty, StringComparison.Ordinal)
+            .Replace("__", string.Empty, StringComparison.Ordinal)
+            .Replace("`", string.Empty, StringComparison.Ordinal);
+    }
+
+    private static bool TryParseType(string value, out UpdateReleaseType type)
+    {
+        if (string.Equals(value, "major-feature", StringComparison.OrdinalIgnoreCase))
+        {
+            type = UpdateReleaseType.MajorFeature;
+            return true;
+        }
+        if (string.Equals(value, "feature", StringComparison.OrdinalIgnoreCase))
+        {
+            type = UpdateReleaseType.Feature;
+            return true;
+        }
+        if (string.Equals(value, "fix", StringComparison.OrdinalIgnoreCase))
+        {
+            type = UpdateReleaseType.Fix;
+            return true;
+        }
+
+        type = default;
+        return false;
+    }
+
+    private static UpdateReleaseType InferType(
+        Version currentVersion,
+        Version releaseVersion)
+    {
+        if (releaseVersion.Major > currentVersion.Major)
+            return UpdateReleaseType.MajorFeature;
+        if (releaseVersion.Minor > currentVersion.Minor)
+            return UpdateReleaseType.Feature;
+        return UpdateReleaseType.Fix;
+    }
+}
+
 public sealed record UpdateReleaseAsset(
     string Name,
     Uri DownloadUri,
@@ -20,7 +179,8 @@ public sealed record UpdateReleaseInfo(
     Uri PageUri,
     UpdateReleaseAsset Package,
     UpdateReleaseAsset? Checksum,
-    UpdateSourceKind Source)
+    UpdateSourceKind Source,
+    UpdateReleaseType Type = UpdateReleaseType.Fix)
 {
     public string SourceName => Source switch
     {

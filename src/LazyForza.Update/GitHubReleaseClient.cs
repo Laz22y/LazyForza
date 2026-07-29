@@ -97,15 +97,20 @@ public sealed class GitHubReleaseClient : UpdateReleaseClientBase
                 !string.Equals(pageUri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
                 throw new UpdateException("发行版页面地址不可信。");
 
+            var metadata = UpdateReleaseMetadata.Parse(
+                release.Body,
+                currentVersion,
+                version);
             return new UpdateReleaseInfo(
                 version,
                 release.TagName,
                 string.IsNullOrWhiteSpace(release.Name) ? release.TagName : release.Name,
-                release.Body ?? string.Empty,
+                metadata.Notes,
                 pageUri,
                 package,
                 checksum,
-                Source);
+                Source,
+                metadata.Type);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
