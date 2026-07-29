@@ -107,7 +107,7 @@ public sealed class DataBackupService
             ["LapId", "SectorIndex"]),
         new("LapSamples",
             ["LapId", "S", "ElapsedSeconds", "SpeedMps", "Rpm", "Gear", "Accel", "Brake",
-                "DeltaSeconds", "X", "Y", "Z"],
+                "DeltaSeconds", "X", "Y", "Z", "Dynamics"],
             [])
     ];
 
@@ -365,7 +365,13 @@ public sealed class DataBackupService
         var queries = requests.Select(request =>
         {
             var spec = Spec(request.Name);
-            return $"SELECT {string.Join(',', spec.Columns)} FROM {spec.Name}" +
+            var columns = string.Equals(spec.Name, "LapSamples", StringComparison.Ordinal)
+                ? string.Join(',', spec.Columns.Select(column =>
+                    string.Equals(column, "Dynamics", StringComparison.Ordinal)
+                        ? "hex(Dynamics) AS Dynamics"
+                        : column))
+                : string.Join(',', spec.Columns);
+            return $"SELECT {columns} FROM {spec.Name}" +
                    (string.IsNullOrWhiteSpace(request.Where)
                        ? string.Empty
                        : $" WHERE {request.Where}") +
@@ -424,7 +430,8 @@ public sealed class DataBackupService
                 throw new InvalidDataException($"备份文件校验失败：{name}。");
         }
 
-        var payload = ReadJsonEntry<BackupPayload>(dataEntries[0], MaximumPortableDataBytes);
+        var payload = NormalizeLegacyPayload(
+            ReadJsonEntry<BackupPayload>(dataEntries[0], MaximumPortableDataBytes));
         ValidatePayload(payload);
         return new PortableArchive(manifest, payload);
     }
@@ -637,7 +644,8 @@ public sealed class DataBackupService
     private static string UpsertSql(BackupTableData table, IReadOnlyList<string?> row)
     {
         var spec = Spec(table.Name);
-        var values = string.Join(',', row.Select(SqlValue));
+        var values = string.Join(',', row.Select((value, index) =>
+            SqlValue(spec.Name, spec.Columns[index], value)));
         if (spec.Keys.Length == 0)
             return $"INSERT INTO {spec.Name}({string.Join(',', spec.Columns)}) VALUES({values});";
         var updates = spec.Columns
@@ -652,7 +660,30 @@ public sealed class DataBackupService
     {
         var spec = Spec(table.Name);
         return $"INSERT OR IGNORE INTO {spec.Name}({string.Join(',', spec.Columns)}) " +
-               $"VALUES({string.Join(',', row.Select(SqlValue))});";
+               $"VALUES({string.Join(',', row.Select((value, index) =>
+                   SqlValue(spec.Name, spec.Columns[index], value)))});";
+    }
+
+    private static BackupPayload NormalizeLegacyPayload(BackupPayload payload)
+    {
+        string[] legacyLapSampleColumns =
+        [
+            "LapId", "S", "ElapsedSeconds", "SpeedMps", "Rpm", "Gear", "Accel", "Brake",
+            "DeltaSeconds", "X", "Y", "Z"
+        ];
+        var tables = payload.Tables.Select(table =>
+        {
+            if (!string.Equals(table.Name, "LapSamples", StringComparison.Ordinal) ||
+                !table.Columns.SequenceEqual(legacyLapSampleColumns, StringComparer.Ordinal))
+                return table;
+            return new BackupTableData(
+                table.Name,
+                Spec("LapSamples").Columns,
+                table.Rows
+                    .Select(row => row.Concat([null]).ToArray())
+                    .ToList());
+        }).ToList();
+        return new BackupPayload(tables);
     }
 
     private static void ValidatePayload(BackupPayload payload)
@@ -720,6 +751,20 @@ public sealed class DataBackupService
 
     private static string SqlValue(string? value) =>
         value is null ? "NULL" : $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+
+    private static string SqlValue(
+        string table,
+        string column,
+        string? value)
+    {
+        if (!string.Equals(table, "LapSamples", StringComparison.Ordinal) ||
+            !string.Equals(column, "Dynamics", StringComparison.Ordinal))
+            return SqlValue(value);
+        if (string.IsNullOrWhiteSpace(value)) return "NULL";
+        if (value.Length % 2 != 0 || value.Any(character => !Uri.IsHexDigit(character)))
+            throw new InvalidDataException("备份中的圈速动态遥测数据无效。");
+        return $"X'{value}'";
+    }
 
     private static string Summarize(string? value)
     {

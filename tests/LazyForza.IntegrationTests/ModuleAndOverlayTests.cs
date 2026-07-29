@@ -55,25 +55,89 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(8, layout.LapNoMatchConfirmationSeconds);
         Assert.AreEqual(0.5, layout.LapNoMatchFadeSeconds);
         Assert.AreEqual(0.8, layout.LiveHudStaleSeconds);
-        Assert.AreEqual("1.3.0", LazyForza.App.ApplicationVersionInfo.Display);
+        Assert.AreEqual("1.3.1", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]
-    public void OverlayScaleSupportsTwentyPercentWithOnePercentPrecision()
+    public void OverlayScaleSupportsContinuousEditorAndOnePercentSettingsSlider()
     {
         var layout = LazyForzaDefaults.CreateOverlayLayout();
 
         Assert.AreEqual(0.20, OverlayScaleSettings.Minimum);
         Assert.AreEqual(0.01, OverlayScaleSettings.Step);
         Assert.AreEqual(0.20, OverlayScaleSettings.Normalize(0.10), 1e-9);
-        Assert.AreEqual(0.20, OverlayScaleSettings.Normalize(0.204), 1e-9);
-        Assert.AreEqual(0.21, OverlayScaleSettings.Normalize(0.206), 1e-9);
+        Assert.AreEqual(0.204, OverlayScaleSettings.Normalize(0.204), 1e-9);
+        Assert.AreEqual(0.206, OverlayScaleSettings.Normalize(0.206), 1e-9);
+        Assert.AreEqual(0.20, OverlayScaleSettings.SnapToStep(0.204), 1e-9);
+        Assert.AreEqual(0.21, OverlayScaleSettings.SnapToStep(0.206), 1e-9);
         Assert.AreEqual(1.50, OverlayScaleSettings.Normalize(1.80), 1e-9);
         Assert.AreEqual(layout.Width * 0.20, OverlayScaleSettings.ScaledDimension(layout.Width, 0.20), 1e-9);
         Assert.AreEqual(layout.Height * 0.20, OverlayScaleSettings.ScaledDimension(layout.Height, 0.20), 1e-9);
 
-        using var coordinator = new OverlayCoordinator(layout with { Scale = 0.206 });
-        Assert.AreEqual(0.21, coordinator.CurrentLayout.Scale, 1e-9);
+        using var coordinator = new OverlayCoordinator(layout with
+        {
+            Scale = 0.206,
+            ClickThrough = false,
+            IsLocked = false
+        });
+        Assert.AreEqual(0.206, coordinator.CurrentLayout.Scale, 1e-9);
+        Assert.IsTrue(coordinator.CurrentLayout.ClickThrough);
+        Assert.IsTrue(coordinator.CurrentLayout.IsLocked);
+    }
+
+    [TestMethod]
+    public void OverlayCornerResizeProjectsBothAxesWithoutAxisSwitching()
+    {
+        const double startScale = 0.6;
+        const double width = 1_200;
+        const double height = 675;
+
+        var proportional = OverlayResizeMath.ScaleFromDrag(
+            startScale,
+            width,
+            height,
+            120,
+            67.5,
+            resizeHorizontally: true,
+            resizeVertically: true);
+        Assert.AreEqual(0.7, proportional, 1e-9);
+
+        var horizontalOnly = OverlayResizeMath.ScaleFromDrag(
+            startScale,
+            width,
+            height,
+            120,
+            0,
+            resizeHorizontally: true,
+            resizeVertically: true);
+        var expectedProjection = startScale + 120 * width / (width * width + height * height);
+        Assert.AreEqual(expectedProjection, horizontalOnly, 1e-9);
+
+        var side = OverlayResizeMath.ScaleFromDrag(
+            startScale,
+            width,
+            height,
+            37,
+            0,
+            resizeHorizontally: true,
+            resizeVertically: false);
+        Assert.AreEqual(startScale + 37 / width, side, 1e-9);
+    }
+
+    [TestMethod]
+    public void OverlayLayoutPreviewAlwaysProvidesDashboardAndLapHud()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var dashboard = OverlayLayoutPreviewState.Dashboard(null, now);
+        var lap = OverlayLayoutPreviewState.Lap(null, now);
+
+        Assert.IsTrue(dashboard.IsDriving);
+        Assert.IsFalse(dashboard.IsStale);
+        Assert.AreEqual(now, dashboard.UpdatedAt);
+        Assert.IsTrue(lap.IsCompetitionActive);
+        Assert.IsTrue(lap.Sectors.Count >= 4);
+        Assert.IsNotNull(lap.CumulativeHistoricalDeltaSeconds);
+        Assert.IsTrue(lap.CurrentLapSeconds > 0);
     }
 
     [TestMethod]
@@ -141,16 +205,64 @@ public sealed class ModuleAndOverlayTests
     public void OverlayStylesAndFrameLimiterMeetSpikeContract()
     {
         const long original = 0x100;
-        var locked = OverlayNativeStyles.Apply(original, true);
+        var locked = OverlayNativeStyles.Apply(original);
         Assert.AreNotEqual(0, locked & OverlayNativeStyles.WsExTransparent);
         Assert.AreNotEqual(0, locked & OverlayNativeStyles.WsExNoActivate);
         Assert.AreNotEqual(0, locked & OverlayNativeStyles.WsExToolWindow);
-        var unlocked = OverlayNativeStyles.Apply(locked, false);
-        Assert.AreEqual(0, unlocked & OverlayNativeStyles.WsExTransparent);
+        var reapplied = OverlayNativeStyles.Apply(locked);
+        Assert.AreNotEqual(0, reapplied & OverlayNativeStyles.WsExTransparent);
         var limiter = new FrameRateLimiter(60);
         Assert.IsTrue(limiter.ShouldRender(0));
         Assert.IsFalse(limiter.ShouldRender(0.010));
         Assert.IsTrue(limiter.ShouldRender(0.017));
+    }
+
+    [TestMethod]
+    public void OverlayEditorSnapsToWindowEdgesAndCenters()
+    {
+        var centered = OverlayLayoutSnapping.Snap(
+            left: 395,
+            top: 246,
+            width: 200,
+            height: 100,
+            workspaceWidth: 1_000,
+            workspaceHeight: 600);
+        Assert.AreEqual(400, centered.Left, 0.001);
+        Assert.AreEqual(250, centered.Top, 0.001);
+        Assert.AreEqual(500, centered.VerticalGuide);
+        Assert.AreEqual(300, centered.HorizontalGuide);
+        StringAssert.Contains(centered.AlignmentText, "垂直居中");
+        StringAssert.Contains(centered.AlignmentText, "水平居中");
+
+        var edgeAligned = OverlayLayoutSnapping.Snap(
+            left: 8,
+            top: 11,
+            width: 200,
+            height: 100,
+            workspaceWidth: 1_000,
+            workspaceHeight: 600);
+        Assert.AreEqual(12, edgeAligned.Left, 0.001);
+        Assert.AreEqual(12, edgeAligned.Top, 0.001);
+        StringAssert.Contains(edgeAligned.AlignmentText, "左对齐");
+        StringAssert.Contains(edgeAligned.AlignmentText, "顶部对齐");
+    }
+
+    [TestMethod]
+    public void ForzaWindowMatchingRejectsOtherGamesAndRecognizesFh6()
+    {
+        Assert.IsTrue(
+            ForzaHorizonWindow.CandidateScore(
+                "ForzaHorizon6",
+                "Forza Horizon 6") >= 200);
+        Assert.IsTrue(
+            ForzaHorizonWindow.CandidateScore(
+                "ForzaHorizon6_Steam",
+                string.Empty) >= 100);
+        Assert.AreEqual(
+            0,
+            ForzaHorizonWindow.CandidateScore(
+                "notepad",
+                "LazyForza"));
     }
 
     [TestMethod]

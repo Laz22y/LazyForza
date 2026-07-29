@@ -628,7 +628,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             currentSamples.Add(new LapSample(
                 projection.S, raw.CurrentLap, raw.Speed, raw.CurrentEngineRpm, raw.Gear,
                 frame.Normalized.AccelRatio, frame.Normalized.BrakeRatio, 0,
-                raw.Position.X, raw.Position.Y, raw.Position.Z));
+                raw.Position.X, raw.Position.Y, raw.Position.Z,
+                CaptureDynamics(raw)));
         }
 
         var currentSector = sectors.Count == 0 ? 0 : Math.Clamp(sectors.ToList().FindLastIndex(sector => lastS >= sector.StartS), 0, sectors.Count - 1);
@@ -962,10 +963,17 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 0,
                 raw.Position.X,
                 raw.Position.Y,
-                raw.Position.Z));
+                raw.Position.Z,
+                CaptureDynamics(raw)));
             UpdateSectorProgress(CurrentSectorIndex(), raw.CurrentLap, false);
         }
     }
+
+    private static LapDynamics CaptureDynamics(Fh6RawTelemetry raw) => new(
+        Math.Clamp(raw.Steer / 127d, -1, 1),
+        raw.TireSlipRatio,
+        raw.TireSlipAngle,
+        raw.TireCombinedSlip);
 
     private void PublishAutomaticMatching(
         TelemetryFrame frame,

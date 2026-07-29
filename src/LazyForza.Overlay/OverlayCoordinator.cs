@@ -73,6 +73,37 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
         });
     }
 
+    public OverlayLayout? EditLayout(ForzaHorizonWindowInfo target)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (Application.Current is null ||
+            !Application.Current.Dispatcher.CheckAccess())
+            throw new InvalidOperationException("Overlay layout editing must start on the UI thread.");
+
+        var wasVisible = window?.IsVisible == true;
+        window?.Hide();
+        try
+        {
+            _ = ForzaHorizonWindow.TryActivate(target);
+            var editor = new OverlayLayoutEditorWindow(
+                () => contributions.Values.OrderBy(item => item.ZIndex).ToArray(),
+                layout,
+                target);
+            var accepted = editor.ShowDialog() == true;
+            if (!accepted || editor.Result is not { } result) return null;
+            layout = NormalizeLayout(result);
+            return layout;
+        }
+        finally
+        {
+            if (window is not null)
+            {
+                window.ApplyLayout(layout);
+                if (wasVisible) window.Show();
+            }
+        }
+    }
+
     public void Dispose()
     {
         if (disposed) return;
@@ -103,5 +134,10 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
     }
 
     private static OverlayLayout NormalizeLayout(OverlayLayout value) =>
-        value with { Scale = OverlayScaleSettings.Normalize(value.Scale) };
+        value with
+        {
+            Scale = OverlayScaleSettings.Normalize(value.Scale),
+            ClickThrough = true,
+            IsLocked = true
+        };
 }

@@ -30,7 +30,12 @@ public static class OverlayScaleSettings
     public static double Normalize(double scale)
     {
         if (!double.IsFinite(scale)) return Default;
-        var clamped = Math.Clamp(scale, Minimum, Maximum);
+        return Math.Clamp(scale, Minimum, Maximum);
+    }
+
+    public static double SnapToStep(double scale)
+    {
+        var clamped = Normalize(scale);
         return Math.Clamp(
             Math.Round(clamped / Step, MidpointRounding.AwayFromZero) * Step,
             Minimum,

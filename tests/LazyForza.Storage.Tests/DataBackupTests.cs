@@ -65,7 +65,13 @@ public sealed class DataBackupTests
                 Assert.AreEqual("source", destination.GetAppSetting("ui.test"));
                 Assert.AreEqual("Portable track", destination.LoadTrack(trackId)!.Value.Track.Name);
                 Assert.AreEqual(0, overwritten.PreservedConflicts);
-                Assert.HasCount(24, destination.LoadLap(lapId)!.Samples);
+                var importedLap = destination.LoadLap(lapId)!;
+                Assert.HasCount(24, importedLap.Samples);
+                Assert.IsNotNull(importedLap.Samples[0].Dynamics);
+                Assert.AreEqual(
+                    0.42,
+                    importedLap.Samples[0].Dynamics!.Steering,
+                    0.0001);
             }
         }
         finally
@@ -260,7 +266,12 @@ public sealed class DataBackupTests
                 0,
                 point.X,
                 point.Y,
-                point.Z))
+                point.Z,
+                new LapDynamics(
+                    0.42,
+                    new WheelValues(0.1f, 0.2f, 0.3f, 0.4f),
+                    new WheelValues(0.02f, 0.03f, 0.04f, 0.05f),
+                    new WheelValues(0.15f, 0.2f, 0.25f, 0.3f))))
             .ToArray();
         var lapId = Guid.NewGuid();
         store.SaveLap(new LapRecord(

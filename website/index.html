@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="LazyForza：面向 Forza Horizon 6 的本地遥测仪表盘、圈速分析与赛后复盘工具。"
+    >
+    <meta name="theme-color" content="#080d14">
+    <meta property="og:title" content="LazyForza · FH6 遥测与圈速分析">
+    <meta
+      property="og:description"
+      content="透明遥测仪表盘、圈速与走线分析，以及完全保存在本机的个人数据。"
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="assets/app-preview.png">
+    <title>LazyForza · FH6 遥测与圈速分析</title>
+    <link rel="icon" href="assets/favicon.png" type="image/png">
+    <link rel="preload" href="assets/lazyforza-logo-transparent.png" as="image">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+
+    <div class="page-shell">
+      <header class="site-header" aria-label="主导航">
+        <a class="brand" href="#top" aria-label="LazyForza 首页">
+          <img src="assets/lazyforza-logo-transparent.png" alt="LazyForza">
+        </a>
+
+        <nav class="repo-links" aria-label="项目仓库">
+          <a
+            href="https://github.com/Laz22y/LazyForza"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub
+            <span aria-hidden="true">↗</span>
+          </a>
+          <a
+            href="https://gitcode.com/Laz22y/LazyForza"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitCode
+            <span aria-hidden="true">↗</span>
+          </a>
+        </nav>
+      </header>
+
+      <main id="main">
+        <section class="hero" id="top">
+          <div class="hero-glow hero-glow-left" aria-hidden="true"></div>
+          <div class="hero-glow hero-glow-right" aria-hidden="true"></div>
+
+          <div class="eyebrow">
+            <span class="status-dot" aria-hidden="true"></span>
+            Forza Horizon 6 · 本地遥测工具
+          </div>
+
+          <div class="hero-logo" aria-label="LazyForza">
+            <img src="assets/lazyforza-logo-transparent.png" alt="LazyForza">
+          </div>
+          <p class="hero-copy">
+            从实时仪表盘到圈速、走线和赛后复盘。只使用 FH6 官方 UDP Data Out，
+            所有个人数据都留在你的电脑里。
+          </p>
+
+          <div class="download-grid" aria-label="下载最新版">
+            <a
+              class="download-card download-card-primary"
+              id="gitcode-download"
+              href="https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza/releases/v1.3.0/attach_files/LazyForza-1.3.0-win-x64.zip/download"
+            >
+              <span class="download-source">
+                <span class="source-mark source-mark-gitcode" aria-hidden="true">
+                  <img src="assets/gitcode.png" alt="">
+                </span>
+                <span>
+                  <strong>通过 GitCode 下载</strong>
+                  <small>中国大陆网络优先</small>
+                </span>
+              </span>
+              <span class="release-meta">
+                <strong data-release-version>v1.3.0</strong>
+                <span aria-hidden="true">·</span>
+                <time data-release-date datetime="2026-07-28">2026.07.28 更新</time>
+                <span class="download-arrow" aria-hidden="true">↓</span>
+              </span>
+            </a>
+
+            <a
+              class="download-card"
+              id="github-download"
+              href="https://github.com/Laz22y/LazyForza/releases/latest/download/LazyForza-1.3.0-win-x64.zip"
+            >
+              <span class="download-source">
+                <span class="source-mark" aria-hidden="true">
+                  <img src="assets/github.png" alt="">
+                </span>
+                <span>
+                  <strong>通过 GitHub 下载</strong>
+                  <small>全球备用下载源</small>
+                </span>
+              </span>
+              <span class="release-meta">
+                <strong data-release-version>v1.3.0</strong>
+                <span aria-hidden="true">·</span>
+                <time data-release-date datetime="2026-07-28">2026.07.28 更新</time>
+                <span class="download-arrow" aria-hidden="true">↓</span>
+              </span>
+            </a>
+          </div>
+
+          <p class="download-note">
+            Windows 10 / 11 x64 · 解压即用 · 已包含 .NET 运行时
+          </p>
+
+          <div class="product-frame">
+            <div class="frame-bar" aria-hidden="true">
+              <span></span><span></span><span></span>
+              <b>LIVE TELEMETRY WORKSPACE</b>
+            </div>
+            <div class="preview-wrap">
+              <img
+                src="assets/app-preview.png"
+                alt="LazyForza 深色界面，显示遥测工作区、当前模式和圈速数据"
+                width="1280"
+                height="800"
+              >
+              <div class="preview-sheen" aria-hidden="true"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="features" aria-labelledby="features-title">
+          <div class="section-heading">
+            <p>核心功能</p>
+            <h2 id="features-title">需要的信息，刚好够用。</h2>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature-card">
+              <div class="feature-index">01</div>
+              <h3>实时仪表盘</h3>
+              <p>速度、挡位、踏板、轮胎与换挡提示保持在视线之内，布局和大小都能按习惯调整。</p>
+              <div class="signal-line" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              </div>
+            </article>
+
+            <article class="feature-card feature-card-accent">
+              <div class="feature-index">02</div>
+              <h3>圈速与走线</h3>
+              <p>对比同等级个人最快圈，定位刹车、入弯、出弯和油门恢复带来的真实差距。</p>
+              <div class="track-line" aria-hidden="true">
+                <span></span>
+              </div>
+            </article>
+
+            <article class="feature-card">
+              <div class="feature-index">03</div>
+              <h3>赛后复盘</h3>
+              <p>用稳定性、分段趋势和组合最佳回看一场比赛，也可以导出简洁的 PNG 报告。</p>
+              <div class="lap-bars" aria-hidden="true">
+                <i style="--bar: 48%"></i>
+                <i style="--bar: 72%"></i>
+                <i style="--bar: 58%"></i>
+                <i style="--bar: 86%"></i>
+                <i style="--bar: 68%"></i>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="principles" aria-label="项目特点">
+          <div>
+            <span>01</span>
+            <strong>官方 UDP</strong>
+            <p>不读内存，不注入 DLL。</p>
+          </div>
+          <div>
+            <span>02</span>
+            <strong>本地优先</strong>
+            <p>圈速、赛道与车辆学习留在本机。</p>
+          </div>
+          <div>
+            <span>03</span>
+            <strong>开源透明</strong>
+            <p>源码与正式发行记录均可查阅。</p>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <p>LazyForza 是非官方社区项目，与 Microsoft、Xbox 或 Playground Games 无隶属关系。</p>
+        <p>MIT License · <span id="copyright-year">2026</span></p>
+      </footer>
+    </div>
+  </body>
+</html>

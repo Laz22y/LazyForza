@@ -6,10 +6,8 @@ public static class OverlayNativeStyles
     public const long WsExToolWindow = 0x00000080L;
     public const long WsExNoActivate = 0x08000000L;
 
-    public static long Apply(long existing, bool clickThrough) =>
-        clickThrough
-            ? existing | WsExTransparent | WsExToolWindow | WsExNoActivate
-            : (existing | WsExToolWindow | WsExNoActivate) & ~WsExTransparent;
+    public static long Apply(long existing) =>
+        existing | WsExTransparent | WsExToolWindow | WsExNoActivate;
 }
 
 public sealed class FrameRateLimiter(double maximumFramesPerSecond = 60)
@@ -24,4 +22,3 @@ public sealed class FrameRateLimiter(double maximumFramesPerSecond = 60)
         return true;
     }
 }
-

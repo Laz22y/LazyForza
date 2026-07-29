@@ -34,6 +34,7 @@ internal sealed partial class MainWindow : Window
         ("M 12 3 L 21 8 L 12 13 L 3 8 Z M 5 12 L 12 16 L 19 12 M 5 16 L 12 20 L 19 16", "模块"),
         ("M 5 21 L 5 4 M 6 5 C 9 3.5 11 6.5 14 5 C 16.5 3.8 18.5 4.5 20 5.5 L 20 13 C 18 12 16.5 11.8 14.5 13 C 11.5 14.5 9 11.5 6 13 Z M 10 4.8 L 10 12.7 M 15 4.8 L 15 12.8 M 6 8.8 C 9 7.3 11.5 10.3 14.5 8.8 C 16.5 7.8 18 8.1 20 9", "当前比赛"),
         ("M 12 6 A 7 7 0 1 1 12 20 A 7 7 0 1 1 12 6 M 9 3 L 15 3 M 12 3 L 12 6 M 12 10 L 12 13 L 16 15", "圈速分析"),
+        ("M 5 5 L 5 19 L 17 12 Z M 19 5 L 19 19", "回放工作台"),
         ("M 11 3 C 16 2 20 5 21 9 C 22 13 20 18 16 20 C 12 22 6 21 4 17 C 2 13 3 8 6 5 C 8 3 9 3 11 3 Z M 11 7 C 8 7 7 9 7 12 C 7 15 9 17 12 17 C 15 17 17 15 17 12 C 17 9 15 7 11 7 Z M 16 16 L 18.5 18 M 17.2 14.8 L 19.7 16.8", "赛道"),
         ("M 4 16 L 5.5 11 L 8 8 L 16 8 L 18.5 11 L 20 16 L 20 19 L 18 19 L 18 17 L 6 17 L 6 19 L 4 19 Z M 6 12 L 18 12 M 8 15 L 8.01 15 M 16 15 L 16.01 15", "车辆与换挡"),
         ("M 4 7 L 9 7 M 15 7 L 20 7 M 12 4 L 12 10 M 4 17 L 13 17 M 19 17 L 20 17 M 16 14 L 16 20", "设置"),
@@ -190,10 +191,11 @@ internal sealed partial class MainWindow : Window
             1 => ModulesPage(),
             2 => CurrentCompetitionPage(),
             3 => LapAnalysisPage(),
-            4 => TracksPage(),
-            5 => ShiftPage(),
-            6 => SettingsPage(),
-            7 => DiagnosticsPage(),
+            4 => ReplayWorkbenchPage(),
+            5 => TracksPage(),
+            6 => ShiftPage(),
+            7 => SettingsPage(),
+            8 => DiagnosticsPage(),
             _ => DataProtectionPage()
         };
         content.Content = page;
@@ -1045,6 +1047,8 @@ internal sealed partial class MainWindow : Window
             }
 
             var visuals = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var selectedDynamicsLayer = DrivingDynamicsLayer.Default;
+            var dynamicsLapId = singleLapPlan?.SelectedLap.Id ?? visualLaps[0].Id;
             var exportRow = new Grid();
             exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1068,7 +1072,9 @@ internal sealed partial class MainWindow : Window
                 visualLaps,
                 legendEntries,
                 cornerAnnotations,
-                pointToPointTimingApproximate);
+                pointToPointTimingApproximate,
+                selectedDynamicsLayer,
+                dynamicsLapId);
             Grid.SetColumn(exportPng, 1);
             exportRow.Children.Add(exportPng);
             visuals.Children.Add(exportRow);
@@ -1093,8 +1099,7 @@ internal sealed partial class MainWindow : Window
             };
             mapPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             mapPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            var mapHeader = new Grid { Margin = new Thickness(0, 0, 0, 8) };
-            mapHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var mapHeader = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
             var mapTitle = Label(
                 cornerAnnotations.Count == 0
                     ? "走线预览 · 滚轮缩放，拖动平移"
@@ -1108,7 +1113,16 @@ internal sealed partial class MainWindow : Window
                 visualLaps,
                 activeTrack,
                 legendEntries,
-                cornerAnnotations);
+                cornerAnnotations,
+                dynamicsLapId);
+            if (singleLapPlan is not null)
+            {
+                var layerControls = DynamicsLayerControls(
+                    mapView,
+                    layer => selectedDynamicsLayer = layer);
+                layerControls.Margin = new Thickness(0, 7, 0, 0);
+                mapHeader.Children.Add(layerControls);
+            }
             mapSurface.Children.Add(mapView);
             mapSurface.Children.Add(MapDisplayControls(mapView));
             Grid.SetRow(mapSurface, 1);
@@ -1224,6 +1238,50 @@ internal sealed partial class MainWindow : Window
         return chrome;
     }
 
+    private static WrapPanel DynamicsLayerControls(
+        TrackMapView mapView,
+        Action<DrivingDynamicsLayer> onChanged)
+    {
+        var panel = new WrapPanel();
+        var layers = new[]
+        {
+            DrivingDynamicsLayer.Default,
+            DrivingDynamicsLayer.Throttle,
+            DrivingDynamicsLayer.Brake,
+            DrivingDynamicsLayer.Steering,
+            DrivingDynamicsLayer.TireSlip,
+            DrivingDynamicsLayer.HandlingBalance,
+            DrivingDynamicsLayer.ExitWheelspin,
+            DrivingDynamicsLayer.BrakingInstability
+        };
+        var buttons = new List<ToggleButton>(layers.Length);
+        foreach (var layer in layers)
+        {
+            var needsExtended = DrivingDynamicsAnalyzer.RequiresExtendedTelemetry(layer);
+            var button = new ToggleButton
+            {
+                Content = DrivingDynamicsAnalyzer.LayerName(layer),
+                IsChecked = layer == DrivingDynamicsLayer.Default,
+                Padding = new Thickness(9, 5, 9, 5),
+                Margin = new Thickness(0, 0, 6, 5),
+                FontSize = 11,
+                ToolTip = needsExtended && !mapView.HasExtendedDynamics
+                    ? "旧版本保存的圈速未记录此图层所需的动态遥测；切换后会显示不可用提示。"
+                    : "切换走线着色图层；悬停可查看当前位置数据。"
+            };
+            button.Click += (_, _) =>
+            {
+                foreach (var candidate in buttons) candidate.IsChecked = false;
+                button.IsChecked = true;
+                mapView.DynamicsLayer = layer;
+                onChanged(layer);
+            };
+            buttons.Add(button);
+            panel.Children.Add(button);
+        }
+        return panel;
+    }
+
     private IReadOnlyList<CornerMapAnnotation> BuildCornerMapAnnotations(
         SingleLapAnalysisPlan plan,
         LapRecord selectedLap,
@@ -1254,7 +1312,7 @@ internal sealed partial class MainWindow : Window
             ? "同等级个人最快 · 轻度跑法分析"
             : "暂无同等级参考圈 · 仅分析明显驾驶节奏";
         const string footerText =
-            "依据速度、刹车、油门、挡位、位置和圈进度；圈速样本未保存轮胎滑移。" +
+            "依据已保存的速度、输入、位置与动态遥测；旧圈可能不含轮胎滑移。" +
             "LazyForza 只能提供轻度范围内的分析，仅供参考。";
         return CornerDrivingAnalyzer.AnalyzePersonalBest(selectedLap)
             .OrderByDescending(corner => corner.OpportunityScore)
@@ -2543,7 +2601,7 @@ internal sealed partial class MainWindow : Window
 
     private UIElement SettingsPage()
     {
-        var stack = PageStack("设置", "设置 Live UDP 与 HUD。监听设置重启后生效。");
+        var stack = PageStack("设置", "设置 Live UDP 与 Overlay。监听设置重启后生效。");
         var network = new Grid();
         network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
         network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
@@ -2583,28 +2641,48 @@ internal sealed partial class MainWindow : Window
         overlayHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         overlayHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var headerText = new StackPanel();
-        headerText.Children.Add(Label("HUD 设置", 17, FontWeights.SemiBold));
+        headerText.Children.Add(Label("Overlay 设置", 17, FontWeights.SemiBold));
         var overlaySummary = Label(
             $"{current.Width:0} × {current.Height:0} · 缩放 {current.Scale:P0} · 不透明度 {current.Opacity:P0} · {current.MonitorId}",
             11, FontWeights.Normal, "MutedBrush");
         overlaySummary.Margin = new Thickness(0, 3, 0, 0);
         headerText.Children.Add(overlaySummary);
+        var interactionNote = Label(
+            "运行时始终点击穿透且不可移动；位置与大小只在布局编辑器中调整。",
+            10,
+            FontWeights.Normal,
+            "MutedBrush");
+        interactionNote.Margin = new Thickness(0, 3, 0, 0);
+        headerText.Children.Add(interactionNote);
         overlayHeader.Children.Add(headerText);
 
+        var headerActions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top
+        };
+        var editLayout = new Button
+        {
+            Content = "设置 Overlay 布局",
+            Padding = new Thickness(13, 7, 13, 7),
+            ToolTip = "以 Forza Horizon 6 当前窗口为背景，拖动并缩放 Overlay"
+        };
+        editLayout.Click += async (_, _) =>
+            await ConfigureOverlayLayoutAsync(editLayout);
+        headerActions.Children.Add(editLayout);
         var resetDefaults = new Button
         {
-            Content = "重置 HUD",
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
+            Content = "重置 Overlay",
             Margin = new Thickness(12, 0, 0, 0),
             Padding = new Thickness(12, 7, 12, 7),
-            ToolTip = "恢复 HUD 默认参数；不修改监听 IP 和 UDP 端口"
+            ToolTip = "恢复 Overlay 默认参数；不修改监听 IP 和 UDP 端口"
         };
         resetDefaults.Click += async (_, _) =>
         {
             if (MessageBox.Show(
-                    "确定重置 HUD 设置吗？\n\n位置、尺寸、透明度、交互、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。",
-                    "重置 HUD",
+                    "确定重置 Overlay 设置吗？\n\n位置、尺寸、透明度、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。",
+                    "重置 Overlay",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
@@ -2613,8 +2691,9 @@ internal sealed partial class MainWindow : Window
             await overlay.SetLayoutAsync(defaultLayout, CancellationToken.None);
             RenderSelectedPage();
         };
-        Grid.SetColumn(resetDefaults, 1);
-        overlayHeader.Children.Add(resetDefaults);
+        headerActions.Children.Add(resetDefaults);
+        Grid.SetColumn(headerActions, 1);
+        overlayHeader.Children.Add(headerActions);
         controls.Children.Add(overlayHeader);
 
         var primarySettings = new Grid { Margin = new Thickness(0, 0, 0, 10) };
@@ -2624,7 +2703,7 @@ internal sealed partial class MainWindow : Window
 
         var appearance = new StackPanel();
         var scale = AddValueSlider(
-            appearance, "缩放", "调整 HUD 整体尺寸", current.Scale,
+            appearance, "精确缩放", "按 1% 调整，也可在布局编辑器中拖动边框", current.Scale,
             OverlayScaleSettings.Minimum,
             OverlayScaleSettings.Maximum,
             OverlayScaleSettings.Step,
@@ -2634,36 +2713,20 @@ internal sealed partial class MainWindow : Window
         var opacity = AddValueSlider(
             appearance, "不透明度", "HUD 内容的最高可见度", current.Opacity,
             0.25, 1, 0.05, value => value.ToString("P0"));
-        var monitorLabel = Label("显示器标识", 12, FontWeights.SemiBold);
-        appearance.Children.Add(monitorLabel);
-        var monitorHelp = Label("用于多显示器布局；primary 表示主显示器。", 10, FontWeights.Normal, "MutedBrush");
-        monitorHelp.Margin = new Thickness(0, 2, 0, 6);
-        appearance.Children.Add(monitorHelp);
-        var monitor = new TextBox
-        {
-            Text = current.MonitorId,
-            Padding = new Thickness(8),
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
+        var monitor = Label(
+            $"当前显示器：{current.MonitorId}",
+            10,
+            FontWeights.Normal,
+            "MutedBrush");
+        monitor.Margin = new Thickness(0, 0, 0, 4);
         appearance.Children.Add(monitor);
         primarySettings.Children.Add(SettingGroup(
-            "外观与位置",
-            "调整 HUD 尺寸、透明度和显示器。解锁后可拖动。",
+            "外观",
+            "调整 Overlay 的缩放与透明度。",
             appearance));
 
         var interaction = new StackPanel();
         var toggleRow = new WrapPanel { Margin = new Thickness(-4, -2, 0, 8) };
-        var locked = new ToggleButton
-        {
-            Content = current.IsLocked ? "布局锁定：开" : "布局锁定：关",
-            IsChecked = current.IsLocked
-        };
-        var clickThrough = new ToggleButton
-        {
-            Content = current.ClickThrough ? "点击穿透：开" : "点击穿透：关",
-            IsChecked = current.ClickThrough,
-            ToolTip = "锁定后 HUD 不接收鼠标或键盘焦点"
-        };
         var reduceMotion = new ToggleButton
         {
             Content = current.ReduceMotion ? "减少动态：开" : "减少动态：关",
@@ -2675,8 +2738,6 @@ internal sealed partial class MainWindow : Window
             IsChecked = current.DashboardMotionEnabled,
             ToolTip = "让仪表盘随车辆加速度轻微移动"
         };
-        toggleRow.Children.Add(locked);
-        toggleRow.Children.Add(clickThrough);
         toggleRow.Children.Add(reduceMotion);
         toggleRow.Children.Add(dashboardMotion);
         interaction.Children.Add(toggleRow);
@@ -2686,20 +2747,11 @@ internal sealed partial class MainWindow : Window
 
         void RefreshInteractionControls()
         {
-            if (locked.IsChecked == true) clickThrough.IsChecked = true;
-            locked.Content = locked.IsChecked == true ? "布局锁定：开" : "布局锁定：关";
-            clickThrough.Content = clickThrough.IsChecked == true ? "点击穿透：开" : "点击穿透：关";
-            clickThrough.IsEnabled = locked.IsChecked != true;
             reduceMotion.Content = reduceMotion.IsChecked == true ? "减少动态：开" : "减少动态：关";
             dashboardMotion.Content = dashboardMotion.IsChecked == true ? "加速度跟随：开" : "加速度跟随：关";
             motionIntensity.IsEnabled = dashboardMotion.IsChecked == true && reduceMotion.IsChecked != true;
         }
 
-        locked.Click += (_, _) =>
-        {
-            RefreshInteractionControls();
-        };
-        clickThrough.Click += (_, _) => RefreshInteractionControls();
         reduceMotion.Click += (_, _) => RefreshInteractionControls();
         dashboardMotion.Click += (_, _) =>
         {
@@ -2707,8 +2759,8 @@ internal sealed partial class MainWindow : Window
         };
         RefreshInteractionControls();
         var interactionGroup = SettingGroup(
-            "交互与动态",
-            "控制穿透、动态和仪表盘跟随。",
+            "动态效果",
+            "控制动画和仪表盘加速度跟随。",
             interaction);
         Grid.SetColumn(interactionGroup, 2);
         primarySettings.Children.Add(interactionGroup);
@@ -2744,9 +2796,8 @@ internal sealed partial class MainWindow : Window
             {
                 Scale = OverlayScaleSettings.Normalize(scale.Value),
                 Opacity = opacity.Value,
-                MonitorId = string.IsNullOrWhiteSpace(monitor.Text) ? "primary" : monitor.Text.Trim(),
-                ClickThrough = locked.IsChecked == true || clickThrough.IsChecked == true,
-                IsLocked = locked.IsChecked == true,
+                ClickThrough = true,
+                IsLocked = true,
                 ReduceMotion = reduceMotion.IsChecked == true,
                 DashboardMotionEnabled = dashboardMotion.IsChecked == true,
                 DashboardMotionIntensity = motionIntensity.Value,
