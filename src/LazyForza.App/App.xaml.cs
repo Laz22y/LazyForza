@@ -108,7 +108,15 @@ public partial class App : Application
                 if (enabled) await moduleManager.SetEnabledAsync(module.Descriptor.Id, true, CancellationToken.None);
             }
 
-            recorder = new TelemetryRecorderController(telemetry, directories);
+            var lapAnalysis = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
+            recorder = new TelemetryRecorderController(
+                telemetry,
+                directories,
+                store,
+                source.Kind,
+                lapAnalysis,
+                message => log.Write(message));
+            await recorder.InitializeAsync(CancellationToken.None);
             MainWindow = new MainWindow(
                 moduleManager,
                 telemetry,

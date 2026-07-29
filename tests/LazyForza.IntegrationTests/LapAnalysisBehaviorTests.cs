@@ -380,6 +380,38 @@ public sealed class LapAnalysisBehaviorTests
     }
 
     [TestMethod]
+    public void UserCorrectionAppliesOnlyToCurrentCompetitionAndDefersRecording()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-track-correction-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            var selected = SaveCircleTrack(store, "Actual official event");
+            SaveCircleTrack(store, "Overlapping official event");
+            var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            var feed = new CircleFrameFeed(module);
+            feed.Send(0, 20, raceTimeOverride: 2.1f);
+            feed.Send(0, 0, raceTimeOverride: 2.2f);
+            feed.Drive(0, 1, 45);
+            var sessionId = module.CurrentSessionId;
+
+            var result = module.CorrectTrackMatch(selected.Id);
+
+            Assert.AreEqual(selected.Id, module.CurrentTrack?.Id);
+            Assert.AreEqual(sessionId, module.CurrentSessionId);
+            Assert.AreEqual("已由用户纠正", module.MatchDiagnostics.State);
+            Assert.AreEqual(selected.Id, module.MatchDiagnostics.TopCandidates.Single().TrackId);
+            Assert.AreEqual(string.Empty, store.GetAppSetting("lap.selectedTrack.simulator"));
+            StringAssert.Contains(result.Message, "下次经过起点");
+            Assert.HasCount(0, module.VisibleLaps);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
     public void CoarseFilterCapsFineCandidatesAndPublishesEliminationReasons()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-auto-match-prefilter-{Guid.NewGuid():N}.db");

@@ -55,7 +55,7 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(8, layout.LapNoMatchConfirmationSeconds);
         Assert.AreEqual(0.5, layout.LapNoMatchFadeSeconds);
         Assert.AreEqual(0.8, layout.LiveHudStaleSeconds);
-        Assert.AreEqual("1.3.2", LazyForza.App.ApplicationVersionInfo.Display);
+        Assert.AreEqual("1.3.3", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]
@@ -178,6 +178,33 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(38, legend.Height, 0.001);
         Assert.IsTrue(legend.Left > renderBounds.Left + renderBounds.Width / 2);
         Assert.IsTrue(renderBounds.Contains(legend));
+    }
+
+    [TestMethod]
+    public void LinkedAnalysisCursorPublishesChangesOnceAndCanBeCleared()
+    {
+        var cursor = new LazyForza.App.LapAnalysisCursor();
+        var source = new object();
+        var lapId = Guid.NewGuid();
+        var changes = new List<LazyForza.App.LapAnalysisCursorPosition?>();
+        var commits = new List<LazyForza.App.LapAnalysisCursorPosition>();
+        cursor.Changed += (_, position) => changes.Add(position);
+        cursor.CommitRequested += (_, position) => commits.Add(position);
+
+        cursor.Set(source, lapId, 123.45);
+        cursor.Set(source, lapId, 123.45);
+        Assert.HasCount(0, commits, "Hover updates must not commit a replay seek.");
+        cursor.Commit(source);
+        cursor.Clear(source);
+        cursor.Commit(source);
+        cursor.Clear(source);
+
+        Assert.HasCount(2, changes);
+        Assert.HasCount(1, commits);
+        Assert.AreEqual(123.45, commits[0].ProgressMeters, 0.001);
+        Assert.AreEqual(lapId, changes[0]!.Value.LapId);
+        Assert.AreEqual(123.45, changes[0]!.Value.ProgressMeters, 0.001);
+        Assert.IsNull(changes[1]);
     }
 
     [TestMethod]

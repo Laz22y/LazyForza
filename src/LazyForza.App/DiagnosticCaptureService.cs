@@ -314,6 +314,7 @@ internal sealed class DiagnosticCaptureService : IAsyncDisposable
     private TrackMatchCandidatePackageSnapshot ToCandidateSnapshot(
         TrackMatchCandidateDiagnostic candidate) =>
         new(
+            candidate.TrackId,
             Sanitize(candidate.TrackName),
             candidate.LayoutKind.ToString(),
             Sanitize(candidate.Category),
@@ -437,6 +438,7 @@ internal sealed class DiagnosticCaptureService : IAsyncDisposable
         IReadOnlyList<TrackMatchCandidatePackageSnapshot> EliminatedCandidates);
 
     private sealed record TrackMatchCandidatePackageSnapshot(
+        Guid TrackId,
         string? TrackName,
         string LayoutKind,
         string? Category,

@@ -964,6 +964,7 @@ internal sealed partial class MainWindow : Window
             var visuals = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
             var selectedDynamicsLayer = DrivingDynamicsLayer.Default;
             var dynamicsLapId = singleLapPlan?.SelectedLap.Id ?? visualLaps[0].Id;
+            var linkedCursor = new LapAnalysisCursor();
             var exportRow = new Grid();
             exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -996,16 +997,35 @@ internal sealed partial class MainWindow : Window
             var chartPanel = new Grid { Height = 320 };
             chartPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             chartPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            var chartTitle = Label("速度曲线 · 悬停查看数据", 13, FontWeights.SemiBold);
+            var chartTitle = Label("速度曲线 · 与驾驶输入和走线联动", 13, FontWeights.SemiBold);
             chartTitle.Margin = new Thickness(0, 0, 0, 8);
             chartPanel.Children.Add(chartTitle);
             var chart = new LapTelemetryChart(
                 visualLaps,
                 activeTrack?.LengthMeters,
-                legendEntries);
+                legendEntries,
+                linkedCursor);
             Grid.SetRow(chart, 1);
             chartPanel.Children.Add(chart);
             visuals.Children.Add(Card(chartPanel));
+
+            var inputLap = visualLaps.First(lap => lap.Id == dynamicsLapId);
+            var inputPanel = new Grid { Height = 250 };
+            inputPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            inputPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            var inputTitle = Label(
+                "驾驶输入曲线 · 油门 / 制动 / 方向 · 与速度和走线联动",
+                13,
+                FontWeights.SemiBold);
+            inputTitle.Margin = new Thickness(0, 0, 0, 8);
+            inputPanel.Children.Add(inputTitle);
+            var inputChart = new LapInputChart(
+                inputLap,
+                activeTrack?.LengthMeters,
+                linkedCursor);
+            Grid.SetRow(inputChart, 1);
+            inputPanel.Children.Add(inputChart);
+            visuals.Children.Add(Card(inputPanel));
 
             var mapPanel = new Grid
             {
@@ -1029,7 +1049,8 @@ internal sealed partial class MainWindow : Window
                 activeTrack,
                 legendEntries,
                 cornerAnnotations,
-                dynamicsLapId);
+                dynamicsLapId,
+                linkedCursor);
             if (singleLapPlan is not null)
             {
                 var layerControls = DynamicsLayerControls(
@@ -2724,6 +2745,7 @@ internal sealed partial class MainWindow : Window
         controls.Children.Add(footer);
         stack.Children.Add(Card(controls));
 
+        stack.Children.Add(BuildRecordingSettingsCard());
         stack.Children.Add(BuildUpdateSettingsCard());
 
         return Scroll(stack);
@@ -2894,7 +2916,44 @@ internal sealed partial class MainWindow : Window
         stack.Children.Add(Card(packagePanel));
         var lapAnalysisModule = moduleManager.Modules.OfType<LapAnalysisModule>().FirstOrDefault();
         var trackMatchLabel = Label(string.Empty, 13);
-        if (lapAnalysisModule is not null) stack.Children.Add(Card(trackMatchLabel));
+        Button? trackCorrection = null;
+        if (lapAnalysisModule is not null)
+        {
+            var trackMatchPanel = new StackPanel();
+            trackMatchPanel.Children.Add(trackMatchLabel);
+            trackCorrection = new Button
+            {
+                Content = "打开赛道识别纠错助手",
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 12, 0, 0),
+                Padding = new Thickness(14, 8, 14, 8)
+            };
+            trackCorrection.Click += (_, _) =>
+            {
+                var dialog = new TrackCorrectionWindow(this, lapAnalysisModule.CorrectionCandidates);
+                if (dialog.ShowDialog() != true || dialog.SelectedTrackId is not Guid trackId) return;
+                try
+                {
+                    var result = lapAnalysisModule.CorrectTrackMatch(trackId);
+                    MessageBox.Show(
+                        result.Message,
+                        "赛道已纠正",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    refreshVisiblePage?.Invoke();
+                }
+                catch (Exception exception)
+                {
+                    MessageBox.Show(
+                        exception.Message,
+                        "无法应用纠正",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+            };
+            trackMatchPanel.Children.Add(trackCorrection);
+            stack.Children.Add(Card(trackMatchPanel));
+        }
         var recordingControls = new StackPanel();
         var recordingLabel = Label(string.Empty, 13);
         recordingControls.Children.Add(recordingLabel);
@@ -2902,7 +2961,7 @@ internal sealed partial class MainWindow : Window
         recordButton.Click += async (_, _) =>
         {
             recordButton.IsEnabled = false;
-            if (recorder.IsRecording) await recorder.StopAsync(CancellationToken.None);
+            if (recorder.IsManualRecording) await recorder.StopAsync(CancellationToken.None);
             else await recorder.StartAsync(CancellationToken.None);
             recordButton.IsEnabled = true;
             refreshVisiblePage?.Invoke();
@@ -2954,6 +3013,13 @@ internal sealed partial class MainWindow : Window
                             $"  {candidate.TrackName}：{candidate.EliminationReason ?? "未进入精匹配集合"}"));
                 trackMatchLabel.Text =
                     $"赛道识别 2.0\n状态：{match.State}\n路线总数/粗筛通过/精匹配：{match.TotalRoutes} / {match.CoarseEligibleRoutes} / {match.FineCandidateRoutes}\n前三名候选：\n{candidates}\n最近淘汰：\n{eliminations}";
+                if (trackCorrection is not null)
+                {
+                    trackCorrection.IsEnabled = lapAnalysisModule.HasCurrentCompetitionSession;
+                    trackCorrection.ToolTip = trackCorrection.IsEnabled
+                        ? "根据当前候选证据或官方赛事名称纠正本场识别"
+                        : "进入一场比赛后可使用纠错助手";
+                }
             }
             if (exportPackage.IsEnabled)
             {
@@ -2962,10 +3028,10 @@ internal sealed partial class MainWindow : Window
                     $"事件 {diagnosticCapture.EventCount} 条 · 异常快照 {diagnosticCapture.AnomalyCount} 个\n" +
                     "导出内容会移除用户名和本地目录，不包含原始 UDP 字节。";
             }
-            recordingLabel.Text = recorder.IsRecording
-                ? $"正在录制：{recorder.FramesWritten:N0} 帧\n{recorder.CurrentPath}"
-                : "原始数据录制已停止。回放：dotnet run --project src/LazyForza.App -- --replay <file>";
-            recordButton.Content = recorder.IsRecording ? "停止并写入文件" : "开始原始 324 字节录制";
+            recordingLabel.Text = recorder.IsManualRecording
+                ? $"正在手动录制：{recorder.FramesWritten:N0} 帧\n{recorder.CurrentPath}\n{recorder.AutomaticStatus}"
+                : $"手动原始数据录制已停止。\n{recorder.AutomaticStatus}";
+            recordButton.Content = recorder.IsManualRecording ? "停止并写入文件" : "开始手动原始 324 字节录制";
             foreach (var (module, label) in moduleLabels) label.Text = $"{module.Descriptor.Id} · {module.Status.State} · Enabled={module.Status.IsEnabled} · Error={module.Status.LastError ?? "none"}";
         };
         refreshVisiblePage();
