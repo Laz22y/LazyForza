@@ -425,8 +425,11 @@ if ($localHash -ne $declaredHash) {
 
 $head = (git rev-parse HEAD).Trim()
 Assert-LastExitCode -Operation 'HEAD lookup'
-$existingTagCommit = git rev-list -n 1 $tag 2>$null
-if ($LASTEXITCODE -eq 0) {
+$matchingTags = @(git tag --list $tag)
+Assert-LastExitCode -Operation "Local tag lookup for $tag"
+if ($matchingTags.Count -gt 0) {
+    $existingTagCommit = (git rev-list -n 1 $tag).Trim()
+    Assert-LastExitCode -Operation "Resolve existing tag $tag"
     if ($existingTagCommit.Trim() -ne $head) {
         throw "$tag already points to a different commit."
     }
