@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using System.Text.Json;
 using System.Windows;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
@@ -55,7 +56,7 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(8, layout.LapNoMatchConfirmationSeconds);
         Assert.AreEqual(0.5, layout.LapNoMatchFadeSeconds);
         Assert.AreEqual(0.8, layout.LiveHudStaleSeconds);
-        Assert.AreEqual("1.3.3", LazyForza.App.ApplicationVersionInfo.Display);
+        Assert.AreEqual("1.3.4", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]
@@ -83,6 +84,103 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(0.206, coordinator.CurrentLayout.Scale, 1e-9);
         Assert.IsTrue(coordinator.CurrentLayout.ClickThrough);
         Assert.IsTrue(coordinator.CurrentLayout.IsLocked);
+    }
+
+    [TestMethod]
+    public void LegacyOverlayJsonKeepsLapHudAttachedToDashboard()
+    {
+        const string json =
+            """
+            {
+              "Left": 120,
+              "Top": 240,
+              "Width": 1000,
+              "Height": 500,
+              "Scale": 0.75
+            }
+            """;
+        var legacy = JsonSerializer.Deserialize<OverlayLayout>(json);
+        Assert.IsNotNull(legacy);
+
+        var normalized = OverlayLayoutGeometry.Normalize(legacy);
+        var dashboard = OverlayLayoutGeometry.Bounds(
+            normalized,
+            OverlayHudKind.Dashboard);
+        var lap = OverlayLayoutGeometry.Bounds(
+            normalized,
+            OverlayHudKind.Lap);
+
+        Assert.IsTrue(normalized.LapHudAttachedToDashboard);
+        Assert.AreEqual(dashboard, lap);
+    }
+
+    [TestMethod]
+    public void OverlayHudScalingKeepsEachCenterFixed()
+    {
+        var layout = OverlayLayoutGeometry.DetachLap(new OverlayLayout(
+            Left: 100,
+            Top: 200,
+            Width: 1000,
+            Height: 500,
+            Scale: 0.6)) with
+        {
+            LapHudLeft = 420,
+            LapHudTop = 90,
+            LapHudScale = 0.4
+        };
+        var dashboardBefore = OverlayLayoutGeometry.Bounds(
+            layout,
+            OverlayHudKind.Dashboard);
+        var lapBefore = OverlayLayoutGeometry.Bounds(
+            layout,
+            OverlayHudKind.Lap);
+
+        var dashboardScaled = OverlayLayoutGeometry.ScaleAroundCenter(
+            layout,
+            OverlayHudKind.Dashboard,
+            0.9);
+        var dashboardAfter = OverlayLayoutGeometry.Bounds(
+            dashboardScaled,
+            OverlayHudKind.Dashboard);
+        var lapAfterDashboardScale = OverlayLayoutGeometry.Bounds(
+            dashboardScaled,
+            OverlayHudKind.Lap);
+        Assert.AreEqual(dashboardBefore.CenterX, dashboardAfter.CenterX, 1e-9);
+        Assert.AreEqual(dashboardBefore.CenterY, dashboardAfter.CenterY, 1e-9);
+        Assert.AreEqual(lapBefore, lapAfterDashboardScale);
+
+        var lapScaled = OverlayLayoutGeometry.ScaleAroundCenter(
+            dashboardScaled,
+            OverlayHudKind.Lap,
+            0.55);
+        var lapAfter = OverlayLayoutGeometry.Bounds(
+            lapScaled,
+            OverlayHudKind.Lap);
+        Assert.AreEqual(lapBefore.CenterX, lapAfter.CenterX, 1e-9);
+        Assert.AreEqual(lapBefore.CenterY, lapAfter.CenterY, 1e-9);
+        Assert.IsFalse(lapScaled.LapHudAttachedToDashboard);
+    }
+
+    [TestMethod]
+    public void AttachLapHudCopiesDashboardPlacementAndScale()
+    {
+        var detached = new OverlayLayout(
+            Left: 90,
+            Top: 140,
+            Width: 1000,
+            Height: 500,
+            Scale: 0.72,
+            LapHudLeft: 600,
+            LapHudTop: 300,
+            LapHudScale: 0.35,
+            LapHudAttachedToDashboard: false);
+
+        var attached = OverlayLayoutGeometry.AttachLapToDashboard(detached);
+
+        Assert.IsTrue(attached.LapHudAttachedToDashboard);
+        Assert.AreEqual(
+            OverlayLayoutGeometry.Bounds(attached, OverlayHudKind.Dashboard),
+            OverlayLayoutGeometry.Bounds(attached, OverlayHudKind.Lap));
     }
 
     [TestMethod]
@@ -122,6 +220,16 @@ public sealed class ModuleAndOverlayTests
             resizeHorizontally: true,
             resizeVertically: false);
         Assert.AreEqual(startScale + 37 / width, side, 1e-9);
+
+        var centeredSide = OverlayResizeMath.ScaleFromCenteredDrag(
+            startScale,
+            width,
+            height,
+            60,
+            0,
+            resizeHorizontally: true,
+            resizeVertically: false);
+        Assert.AreEqual(startScale + 120 / width, centeredSide, 1e-9);
     }
 
     [TestMethod]
@@ -272,6 +380,38 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(12, edgeAligned.Top, 0.001);
         StringAssert.Contains(edgeAligned.AlignmentText, "左对齐");
         StringAssert.Contains(edgeAligned.AlignmentText, "顶部对齐");
+    }
+
+    [TestMethod]
+    public void LapHudSnapAssistanceAllowsFineSpacingBeforeExactAlignment()
+    {
+        var assistedOnly = OverlayHudSnapping.AssistLapNearDashboard(
+            lapLeft: 320,
+            lapTop: 220,
+            lapWidth: 400,
+            lapHeight: 200,
+            dashboardLeft: 300,
+            dashboardTop: 200,
+            dashboardWidth: 400,
+            dashboardHeight: 200);
+        Assert.AreEqual(320, assistedOnly.Left, 1e-9);
+        Assert.AreEqual(220, assistedOnly.Top, 1e-9);
+        Assert.IsNotNull(assistedOnly.VerticalGuide);
+        Assert.IsNotNull(assistedOnly.HorizontalGuide);
+        StringAssert.Contains(assistedOnly.AlignmentText, "微调间隔");
+
+        var snapped = OverlayHudSnapping.AssistLapNearDashboard(
+            lapLeft: 305,
+            lapTop: 196,
+            lapWidth: 400,
+            lapHeight: 200,
+            dashboardLeft: 300,
+            dashboardTop: 200,
+            dashboardWidth: 400,
+            dashboardHeight: 200);
+        Assert.AreEqual(300, snapped.Left, 1e-9);
+        Assert.AreEqual(200, snapped.Top, 1e-9);
+        StringAssert.Contains(snapped.AlignmentText, "已对齐");
     }
 
     [TestMethod]

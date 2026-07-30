@@ -123,7 +123,8 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             EnsureWindow();
-            window!.CapturePng(path, layout.Width * layout.Scale, layout.Height * layout.Scale);
+            var bounds = OverlayLayoutGeometry.UnionBounds(layout);
+            window!.CapturePng(path, bounds.Width, bounds.Height);
         });
     }
 
@@ -134,9 +135,8 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
     }
 
     private static OverlayLayout NormalizeLayout(OverlayLayout value) =>
-        value with
+        OverlayLayoutGeometry.Normalize(value) with
         {
-            Scale = OverlayScaleSettings.Normalize(value.Scale),
             ClickThrough = true,
             IsLocked = true
         };

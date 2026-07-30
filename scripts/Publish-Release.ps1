@@ -15,7 +15,9 @@ param(
 
     [switch]$SkipBuild,
 
-    [switch]$ValidateOnly
+    [switch]$ValidateOnly,
+
+    [switch]$GitCodeDirect
 )
 
 $ErrorActionPreference = 'Stop'
@@ -82,6 +84,16 @@ function Assert-LastExitCode {
         Get-Content -LiteralPath $LogPath -Tail 80
     }
     throw "$Operation failed with exit code $LASTEXITCODE."
+}
+
+function New-GitCodeHttpClient {
+    if (-not $GitCodeDirect) {
+        return [Net.Http.HttpClient]::new()
+    }
+
+    $handler = [Net.Http.HttpClientHandler]::new()
+    $handler.UseProxy = $false
+    return [Net.Http.HttpClient]::new($handler)
 }
 
 function Assert-SafeChildPath {
@@ -313,7 +325,7 @@ function Test-ReleaseDestinations {
             throw 'The saved GitCode token is empty.'
         }
 
-        $client = [Net.Http.HttpClient]::new()
+        $client = New-GitCodeHttpClient
         try {
             $client.Timeout = [TimeSpan]::FromSeconds(30)
             $client.DefaultRequestHeaders.Authorization =
@@ -550,8 +562,8 @@ try {
         throw 'The saved GitCode token is empty.'
     }
 
-    $apiClient = [Net.Http.HttpClient]::new()
-    $uploadClient = [Net.Http.HttpClient]::new()
+    $apiClient = New-GitCodeHttpClient
+    $uploadClient = New-GitCodeHttpClient
     try {
         $apiClient.Timeout = [TimeSpan]::FromSeconds(60)
         $apiClient.DefaultRequestHeaders.Authorization =

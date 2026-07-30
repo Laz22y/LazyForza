@@ -2563,6 +2563,12 @@ internal sealed partial class MainWindow : Window
         stack.Children.Add(Card(network));
 
         var current = overlay.CurrentLayout;
+        var currentDashboardBounds = OverlayLayoutGeometry.Bounds(
+            current,
+            OverlayHudKind.Dashboard);
+        var currentLapBounds = OverlayLayoutGeometry.Bounds(
+            current,
+            OverlayHudKind.Lap);
         var controls = new StackPanel();
 
         var overlayHeader = new Grid { Margin = new Thickness(0, 0, 0, 14) };
@@ -2571,7 +2577,10 @@ internal sealed partial class MainWindow : Window
         var headerText = new StackPanel();
         headerText.Children.Add(Label("Overlay 设置", 17, FontWeights.SemiBold));
         var overlaySummary = Label(
-            $"{current.Width:0} × {current.Height:0} · 缩放 {current.Scale:P0} · 不透明度 {current.Opacity:P0} · {current.MonitorId}",
+            $"仪表盘 {currentDashboardBounds.Width:0} × {currentDashboardBounds.Height:0} · " +
+            $"圈速 {currentLapBounds.Width:0} × {currentLapBounds.Height:0} · " +
+            $"{(current.LapHudAttachedToDashboard ? "已吸附" : "独立布局")} · " +
+            $"不透明度 {current.Opacity:P0} · {current.MonitorId}",
             11, FontWeights.Normal, "MutedBrush");
         overlaySummary.Margin = new Thickness(0, 3, 0, 0);
         headerText.Children.Add(overlaySummary);
@@ -2630,14 +2639,23 @@ internal sealed partial class MainWindow : Window
         primarySettings.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var appearance = new StackPanel();
-        var scale = AddValueSlider(
-            appearance, "精确缩放", "按 1% 调整，也可在布局编辑器中拖动边框", current.Scale,
+        var dashboardScale = AddValueSlider(
+            appearance, "仪表盘 HUD 精确缩放", "按 1% 调整，并保持仪表盘中心点不变", current.Scale,
             OverlayScaleSettings.Minimum,
             OverlayScaleSettings.Maximum,
             OverlayScaleSettings.Step,
             value => value.ToString("P0"));
-        scale.SmallChange = OverlayScaleSettings.Step;
-        scale.LargeChange = 0.05;
+        dashboardScale.SmallChange = OverlayScaleSettings.Step;
+        dashboardScale.LargeChange = 0.05;
+        var lapScale = AddValueSlider(
+            appearance, "圈速 HUD 精确缩放", "按 1% 调整，并保持圈速 HUD 中心点不变",
+            current.LapHudScale ?? current.Scale,
+            OverlayScaleSettings.Minimum,
+            OverlayScaleSettings.Maximum,
+            OverlayScaleSettings.Step,
+            value => value.ToString("P0"));
+        lapScale.SmallChange = OverlayScaleSettings.Step;
+        lapScale.LargeChange = 0.05;
         var opacity = AddValueSlider(
             appearance, "不透明度", "HUD 内容的最高可见度", current.Opacity,
             0.25, 1, 0.05, value => value.ToString("P0"));
@@ -2650,7 +2668,7 @@ internal sealed partial class MainWindow : Window
         appearance.Children.Add(monitor);
         primarySettings.Children.Add(SettingGroup(
             "外观",
-            "调整 Overlay 的缩放与透明度。",
+            "分别调整两个 HUD；缩放时位置会围绕各自中心点补偿。",
             appearance));
 
         var interaction = new StackPanel();
@@ -2722,7 +2740,6 @@ internal sealed partial class MainWindow : Window
         {
             var next = overlay.CurrentLayout with
             {
-                Scale = OverlayScaleSettings.Normalize(scale.Value),
                 Opacity = opacity.Value,
                 ClickThrough = true,
                 IsLocked = true,
@@ -2736,6 +2753,18 @@ internal sealed partial class MainWindow : Window
                 LapNoMatchFadeSeconds = noMatchFade.Value,
                 LiveHudStaleSeconds = liveHudStale.Value
             };
+            next = OverlayLayoutGeometry.ScaleAroundCenter(
+                next,
+                OverlayHudKind.Dashboard,
+                dashboardScale.Value);
+            next = OverlayLayoutGeometry.ScaleAroundCenter(
+                next,
+                OverlayHudKind.Lap,
+                lapScale.Value);
+            if (current.LapHudAttachedToDashboard &&
+                Math.Abs(dashboardScale.Value - lapScale.Value) <
+                OverlayScaleSettings.Step / 2)
+                next = OverlayLayoutGeometry.AttachLapToDashboard(next);
             store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
             await overlay.SetLayoutAsync(next, CancellationToken.None);
             RenderSelectedPage();
