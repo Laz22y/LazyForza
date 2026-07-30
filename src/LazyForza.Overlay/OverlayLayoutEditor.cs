@@ -394,12 +394,14 @@ internal sealed class OverlayLayoutEditorWindow : Window
     private readonly Canvas canvas;
     private readonly EditorHud dashboardHud;
     private readonly EditorHud lapHud;
+    private readonly EditorHud driftHud;
     private readonly Line verticalGuide;
     private readonly Line horizontalGuide;
     private readonly TextBlock alignmentText;
     private readonly TextBlock metricsText;
     private readonly ToggleButton dashboardSelection;
     private readonly ToggleButton lapSelection;
+    private readonly ToggleButton driftSelection;
     private readonly List<(Thumb Thumb, ResizeHandle Handle)> handles = [];
     private EditorHud selectedHud;
     private EditorHud? draggingHud;
@@ -455,9 +457,14 @@ internal sealed class OverlayLayoutEditorWindow : Window
             OverlayHudKind.Lap,
             getContributions,
             HudSurfaceKind.Lap);
+        driftHud = CreateHud(
+            OverlayHudKind.Drift,
+            getContributions,
+            HudSurfaceKind.Drift);
         selectedHud = dashboardHud;
         canvas.Children.Add(dashboardHud.Frame);
         canvas.Children.Add(lapHud.Frame);
+        canvas.Children.Add(driftHud.Frame);
 
         verticalGuide = GuideLine();
         horizontalGuide = GuideLine();
@@ -504,7 +511,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         });
         heading.Children.Add(new TextBlock
         {
-            Text = "分别选择两个 HUD 后拖动或缩放；缩放始终以 HUD 中心为固定点。Esc 取消，Ctrl+S 保存。",
+            Text = "分别选择三个 HUD 后拖动或缩放；缩放始终以 HUD 中心为固定点。Esc 取消，Ctrl+S 保存。",
             Margin = new Thickness(0, 3, 0, 0),
             FontSize = 11,
             Foreground = new SolidColorBrush(Color.FromRgb(179, 192, 201))
@@ -533,6 +540,15 @@ internal sealed class OverlayLayoutEditorWindow : Window
         };
         lapSelection.Click += (_, _) => SelectHud(lapHud);
         selectionPanel.Children.Add(lapSelection);
+        driftSelection = new ToggleButton
+        {
+            Content = "漂移 HUD · Preview",
+            Padding = new Thickness(11, 6, 11, 6),
+            Margin = new Thickness(7, 0, 0, 0),
+            MinWidth = 126
+        };
+        driftSelection.Click += (_, _) => SelectHud(driftHud);
+        selectionPanel.Children.Add(driftSelection);
         var attachLap = new Button
         {
             Content = "使圈速 HUD 吸附仪表盘",
@@ -622,7 +638,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
     }
 
     private const string DefaultAlignmentText =
-        "拖动时吸附窗口边缘与中心；圈速 HUD 靠近仪表盘时提供宽松辅助";
+        "三个 HUD 均可独立拖动和固定中心缩放；圈速 HUD 另有吸附辅助";
 
     public OverlayLayout? Result { get; private set; }
 
@@ -654,12 +670,18 @@ internal sealed class OverlayLayoutEditorWindow : Window
     {
         var dashboard = OverlayLayoutGeometry.Bounds(original, OverlayHudKind.Dashboard);
         var lap = OverlayLayoutGeometry.Bounds(original, OverlayHudKind.Lap);
+        var drift = OverlayLayoutGeometry.Bounds(original, OverlayHudKind.Drift);
         dashboardHud.Scale = Math.Min(original.Scale, MaximumScale());
         dashboardHud.Left = dashboard.Left - Left;
         dashboardHud.Top = dashboard.Top - Top;
         lapHud.Scale = Math.Min(original.LapHudScale ?? original.Scale, MaximumScale());
         lapHud.Left = lap.Left - Left;
         lapHud.Top = lap.Top - Top;
+        driftHud.Scale = Math.Min(
+            original.DriftHudScale ?? original.Scale,
+            MaximumScale());
+        driftHud.Left = drift.Left - Left;
+        driftHud.Top = drift.Top - Top;
         if (lapAttached) SyncLapToDashboard();
         SelectHud(dashboardHud);
         ApplyHuds(clamp: true);
@@ -676,6 +698,9 @@ internal sealed class OverlayLayoutEditorWindow : Window
             LapHudTop = Top + lapHud.Top,
             LapHudScale = lapHud.Scale,
             LapHudAttachedToDashboard = lapAttached,
+            DriftHudLeft = Left + driftHud.Left,
+            DriftHudTop = Top + driftHud.Top,
+            DriftHudScale = driftHud.Scale,
             MonitorId = target.MonitorId,
             ClickThrough = true,
             IsLocked = true
@@ -688,6 +713,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         if (lapAttached) SyncLapToDashboard();
         ApplyHud(dashboardHud, clamp);
         ApplyHud(lapHud, clamp);
+        ApplyHud(driftHud, clamp);
         PositionHandles();
         UpdateSelectionVisuals();
     }
@@ -712,6 +738,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         selectedHud = hud;
         Canvas.SetZIndex(dashboardHud.Frame, hud == dashboardHud ? 14 : 10);
         Canvas.SetZIndex(lapHud.Frame, hud == lapHud ? 14 : 10);
+        Canvas.SetZIndex(driftHud.Frame, hud == driftHud ? 14 : 10);
         foreach (var (thumb, _) in handles) Canvas.SetZIndex(thumb, 30);
         UpdateSelectionVisuals();
         PositionHandles();
@@ -721,6 +748,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
     {
         dashboardSelection.IsChecked = selectedHud == dashboardHud;
         lapSelection.IsChecked = selectedHud == lapHud;
+        driftSelection.IsChecked = selectedHud == driftHud;
         dashboardHud.Frame.BorderBrush = new SolidColorBrush(
             selectedHud == dashboardHud
                 ? Color.FromRgb(61, 232, 143)
@@ -729,13 +757,22 @@ internal sealed class OverlayLayoutEditorWindow : Window
             selectedHud == lapHud
                 ? Color.FromRgb(73, 211, 235)
                 : Color.FromArgb(150, 73, 211, 235));
+        driftHud.Frame.BorderBrush = new SolidColorBrush(
+            selectedHud == driftHud
+                ? Color.FromRgb(242, 184, 39)
+                : Color.FromArgb(150, 242, 184, 39));
         dashboardHud.Frame.BorderThickness = new Thickness(
             selectedHud == dashboardHud ? 2.5 : 1.2);
         lapHud.Frame.BorderThickness = new Thickness(
             selectedHud == lapHud ? 2.5 : 1.2);
-        var name = selectedHud.Kind == OverlayHudKind.Dashboard
-            ? "仪表盘 HUD"
-            : "圈速 HUD";
+        driftHud.Frame.BorderThickness = new Thickness(
+            selectedHud == driftHud ? 2.5 : 1.2);
+        var name = selectedHud.Kind switch
+        {
+            OverlayHudKind.Dashboard => "仪表盘 HUD",
+            OverlayHudKind.Lap => "圈速 HUD",
+            _ => "漂移 HUD · Preview"
+        };
         var attachment = selectedHud.Kind == OverlayHudKind.Lap && lapAttached
             ? " · 已吸附"
             : string.Empty;

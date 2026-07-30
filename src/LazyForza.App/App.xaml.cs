@@ -5,6 +5,7 @@ using System.ComponentModel;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
+using LazyForza.Modules.DriftDashboard;
 using LazyForza.Modules.LapAnalysis;
 using LazyForza.Overlay;
 using LazyForza.Storage;
@@ -18,6 +19,7 @@ public partial class App : Application
     private TelemetryHub? telemetry;
     private OverlayCoordinator? overlay;
     private ModuleManager? moduleManager;
+    private DriftDashboardActivationController? moduleActivation;
     private TelemetryRecorderController? recorder;
     private RollingLog? log;
     private ApplicationUpdateManager? updateManager;
@@ -42,6 +44,12 @@ public partial class App : Application
             directories.EnsureCreated();
             var replayPath = ReplayPath(e.Args);
             var captureDirectory = CaptureDirectory(e.Args);
+            var captureDriftQa = e.Args.Contains(
+                "--capture-drift-qa",
+                StringComparer.OrdinalIgnoreCase);
+            var captureDriftOnlyQa = e.Args.Contains(
+                "--capture-drift-only-qa",
+                StringComparer.OrdinalIgnoreCase);
             var recordSeconds = AutoRecordSeconds(e.Args);
             var simulatorRequested = e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase) || captureDirectory is not null || recordSeconds is not null;
             var isolatedData = simulatorRequested || replayPath is not null;
@@ -101,12 +109,14 @@ public partial class App : Application
                 diagnosticCapture.RecordSignal);
             moduleManager = new ModuleManager(modules, context);
             await moduleManager.InitializeAsync(CancellationToken.None);
-            foreach (var module in moduleManager.Modules)
-            {
-                var saved = await store.GetAsync(module.Descriptor.Id, "enabled", CancellationToken.None);
-                var enabled = captureDirectory is not null || saved is null || bool.TryParse(saved, out var parsed) && parsed;
-                if (enabled) await moduleManager.SetEnabledAsync(module.Descriptor.Id, true, CancellationToken.None);
-            }
+            moduleActivation = new DriftDashboardActivationController(
+                moduleManager,
+                store);
+            await moduleActivation.InitializeAsync(
+                captureDirectory is not null,
+                captureDriftQa,
+                captureDriftOnlyQa,
+                CancellationToken.None);
 
             var lapAnalysis = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
             recorder = new TelemetryRecorderController(
@@ -126,7 +136,8 @@ public partial class App : Application
                 recorder,
                 source.Kind,
                 updateManager,
-                diagnosticCapture);
+                diagnosticCapture,
+                moduleActivation);
             MainWindow.Closing += OnMainWindowClosing;
             MainWindow.Show();
             trayIcon = new TrayIconService(
@@ -136,7 +147,13 @@ public partial class App : Application
                 () => ExitApplication());
             if (captureDirectory is null && recordSeconds is null)
                 _ = ((MainWindow)MainWindow).CheckForUpdatesOnStartupAsync();
-            if (captureDirectory is not null) _ = CaptureQaAsync(captureDirectory);
+            if (captureDirectory is not null)
+            {
+                _ = CaptureQaAsync(
+                    captureDirectory,
+                    captureDriftQa,
+                    captureDriftOnlyQa);
+            }
             else if (recordSeconds is not null) _ = AutoRecordAndExitAsync(recordSeconds.Value);
         }
         catch (Exception exception)
@@ -278,7 +295,10 @@ public partial class App : Application
         }
     }
 
-    private async Task CaptureQaAsync(string directory)
+    private async Task CaptureQaAsync(
+        string directory,
+        bool captureDriftQa,
+        bool captureDriftOnlyQa)
     {
         try
         {
@@ -286,7 +306,32 @@ public partial class App : Application
             var original = overlay!.CurrentLayout;
             foreach (var size in new[] { (Width: 1280d, Height: 720d), (Width: 1920d, Height: 1080d), (Width: 2560d, Height: 1440d) })
             {
-                await overlay.SetLayoutAsync(original with { Width = size.Width, Height = size.Height, Scale = 1 }, CancellationToken.None);
+                var captureLayout = original with
+                {
+                    Left = 0,
+                    Top = captureDriftQa ? size.Height * 0.22 : 0,
+                    Width = size.Width,
+                    Height = size.Height,
+                    Scale = captureDriftQa ? 0.50 : 1,
+                    LapHudLeft = 0,
+                    LapHudTop = 0,
+                    LapHudScale = 1,
+                    LapHudAttachedToDashboard = false,
+                    DriftHudLeft = captureDriftQa
+                        ? size.Width * 0.50
+                        : 0,
+                    DriftHudTop = captureDriftQa
+                        ? size.Height * 0.10
+                        : 0,
+                    DriftHudScale = captureDriftQa
+                        ? 0.50
+                        : captureDriftOnlyQa
+                            ? 1
+                            : original.DriftHudScale
+                };
+                await overlay.SetLayoutAsync(
+                    captureLayout,
+                    CancellationToken.None);
                 await Task.Delay(100);
                 await overlay.CapturePngAsync(Path.Combine(directory, $"hud-{size.Width:0}x{size.Height:0}-demo.png"), CancellationToken.None);
             }
@@ -389,6 +434,7 @@ internal static class BuiltInModuleCatalog
         Action<DiagnosticSignal>? diagnosticSink = null) =>
     [
         new DashboardModule(),
-        new LapAnalysisModule(store, sourceKind, getOverlayLayout, diagnosticSink)
+        new LapAnalysisModule(store, sourceKind, getOverlayLayout, diagnosticSink),
+        new DriftDashboardModule()
     ];
 }

@@ -4,6 +4,7 @@ using System.Windows;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
+using LazyForza.Modules.DriftDashboard;
 using LazyForza.Modules.LapAnalysis;
 using LazyForza.Overlay;
 
@@ -56,7 +57,7 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(8, layout.LapNoMatchConfirmationSeconds);
         Assert.AreEqual(0.5, layout.LapNoMatchFadeSeconds);
         Assert.AreEqual(0.8, layout.LiveHudStaleSeconds);
-        Assert.AreEqual("1.3.4", LazyForza.App.ApplicationVersionInfo.Display);
+        Assert.AreEqual("1.3.5", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]
@@ -109,9 +110,15 @@ public sealed class ModuleAndOverlayTests
         var lap = OverlayLayoutGeometry.Bounds(
             normalized,
             OverlayHudKind.Lap);
+        var drift = OverlayLayoutGeometry.Bounds(
+            normalized,
+            OverlayHudKind.Drift);
 
         Assert.IsTrue(normalized.LapHudAttachedToDashboard);
         Assert.AreEqual(dashboard, lap);
+        Assert.AreEqual(dashboard.Right + 24, drift.Left, 1e-9);
+        Assert.AreEqual(dashboard.Top, drift.Top, 1e-9);
+        Assert.AreEqual(dashboard.Width, drift.Width, 1e-9);
     }
 
     [TestMethod]
@@ -134,6 +141,9 @@ public sealed class ModuleAndOverlayTests
         var lapBefore = OverlayLayoutGeometry.Bounds(
             layout,
             OverlayHudKind.Lap);
+        var driftBefore = OverlayLayoutGeometry.Bounds(
+            layout,
+            OverlayHudKind.Drift);
 
         var dashboardScaled = OverlayLayoutGeometry.ScaleAroundCenter(
             layout,
@@ -148,6 +158,11 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(dashboardBefore.CenterX, dashboardAfter.CenterX, 1e-9);
         Assert.AreEqual(dashboardBefore.CenterY, dashboardAfter.CenterY, 1e-9);
         Assert.AreEqual(lapBefore, lapAfterDashboardScale);
+        Assert.AreEqual(
+            driftBefore,
+            OverlayLayoutGeometry.Bounds(
+                dashboardScaled,
+                OverlayHudKind.Drift));
 
         var lapScaled = OverlayLayoutGeometry.ScaleAroundCenter(
             dashboardScaled,
@@ -159,6 +174,23 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(lapBefore.CenterX, lapAfter.CenterX, 1e-9);
         Assert.AreEqual(lapBefore.CenterY, lapAfter.CenterY, 1e-9);
         Assert.IsFalse(lapScaled.LapHudAttachedToDashboard);
+
+        var driftScaled = OverlayLayoutGeometry.ScaleAroundCenter(
+            lapScaled,
+            OverlayHudKind.Drift,
+            0.7);
+        var driftAfter = OverlayLayoutGeometry.Bounds(
+            driftScaled,
+            OverlayHudKind.Drift);
+        Assert.AreEqual(
+            driftBefore.CenterX,
+            driftAfter.CenterX,
+            1e-9);
+        Assert.AreEqual(
+            driftBefore.CenterY,
+            driftAfter.CenterY,
+            1e-9);
+        Assert.AreEqual(0.7, driftScaled.DriftHudScale!.Value, 1e-9);
     }
 
     [TestMethod]
@@ -233,11 +265,12 @@ public sealed class ModuleAndOverlayTests
     }
 
     [TestMethod]
-    public void OverlayLayoutPreviewAlwaysProvidesDashboardAndLapHud()
+    public void OverlayLayoutPreviewAlwaysProvidesAllThreeHuds()
     {
         var now = DateTimeOffset.UtcNow;
         var dashboard = OverlayLayoutPreviewState.Dashboard(null, now);
         var lap = OverlayLayoutPreviewState.Lap(null, now);
+        var drift = OverlayLayoutPreviewState.Drift(null, now);
 
         Assert.IsTrue(dashboard.IsDriving);
         Assert.IsFalse(dashboard.IsStale);
@@ -246,6 +279,49 @@ public sealed class ModuleAndOverlayTests
         Assert.IsTrue(lap.Sectors.Count >= 4);
         Assert.IsNotNull(lap.CumulativeHistoricalDeltaSeconds);
         Assert.IsTrue(lap.CurrentLapSeconds > 0);
+        Assert.IsTrue(drift.IsDriving);
+        Assert.IsTrue(drift.IsDrifting);
+        Assert.AreEqual(DriftPracticePhase.Stable, drift.Phase);
+        Assert.IsTrue(drift.DriftAngleDegrees > 0);
+        Assert.IsTrue(drift.StabilityScore >= 75);
+    }
+
+    [TestMethod]
+    public void DriftHudMovesIndependentlyAndParticipatesInUnionBounds()
+    {
+        var original = OverlayLayoutGeometry.Normalize(new OverlayLayout(
+            Left: 100,
+            Top: 150,
+            Width: 1_000,
+            Height: 500,
+            Scale: 0.5));
+        var dashboardBefore = OverlayLayoutGeometry.Bounds(
+            original,
+            OverlayHudKind.Dashboard);
+        var lapBefore = OverlayLayoutGeometry.Bounds(
+            original,
+            OverlayHudKind.Lap);
+
+        var moved = OverlayLayoutGeometry.Move(
+            original,
+            OverlayHudKind.Drift,
+            900,
+            260);
+        var drift = OverlayLayoutGeometry.Bounds(
+            moved,
+            OverlayHudKind.Drift);
+        var union = OverlayLayoutGeometry.UnionBounds(moved);
+
+        Assert.AreEqual(dashboardBefore, OverlayLayoutGeometry.Bounds(
+            moved,
+            OverlayHudKind.Dashboard));
+        Assert.AreEqual(lapBefore, OverlayLayoutGeometry.Bounds(
+            moved,
+            OverlayHudKind.Lap));
+        Assert.AreEqual(900, drift.Left, 1e-9);
+        Assert.AreEqual(260, drift.Top, 1e-9);
+        Assert.AreEqual(drift.Right, union.Right, 1e-9);
+        Assert.IsTrue(union.Left <= dashboardBefore.Left);
     }
 
     [TestMethod]

@@ -4,6 +4,9 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
+using LazyForza.Modules.Dashboard;
+using LazyForza.Modules.DriftDashboard;
+using LazyForza.Modules.LapAnalysis;
 
 namespace LazyForza.App;
 
@@ -76,15 +79,111 @@ internal sealed partial class MainWindow
             description.Children.Add(Label(module.Descriptor.Description, 13, FontWeights.Normal, "MutedBrush"));
             description.Children.Add(Label($"状态：{ModuleStateText(module.Status.State)}" + (module.Status.LastError is null ? string.Empty : $" · {module.Status.LastError}"), 12,
                 FontWeights.Normal, module.Status.State == ModuleRuntimeState.Faulted ? "AccentBrush" : "MutedBrush"));
+            if (module is DriftDashboardModule)
+            {
+                var protection = Label(
+                    "开启期间圈速分析保持关闭，接下来的圈速不会写入数据库；关闭后按原偏好恢复。",
+                    11,
+                    FontWeights.Normal,
+                    "MutedBrush");
+                protection.Margin = new Thickness(0, 6, 0, 0);
+                protection.TextWrapping = TextWrapping.Wrap;
+                description.Children.Add(protection);
+                var autoCloseDashboard = new ToggleButton
+                {
+                    Content = AutoCloseDashboardText(
+                        moduleActivation.AutoCloseDashboard),
+                    IsChecked = moduleActivation.AutoCloseDashboard,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Margin = new Thickness(0, 10, 0, 0),
+                    Padding = new Thickness(11, 5, 11, 5),
+                    ToolTip = "关闭此选项后，漂移仪表盘可以和主仪表盘同时显示。"
+                };
+                autoCloseDashboard.Click += async (_, _) =>
+                {
+                    changingModule = true;
+                    autoCloseDashboard.IsEnabled = false;
+                    try
+                    {
+                        await moduleActivation.SetAutoCloseDashboardAsync(
+                            autoCloseDashboard.IsChecked == true,
+                            CancellationToken.None);
+                    }
+                    catch (Exception exception)
+                    {
+                        MessageBox.Show(
+                            exception.Message,
+                            "漂移仪表盘设置失败",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                    }
+                    finally
+                    {
+                        changingModule = false;
+                        RenderSelectedPage();
+                    }
+                };
+                description.Children.Add(autoCloseDashboard);
+            }
             row.Children.Add(description);
-            var toggle = new ToggleButton { Content = module.Status.IsEnabled ? "已启用" : "已停用", IsChecked = module.Status.IsEnabled, MinWidth = 96, VerticalAlignment = VerticalAlignment.Center };
+            var blockedByDrift =
+                module is LapAnalysisModule &&
+                moduleActivation.IsDriftActive;
+            var toggle = new ToggleButton
+            {
+                Content = blockedByDrift
+                    ? "漂移模式中"
+                    : module.Status.IsEnabled ? "已启用" : "已停用",
+                IsChecked = module.Status.IsEnabled,
+                IsEnabled = !blockedByDrift,
+                MinWidth = 96,
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = blockedByDrift
+                    ? "请先关闭漂移仪表盘，再启用圈速分析。"
+                    : null
+            };
             toggle.Click += async (_, _) =>
             {
+                var acceptedIntroduction = false;
+                bool? introductionAutoClose = null;
+                var requestedEnabled = toggle.IsChecked == true;
+                if (module is DriftDashboardModule &&
+                    requestedEnabled &&
+                    !moduleActivation.IntroductionSeen)
+                {
+                    var introduction = new DriftDashboardIntroductionWindow(
+                        moduleActivation.AutoCloseDashboard)
+                    {
+                        Owner = this
+                    };
+                    if (introduction.ShowDialog() != true)
+                    {
+                        toggle.IsChecked = false;
+                        return;
+                    }
+                    acceptedIntroduction = true;
+                    introductionAutoClose = introduction.AutoCloseDashboard;
+                }
+
                 changingModule = true;
                 toggle.IsEnabled = false;
                 try
                 {
-                    await moduleManager.SetEnabledAsync(module.Descriptor.Id, toggle.IsChecked == true, CancellationToken.None);
+                    if (introductionAutoClose is bool autoClose)
+                    {
+                        await moduleActivation.SetAutoCloseDashboardAsync(
+                            autoClose,
+                            CancellationToken.None);
+                    }
+                    await moduleActivation.SetEnabledAsync(
+                        module.Descriptor.Id,
+                        requestedEnabled,
+                        CancellationToken.None);
+                    if (acceptedIntroduction)
+                    {
+                        await moduleActivation.MarkIntroductionSeenAsync(
+                            CancellationToken.None);
+                    }
                 }
                 catch (Exception exception)
                 {
@@ -102,5 +201,8 @@ internal sealed partial class MainWindow
         }
 
         return Scroll(stack);
+
+        static string AutoCloseDashboardText(bool enabled) =>
+            $"打开漂移仪表盘时自动关闭主仪表盘：{(enabled ? "开" : "关")}";
     }
 }

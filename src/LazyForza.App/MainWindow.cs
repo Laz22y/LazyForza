@@ -50,6 +50,7 @@ internal sealed partial class MainWindow : Window
     private readonly TelemetrySourceKind sourceKind;
     private readonly ApplicationUpdateManager updateManager;
     private readonly DiagnosticCaptureService diagnosticCapture;
+    private readonly DriftDashboardActivationController moduleActivation;
     private readonly MainWindowPageRefreshState pageRefresh = new();
     private readonly ContentControl content = new();
     private readonly ListBox navigation = new();
@@ -73,7 +74,8 @@ internal sealed partial class MainWindow : Window
         TelemetryRecorderController recorder,
         TelemetrySourceKind sourceKind,
         ApplicationUpdateManager updateManager,
-        DiagnosticCaptureService diagnosticCapture)
+        DiagnosticCaptureService diagnosticCapture,
+        DriftDashboardActivationController moduleActivation)
     {
         this.moduleManager = moduleManager;
         this.telemetry = telemetry;
@@ -84,6 +86,7 @@ internal sealed partial class MainWindow : Window
         this.sourceKind = sourceKind;
         this.updateManager = updateManager;
         this.diagnosticCapture = diagnosticCapture;
+        this.moduleActivation = moduleActivation;
         Title = $"LazyForza {ApplicationVersionInfo.Display}";
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForza.png", UriKind.Absolute));
         Width = 1280;
@@ -2569,6 +2572,9 @@ internal sealed partial class MainWindow : Window
         var currentLapBounds = OverlayLayoutGeometry.Bounds(
             current,
             OverlayHudKind.Lap);
+        var currentDriftBounds = OverlayLayoutGeometry.Bounds(
+            current,
+            OverlayHudKind.Drift);
         var controls = new StackPanel();
 
         var overlayHeader = new Grid { Margin = new Thickness(0, 0, 0, 14) };
@@ -2579,6 +2585,7 @@ internal sealed partial class MainWindow : Window
         var overlaySummary = Label(
             $"仪表盘 {currentDashboardBounds.Width:0} × {currentDashboardBounds.Height:0} · " +
             $"圈速 {currentLapBounds.Width:0} × {currentLapBounds.Height:0} · " +
+            $"漂移 {currentDriftBounds.Width:0} × {currentDriftBounds.Height:0} · " +
             $"{(current.LapHudAttachedToDashboard ? "已吸附" : "独立布局")} · " +
             $"不透明度 {current.Opacity:P0} · {current.MonitorId}",
             11, FontWeights.Normal, "MutedBrush");
@@ -2656,6 +2663,17 @@ internal sealed partial class MainWindow : Window
             value => value.ToString("P0"));
         lapScale.SmallChange = OverlayScaleSettings.Step;
         lapScale.LargeChange = 0.05;
+        var driftScale = AddValueSlider(
+            appearance,
+            "漂移 HUD 精确缩放 · Preview",
+            "按 1% 调整，并保持漂移 HUD 中心点不变",
+            current.DriftHudScale ?? current.Scale,
+            OverlayScaleSettings.Minimum,
+            OverlayScaleSettings.Maximum,
+            OverlayScaleSettings.Step,
+            value => value.ToString("P0"));
+        driftScale.SmallChange = OverlayScaleSettings.Step;
+        driftScale.LargeChange = 0.05;
         var opacity = AddValueSlider(
             appearance, "不透明度", "HUD 内容的最高可见度", current.Opacity,
             0.25, 1, 0.05, value => value.ToString("P0"));
@@ -2668,7 +2686,7 @@ internal sealed partial class MainWindow : Window
         appearance.Children.Add(monitor);
         primarySettings.Children.Add(SettingGroup(
             "外观",
-            "分别调整两个 HUD；缩放时位置会围绕各自中心点补偿。",
+            "分别调整三个 HUD；缩放时位置会围绕各自中心点补偿。",
             appearance));
 
         var interaction = new StackPanel();
@@ -2761,6 +2779,10 @@ internal sealed partial class MainWindow : Window
                 next,
                 OverlayHudKind.Lap,
                 lapScale.Value);
+            next = OverlayLayoutGeometry.ScaleAroundCenter(
+                next,
+                OverlayHudKind.Drift,
+                driftScale.Value);
             if (current.LapHudAttachedToDashboard &&
                 Math.Abs(dashboardScale.Value - lapScale.Value) <
                 OverlayScaleSettings.Step / 2)

@@ -1,5 +1,6 @@
 using LazyForza.Domain;
 using LazyForza.Modules.Dashboard;
+using LazyForza.Modules.DriftDashboard;
 using LazyForza.Modules.LapAnalysis;
 
 namespace LazyForza.Overlay;
@@ -22,4 +23,13 @@ public static class OverlayVisibilityPolicy
         state is { IsCompetitionActive: true } &&
         (state.Source != TelemetrySourceKind.Live ||
          now - state.UpdatedAt <= TimeSpan.FromSeconds(Math.Clamp(liveStaleSeconds, 0.05, 10)));
+
+    public static bool ShouldShowDrift(
+        DriftHudState? state,
+        DateTimeOffset now,
+        double liveStaleSeconds = 0.8) =>
+        state is { IsDriving: true } &&
+        (state.Source != TelemetrySourceKind.Live ||
+         now - state.UpdatedAt <= TimeSpan.FromSeconds(
+             Math.Clamp(liveStaleSeconds, 0.05, 10)));
 }
