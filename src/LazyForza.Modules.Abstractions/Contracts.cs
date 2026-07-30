@@ -20,7 +20,8 @@ public sealed record ModuleDescriptor(
     IReadOnlyList<string> Dependencies,
     string? MainPageKey,
     string? SettingsPageKey,
-    bool HasHudContribution);
+    bool HasHudContribution,
+    bool DefaultEnabled = true);
 
 public sealed record ModuleStatus(
     string Id,
@@ -44,7 +45,8 @@ public interface ITelemetryFeed : IAsyncDisposable
 public enum HudContributionKind
 {
     Dashboard,
-    LapSectors
+    LapSectors,
+    DriftDashboard
 }
 
 public interface IHudContribution

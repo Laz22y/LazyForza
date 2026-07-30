@@ -22,12 +22,16 @@ public sealed record OverlayLayout(
     double? LapHudLeft = null,
     double? LapHudTop = null,
     double? LapHudScale = null,
-    bool LapHudAttachedToDashboard = true);
+    bool LapHudAttachedToDashboard = true,
+    double? DriftHudLeft = null,
+    double? DriftHudTop = null,
+    double? DriftHudScale = null);
 
 public enum OverlayHudKind
 {
     Dashboard,
-    Lap
+    Lap,
+    Drift
 }
 
 public readonly record struct OverlayHudBounds(
@@ -59,15 +63,29 @@ public static class OverlayLayoutGeometry
             Height = height,
             Scale = scale
         };
-        if (value.LapHudAttachedToDashboard)
-            return AttachLapToDashboard(normalized);
-
-        return normalized with
+        var withLap = value.LapHudAttachedToDashboard
+            ? AttachLapToDashboard(normalized)
+            : normalized with
+            {
+                LapHudLeft = Finite(value.LapHudLeft, left),
+                LapHudTop = Finite(value.LapHudTop, top),
+                LapHudScale = OverlayScaleSettings.Normalize(
+                    value.LapHudScale ?? scale),
+                LapHudAttachedToDashboard = false
+            };
+        var driftScale = OverlayScaleSettings.Normalize(
+            value.DriftHudScale ?? scale);
+        var defaultDriftLeft =
+            left +
+            OverlayScaleSettings.ScaledDimension(width, scale) +
+            24;
+        return withLap with
         {
-            LapHudLeft = Finite(value.LapHudLeft, left),
-            LapHudTop = Finite(value.LapHudTop, top),
-            LapHudScale = OverlayScaleSettings.Normalize(value.LapHudScale ?? scale),
-            LapHudAttachedToDashboard = false
+            DriftHudLeft = Finite(
+                value.DriftHudLeft,
+                defaultDriftLeft),
+            DriftHudTop = Finite(value.DriftHudTop, top),
+            DriftHudScale = driftScale
         };
     }
 
@@ -76,16 +94,25 @@ public static class OverlayLayoutGeometry
         OverlayHudKind kind)
     {
         var layout = Normalize(value);
-        var scale = kind == OverlayHudKind.Dashboard
-            ? layout.Scale
-            : layout.LapHudScale ?? layout.Scale;
+        var scale = kind switch
+        {
+            OverlayHudKind.Dashboard => layout.Scale,
+            OverlayHudKind.Lap => layout.LapHudScale ?? layout.Scale,
+            _ => layout.DriftHudScale ?? layout.Scale
+        };
         return new OverlayHudBounds(
-            kind == OverlayHudKind.Dashboard
-                ? layout.Left
-                : layout.LapHudLeft ?? layout.Left,
-            kind == OverlayHudKind.Dashboard
-                ? layout.Top
-                : layout.LapHudTop ?? layout.Top,
+            kind switch
+            {
+                OverlayHudKind.Dashboard => layout.Left,
+                OverlayHudKind.Lap => layout.LapHudLeft ?? layout.Left,
+                _ => layout.DriftHudLeft ?? layout.Left
+            },
+            kind switch
+            {
+                OverlayHudKind.Dashboard => layout.Top,
+                OverlayHudKind.Lap => layout.LapHudTop ?? layout.Top,
+                _ => layout.DriftHudTop ?? layout.Top
+            },
             OverlayScaleSettings.ScaledDimension(layout.Width, scale),
             OverlayScaleSettings.ScaledDimension(layout.Height, scale));
     }
@@ -94,10 +121,13 @@ public static class OverlayLayoutGeometry
     {
         var dashboard = Bounds(value, OverlayHudKind.Dashboard);
         var lap = Bounds(value, OverlayHudKind.Lap);
-        var left = Math.Min(dashboard.Left, lap.Left);
-        var top = Math.Min(dashboard.Top, lap.Top);
-        var right = Math.Max(dashboard.Right, lap.Right);
-        var bottom = Math.Max(dashboard.Bottom, lap.Bottom);
+        var drift = Bounds(value, OverlayHudKind.Drift);
+        var left = Math.Min(dashboard.Left, Math.Min(lap.Left, drift.Left));
+        var top = Math.Min(dashboard.Top, Math.Min(lap.Top, drift.Top));
+        var right = Math.Max(dashboard.Right, Math.Max(lap.Right, drift.Right));
+        var bottom = Math.Max(
+            dashboard.Bottom,
+            Math.Max(lap.Bottom, drift.Bottom));
         return new OverlayHudBounds(left, top, right - left, bottom - top);
     }
 
@@ -144,10 +174,19 @@ public static class OverlayLayoutGeometry
                 : moved;
         }
 
-        return DetachLap(normalized) with
+        if (kind == OverlayHudKind.Lap)
         {
-            LapHudLeft = left,
-            LapHudTop = top
+            return DetachLap(normalized) with
+            {
+                LapHudLeft = left,
+                LapHudTop = top
+            };
+        }
+
+        return normalized with
+        {
+            DriftHudLeft = left,
+            DriftHudTop = top
         };
     }
 
@@ -177,11 +216,21 @@ public static class OverlayLayoutGeometry
                 : scaled;
         }
 
-        return DetachLap(normalized) with
+        if (kind == OverlayHudKind.Lap)
         {
-            LapHudLeft = left,
-            LapHudTop = top,
-            LapHudScale = nextScale
+            return DetachLap(normalized) with
+            {
+                LapHudLeft = left,
+                LapHudTop = top,
+                LapHudScale = nextScale
+            };
+        }
+
+        return normalized with
+        {
+            DriftHudLeft = left,
+            DriftHudTop = top,
+            DriftHudScale = nextScale
         };
     }
 

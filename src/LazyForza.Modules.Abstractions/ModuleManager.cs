@@ -23,6 +23,33 @@ public sealed class ModuleManager : IAsyncDisposable
 
     public async ValueTask SetEnabledAsync(string moduleId, bool enabled, CancellationToken cancellationToken)
     {
+        await SetEnabledCoreAsync(
+                moduleId,
+                enabled,
+                persistPreference: true,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async ValueTask SetRuntimeEnabledAsync(
+        string moduleId,
+        bool enabled,
+        CancellationToken cancellationToken)
+    {
+        await SetEnabledCoreAsync(
+                moduleId,
+                enabled,
+                persistPreference: false,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async ValueTask SetEnabledCoreAsync(
+        string moduleId,
+        bool enabled,
+        bool persistPreference,
+        CancellationToken cancellationToken)
+    {
         if (!modules.TryGetValue(moduleId, out var module))
         {
             throw new KeyNotFoundException($"Unknown module '{moduleId}'.");
@@ -54,7 +81,12 @@ public sealed class ModuleManager : IAsyncDisposable
             await module.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await context.Settings.SetAsync(moduleId, "enabled", enabled.ToString(), cancellationToken).ConfigureAwait(false);
+        if (persistPreference)
+        {
+            await context.Settings
+                .SetAsync(moduleId, "enabled", enabled.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     public async ValueTask DisposeAsync()

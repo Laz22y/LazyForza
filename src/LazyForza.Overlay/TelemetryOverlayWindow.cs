@@ -9,6 +9,7 @@ using System.IO;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
+using LazyForza.Modules.DriftDashboard;
 
 namespace LazyForza.Overlay;
 
@@ -22,6 +23,7 @@ internal sealed class TelemetryOverlayWindow : Window
     private readonly Canvas surfaceHost;
     private readonly HudSurface dashboardSurface;
     private readonly HudSurface lapSurface;
+    private readonly HudSurface driftSurface;
     private OverlayLayout layout;
     private HwndSource? source;
 
@@ -48,8 +50,13 @@ internal sealed class TelemetryOverlayWindow : Window
             getContributions,
             () => layout,
             HudSurfaceKind.Lap);
+        driftSurface = new HudSurface(
+            getContributions,
+            () => layout,
+            HudSurfaceKind.Drift);
         surfaceHost.Children.Add(dashboardSurface);
         surfaceHost.Children.Add(lapSurface);
+        surfaceHost.Children.Add(driftSurface);
         Content = surfaceHost;
         ApplyLayout(initialLayout);
         SourceInitialized += OnSourceInitialized;
@@ -72,12 +79,14 @@ internal sealed class TelemetryOverlayWindow : Window
         var union = OverlayLayoutGeometry.UnionBounds(layout);
         var dashboard = OverlayLayoutGeometry.Bounds(layout, OverlayHudKind.Dashboard);
         var lap = OverlayLayoutGeometry.Bounds(layout, OverlayHudKind.Lap);
+        var drift = OverlayLayoutGeometry.Bounds(layout, OverlayHudKind.Drift);
         Left = union.Left;
         Top = union.Top;
         Width = union.Width;
         Height = union.Height;
         PositionSurface(dashboardSurface, dashboard, union);
         PositionSurface(lapSurface, lap, union);
+        PositionSurface(driftSurface, drift, union);
         Opacity = Math.Clamp(layout.Opacity, 0.25, 1);
         UpdateNativeStyles();
         InvalidateHud();
@@ -89,6 +98,7 @@ internal sealed class TelemetryOverlayWindow : Window
     {
         dashboardSurface.InvalidateVisual();
         lapSurface.InvalidateVisual();
+        driftSurface.InvalidateVisual();
     }
 
     public void CapturePng(string path, double targetWidth, double targetHeight)
@@ -162,7 +172,8 @@ internal sealed class TelemetryOverlayWindow : Window
 internal enum HudSurfaceKind
 {
     Dashboard,
-    Lap
+    Lap,
+    Drift
 }
 
 internal sealed class HudSurface : FrameworkElement
@@ -213,15 +224,26 @@ internal sealed class HudSurface : FrameworkElement
         var contributions = getContributions();
         var dashboard = contributions.Select(item => item.Snapshot).OfType<Modules.Dashboard.DashboardHudState>().LastOrDefault();
         var lap = contributions.Select(item => item.Snapshot).OfType<Modules.LapAnalysis.LapHudState>().LastOrDefault();
+        var drift = contributions.Select(item => item.Snapshot).OfType<DriftHudState>().LastOrDefault();
         var now = DateTimeOffset.UtcNow;
         var layout = getLayout();
         if (kind == HudSurfaceKind.Dashboard)
         {
-            RenderDashboard(drawingContext, dashboard, now, layout);
+            RenderDashboard(
+                drawingContext,
+                dashboard,
+                now,
+                layout);
             return;
         }
 
-        RenderLap(drawingContext, dashboard, lap, now, layout);
+        if (kind == HudSurfaceKind.Lap)
+        {
+            RenderLap(drawingContext, dashboard, lap, now, layout);
+            return;
+        }
+
+        RenderDrift(drawingContext, drift, now, layout);
     }
 
     private void RenderDashboard(
@@ -250,6 +272,28 @@ internal sealed class HudSurface : FrameworkElement
             DrawDashboard(drawingContext, dashboard!);
             drawingContext.Pop();
             drawingContext.Pop();
+        }
+    }
+
+    private void RenderDrift(
+        DrawingContext drawingContext,
+        DriftHudState? drift,
+        DateTimeOffset now,
+        OverlayLayout layout)
+    {
+        if (layoutPreview)
+        {
+            drift = OverlayLayoutPreviewState.Drift(drift, now);
+            DrawFullDriftDashboard(drawingContext, drift);
+            return;
+        }
+
+        if (OverlayVisibilityPolicy.ShouldShowDrift(
+                drift,
+                now,
+                layout.LiveHudStaleSeconds))
+        {
+            DrawFullDriftDashboard(drawingContext, drift!);
         }
     }
 
@@ -515,6 +559,282 @@ internal sealed class HudSurface : FrameworkElement
             bounds.Top + bounds.Height * 0.52, height * 0.053, White, TextAlignment.Center, true);
     }
 
+    private void DrawFullDriftDashboard(
+        DrawingContext dc,
+        DriftHudState state)
+    {
+        var width = ActualWidth;
+        var height = ActualHeight;
+        if (width <= 0 || height <= 0) return;
+
+        var center = new Point(width * 0.5, height * 0.40);
+        var angleColor = state.GuidanceTone switch
+        {
+            DriftGuidanceTone.Positive => BrushOf(0x36, 0xD9, 0x8A),
+            DriftGuidanceTone.Warning => BrushOf(0xF2, 0xB8, 0x27),
+            _ => Cyan
+        };
+        DrawEllipticalArc(
+            dc,
+            center,
+            width * 0.425,
+            height * 0.34,
+            202,
+            338,
+            BrushOf(0x20, 0x25, 0x2D, 0.54),
+            height * 0.022,
+            80);
+        var angleEnd = 270 + Math.Clamp(
+            state.DriftAngleDegrees / 60,
+            -1,
+            1) * 68;
+        DrawEllipticalArc(
+            dc,
+            center,
+            width * 0.425,
+            height * 0.34,
+            270,
+            angleEnd,
+            angleColor,
+            height * 0.014,
+            40);
+        Text(
+            dc,
+            $"DRIFT ASSIST  ·  {state.PhaseLabel}",
+            width * 0.5,
+            height * 0.055,
+            height * 0.026,
+            White,
+            TextAlignment.Center,
+            true);
+
+        var radius = Math.Min(width * 0.125, height * 0.21);
+        var leftCenter = new Point(width * 0.37, height * 0.38);
+        var rightCenter = new Point(width * 0.63, height * 0.38);
+        DrawGaugeCircle(dc, leftCenter, radius, angleColor);
+        DrawGaugeCircle(
+            dc,
+            rightCenter,
+            radius,
+            StabilityBrush(state.StabilityScore));
+        Text(
+            dc,
+            SignedDegrees(state.DriftAngleDegrees),
+            leftCenter.X,
+            leftCenter.Y - radius * 0.08,
+            radius * 0.48,
+            White,
+            TextAlignment.Center,
+            true);
+        Text(
+            dc,
+            "侧滑角（推导）",
+            leftCenter.X,
+            leftCenter.Y + radius * 0.48,
+            radius * 0.15,
+            Muted,
+            TextAlignment.Center);
+        Text(
+            dc,
+            state.StabilityScore.ToString("0"),
+            rightCenter.X,
+            rightCenter.Y - radius * 0.08,
+            radius * 0.52,
+            White,
+            TextAlignment.Center,
+            true);
+        Text(
+            dc,
+            "稳定度",
+            rightCenter.X,
+            rightCenter.Y + radius * 0.48,
+            radius * 0.16,
+            Muted,
+            TextAlignment.Center);
+
+        Text(
+            dc,
+            $"挡位 {state.GearDisplay}  ·  {state.SpeedKph} km/h  ·  偏航 {Math.Abs(state.YawRateDegreesPerSecond):0}°/s",
+            width * 0.5,
+            height * 0.635,
+            height * 0.029,
+            White,
+            TextAlignment.Center,
+            true);
+        DrawSignedDriftBar(
+            dc,
+            new Rect(
+                width * 0.23,
+                height * 0.69,
+                width * 0.54,
+                height * 0.032),
+            state.Steering,
+            "方向",
+            Cyan);
+        DrawDriftLevelBar(
+            dc,
+            new Rect(
+                width * 0.23,
+                height * 0.76,
+                width * 0.25,
+                height * 0.032),
+            state.Throttle,
+            "油门",
+            BrushOf(0x28, 0xC6, 0x78));
+        DrawDriftLevelBar(
+            dc,
+            new Rect(
+                width * 0.52,
+                height * 0.76,
+                width * 0.25,
+                height * 0.032),
+            Math.Clamp(state.RearSlip / 1.35, 0, 1),
+            "后轮滑移",
+            BrushOf(0xF2, 0xB8, 0x27));
+        Text(
+            dc,
+            $"当前漂移 {state.CurrentDriftSeconds:0.0}s  ·  连续稳定 {state.StableDriftSeconds:0.0}s  ·  本次最佳 {state.BestStableDriftSeconds:0.0}s",
+            width * 0.5,
+            height * 0.845,
+            height * 0.025,
+            White,
+            TextAlignment.Center,
+            true);
+        DrawDriftGuidance(
+            dc,
+            new Rect(
+                width * 0.20,
+                height * 0.885,
+                width * 0.60,
+                height * 0.075),
+            state);
+    }
+
+    private static void DrawSignedDriftBar(
+        DrawingContext dc,
+        Rect bounds,
+        double value,
+        string label,
+        Brush accent)
+    {
+        value = Math.Clamp(value, -1, 1);
+        var center = bounds.Left + bounds.Width / 2;
+        dc.DrawRoundedRectangle(
+            BrushOf(0x0A, 0x0D, 0x11, 0.7),
+            new Pen(BrushOf(0x58, 0x60, 0x69, 0.65), 1),
+            bounds,
+            bounds.Height / 2,
+            bounds.Height / 2);
+        dc.DrawLine(
+            new Pen(BrushOf(0xF3, 0xF4, 0xF5, 0.48), 1),
+            new Point(center, bounds.Top - bounds.Height * 0.15),
+            new Point(center, bounds.Bottom + bounds.Height * 0.15));
+        var amount = Math.Abs(value) * bounds.Width / 2;
+        if (amount > 0.5)
+        {
+            dc.DrawRoundedRectangle(
+                BrushWithOpacity(accent, 0.88),
+                null,
+                new Rect(
+                    value < 0 ? center - amount : center,
+                    bounds.Top + 2,
+                    amount,
+                    Math.Max(1, bounds.Height - 4)),
+                bounds.Height / 2,
+                bounds.Height / 2);
+        }
+        Text(
+            dc,
+            $"{label}  {value:+0.00;-0.00;0.00}",
+            bounds.Left,
+            bounds.Top - bounds.Height * 0.65,
+            bounds.Height * 0.72,
+            Muted,
+            TextAlignment.Left,
+            true);
+    }
+
+    private static void DrawDriftLevelBar(
+        DrawingContext dc,
+        Rect bounds,
+        double value,
+        string label,
+        Brush accent)
+    {
+        value = Math.Clamp(value, 0, 1);
+        dc.DrawRoundedRectangle(
+            BrushOf(0x0A, 0x0D, 0x11, 0.7),
+            new Pen(BrushOf(0x58, 0x60, 0x69, 0.65), 1),
+            bounds,
+            bounds.Height / 2,
+            bounds.Height / 2);
+        if (value > 0.002)
+        {
+            dc.DrawRoundedRectangle(
+                BrushWithOpacity(accent, 0.88),
+                null,
+                new Rect(
+                    bounds.Left + 2,
+                    bounds.Top + 2,
+                    Math.Max(1, (bounds.Width - 4) * value),
+                    Math.Max(1, bounds.Height - 4)),
+                bounds.Height / 2,
+                bounds.Height / 2);
+        }
+        Text(
+            dc,
+            $"{label}  {value:P0}",
+            bounds.Left,
+            bounds.Top - bounds.Height * 0.65,
+            bounds.Height * 0.72,
+            Muted,
+            TextAlignment.Left,
+            true);
+    }
+
+    private static void DrawDriftGuidance(
+        DrawingContext dc,
+        Rect bounds,
+        DriftHudState state)
+    {
+        var accent = state.GuidanceTone switch
+        {
+            DriftGuidanceTone.Positive => BrushOf(0x36, 0xD9, 0x8A),
+            DriftGuidanceTone.Warning => BrushOf(0xF2, 0xB8, 0x27),
+            _ => Cyan
+        };
+        dc.DrawRoundedRectangle(
+            BrushOf(0x08, 0x0B, 0x0F, 0.78),
+            new Pen(BrushWithOpacity(accent, 0.72), 1.2),
+            bounds,
+            bounds.Height * 0.24,
+            bounds.Height * 0.24);
+        var guidanceSize = bounds.Width / bounds.Height < 8
+            ? bounds.Height * 0.27
+            : bounds.Height * 0.36;
+        BoundedText(
+            dc,
+            state.Guidance,
+            new Rect(
+                bounds.Left + bounds.Width * 0.055,
+                bounds.Top + bounds.Height * 0.10,
+                bounds.Width * 0.89,
+                bounds.Height * 0.80),
+            guidanceSize,
+            White,
+            true);
+    }
+
+    private static Brush StabilityBrush(double score) =>
+        score >= 75
+            ? BrushOf(0x36, 0xD9, 0x8A)
+            : score >= 50
+                ? Cyan
+                : BrushOf(0xF2, 0xB8, 0x27);
+
+    private static string SignedDegrees(double value) =>
+        $"{value:+0;-0;0}°";
+
     private void DrawLapArc(DrawingContext dc, Modules.LapAnalysis.LapHudState state)
     {
         var width = ActualWidth;
@@ -593,6 +913,39 @@ internal sealed class HudSurface : FrameworkElement
         var formatted = new FormattedText(text, System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
             typeface, size, brush, 1) { TextAlignment = alignment };
         dc.DrawText(formatted, new Point(x, y - formatted.Height / 2));
+    }
+
+    private static void BoundedText(
+        DrawingContext dc,
+        string text,
+        Rect bounds,
+        double size,
+        Brush brush,
+        bool strong = false)
+    {
+        if (size <= 0 || bounds.Width <= 0 || bounds.Height <= 0) return;
+        var typeface = ContainsChinese(text)
+            ? strong ? ChineseNormalTypeface : ChineseLightTypeface
+            : strong ? NormalTypeface : LightTypeface;
+        var formatted = new FormattedText(
+            text,
+            System.Globalization.CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            size,
+            brush,
+            1)
+        {
+            TextAlignment = TextAlignment.Center,
+            MaxTextWidth = bounds.Width,
+            MaxTextHeight = bounds.Height,
+            Trimming = TextTrimming.CharacterEllipsis
+        };
+        dc.DrawText(
+            formatted,
+            new Point(
+                bounds.Left,
+                bounds.Top + Math.Max(0, (bounds.Height - formatted.Height) / 2)));
     }
 
     private static bool ContainsChinese(string text) =>
@@ -701,6 +1054,47 @@ public static class OverlayLayoutPreviewState
                 SpeedMps = 142 / 3.6,
                 Steering = 0.16
             }
+            : state with
+            {
+                UpdatedAt = now,
+                IsStale = false,
+                IsDriving = true
+            };
+
+    public static DriftHudState Drift(
+        DriftHudState? state,
+        DateTimeOffset now) =>
+        state is null
+            ? new DriftHudState(
+                now,
+                TelemetrySourceKind.Live,
+                "LIVE",
+                false,
+                true,
+                DriftPracticePhase.Stable,
+                "稳定漂移",
+                "角度、车速和油门较稳定，继续保持",
+                DriftGuidanceTone.Positive,
+                86,
+                3,
+                "3",
+                31,
+                42,
+                -0.34,
+                0.58,
+                0,
+                0,
+                0,
+                0.28,
+                0.52,
+                0.46,
+                true,
+                6.8,
+                4.2,
+                8.6,
+                82,
+                88,
+                76)
             : state with
             {
                 UpdatedAt = now,
