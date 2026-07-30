@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -18,7 +19,9 @@ internal sealed class TelemetryOverlayWindow : Window
     private const int WmNcHitTest = 0x0084;
     private const int MaNoActivate = 3;
     private const int HtTransparent = -1;
-    private readonly HudSurface surface;
+    private readonly Canvas surfaceHost;
+    private readonly HudSurface dashboardSurface;
+    private readonly HudSurface lapSurface;
     private OverlayLayout layout;
     private HwndSource? source;
 
@@ -36,17 +39,26 @@ internal sealed class TelemetryOverlayWindow : Window
         Focusable = false;
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
-        surface = new HudSurface(getContributions, () => layout);
-        Content = surface;
+        surfaceHost = new Canvas { ClipToBounds = true };
+        dashboardSurface = new HudSurface(
+            getContributions,
+            () => layout,
+            HudSurfaceKind.Dashboard);
+        lapSurface = new HudSurface(
+            getContributions,
+            () => layout,
+            HudSurfaceKind.Lap);
+        surfaceHost.Children.Add(dashboardSurface);
+        surfaceHost.Children.Add(lapSurface);
+        Content = surfaceHost;
         ApplyLayout(initialLayout);
         SourceInitialized += OnSourceInitialized;
     }
 
     public void ApplyLayout(OverlayLayout newLayout)
     {
-        layout = newLayout with
+        layout = OverlayLayoutGeometry.Normalize(newLayout) with
         {
-            Scale = OverlayScaleSettings.Normalize(newLayout.Scale),
             ClickThrough = true,
             IsLocked = true,
             DashboardMotionIntensity = Math.Clamp(newLayout.DashboardMotionIntensity, 0, 1),
@@ -57,40 +69,54 @@ internal sealed class TelemetryOverlayWindow : Window
             LapNoMatchFadeSeconds = Math.Clamp(newLayout.LapNoMatchFadeSeconds, 0.05, 10),
             LiveHudStaleSeconds = Math.Clamp(newLayout.LiveHudStaleSeconds, 0.05, 10)
         };
-        Left = layout.Left;
-        Top = layout.Top;
-        Width = OverlayScaleSettings.ScaledDimension(layout.Width, layout.Scale);
-        Height = OverlayScaleSettings.ScaledDimension(layout.Height, layout.Scale);
+        var union = OverlayLayoutGeometry.UnionBounds(layout);
+        var dashboard = OverlayLayoutGeometry.Bounds(layout, OverlayHudKind.Dashboard);
+        var lap = OverlayLayoutGeometry.Bounds(layout, OverlayHudKind.Lap);
+        Left = union.Left;
+        Top = union.Top;
+        Width = union.Width;
+        Height = union.Height;
+        PositionSurface(dashboardSurface, dashboard, union);
+        PositionSurface(lapSurface, lap, union);
         Opacity = Math.Clamp(layout.Opacity, 0.25, 1);
         UpdateNativeStyles();
-        surface.InvalidateVisual();
+        InvalidateHud();
     }
 
-    public OverlayLayout CaptureLayout() => layout with
-    {
-        Left = Left,
-        Top = Top,
-        Width = Width / OverlayScaleSettings.Normalize(layout.Scale),
-        Height = Height / OverlayScaleSettings.Normalize(layout.Scale)
-    };
+    public OverlayLayout CaptureLayout() => layout;
 
-    public void InvalidateHud() => surface.InvalidateVisual();
+    public void InvalidateHud()
+    {
+        dashboardSurface.InvalidateVisual();
+        lapSurface.InvalidateVisual();
+    }
 
     public void CapturePng(string path, double targetWidth, double targetHeight)
     {
         var pixelWidth = Math.Max(1, (int)Math.Round(targetWidth));
         var pixelHeight = Math.Max(1, (int)Math.Round(targetHeight));
-        surface.Measure(new Size(targetWidth, targetHeight));
-        surface.Arrange(new Rect(0, 0, targetWidth, targetHeight));
-        surface.UpdateLayout();
+        surfaceHost.Measure(new Size(targetWidth, targetHeight));
+        surfaceHost.Arrange(new Rect(0, 0, targetWidth, targetHeight));
+        surfaceHost.UpdateLayout();
         var bitmap = new RenderTargetBitmap(pixelWidth, pixelHeight, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(surface);
+        bitmap.Render(surfaceHost);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         var directory = Path.GetDirectoryName(Path.GetFullPath(path));
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
         using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
         encoder.Save(stream);
+    }
+
+    private static void PositionSurface(
+        FrameworkElement surface,
+        OverlayHudBounds bounds,
+        OverlayHudBounds union)
+    {
+        surface.Width = bounds.Width;
+        surface.Height = bounds.Height;
+        Canvas.SetLeft(surface, bounds.Left - union.Left);
+        Canvas.SetTop(surface, bounds.Top - union.Top);
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -133,6 +159,12 @@ internal sealed class TelemetryOverlayWindow : Window
     private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr newLong);
 }
 
+internal enum HudSurfaceKind
+{
+    Dashboard,
+    Lap
+}
+
 internal sealed class HudSurface : FrameworkElement
 {
     private static readonly Typeface NormalTypeface = new(new FontFamily("Bahnschrift SemiCondensed"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Condensed);
@@ -145,6 +177,7 @@ internal sealed class HudSurface : FrameworkElement
     private static readonly Brush Cyan = BrushOf(0x20, 0xB8, 0xCF);
     private readonly Func<IReadOnlyList<IHudContribution>> getContributions;
     private readonly Func<OverlayLayout> getLayout;
+    private readonly HudSurfaceKind kind;
     private readonly bool layoutPreview;
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly FrameRateLimiter limiter = new();
@@ -157,10 +190,12 @@ internal sealed class HudSurface : FrameworkElement
     public HudSurface(
         Func<IReadOnlyList<IHudContribution>> getContributions,
         Func<OverlayLayout> getLayout,
+        HudSurfaceKind kind,
         bool layoutPreview = false)
     {
         this.getContributions = getContributions;
         this.getLayout = getLayout;
+        this.kind = kind;
         this.layoutPreview = layoutPreview;
         IsHitTestVisible = false;
         Loaded += (_, _) => CompositionTarget.Rendering += OnRendering;
@@ -180,21 +215,31 @@ internal sealed class HudSurface : FrameworkElement
         var lap = contributions.Select(item => item.Snapshot).OfType<Modules.LapAnalysis.LapHudState>().LastOrDefault();
         var now = DateTimeOffset.UtcNow;
         var layout = getLayout();
+        if (kind == HudSurfaceKind.Dashboard)
+        {
+            RenderDashboard(drawingContext, dashboard, now, layout);
+            return;
+        }
+
+        RenderLap(drawingContext, dashboard, lap, now, layout);
+    }
+
+    private void RenderDashboard(
+        DrawingContext drawingContext,
+        Modules.Dashboard.DashboardHudState? dashboard,
+        DateTimeOffset now,
+        OverlayLayout layout)
+    {
         if (layoutPreview)
         {
             dashboard = OverlayLayoutPreviewState.Dashboard(dashboard, now);
-            lap = OverlayLayoutPreviewState.Lap(lap, now);
             DrawDashboard(drawingContext, dashboard);
-            DrawCumulativeLapDelta(drawingContext, lap);
-            DrawLapArc(drawingContext, lap, dashboardVisible: true);
             return;
         }
 
         var dashboardVisible = OverlayVisibilityPolicy.ShouldShowDashboard(dashboard, now, layout.LiveHudStaleSeconds);
-        var lapVisible = OverlayVisibilityPolicy.ShouldShowLap(lap, now, layout.LiveHudStaleSeconds);
         var nowSeconds = clock.Elapsed.TotalSeconds;
         var visual = dashboardDynamics.Update(dashboard, dashboardVisible, layout, nowSeconds);
-        var lapVisual = lapDynamics.Update(lap, lapVisible, layout, nowSeconds);
         var motion = new Vector(
             visual.HorizontalOffset * ActualWidth * 0.018,
             visual.VerticalOffset * ActualHeight * 0.024);
@@ -203,23 +248,52 @@ internal sealed class HudSurface : FrameworkElement
             drawingContext.PushTransform(new TranslateTransform(motion.X, motion.Y));
             drawingContext.PushOpacity(visual.Opacity);
             DrawDashboard(drawingContext, dashboard!);
-            if (lapVisual.Opacity > 0.001 && lap?.CumulativeHistoricalDeltaSeconds is not null)
-            {
-                drawingContext.PushOpacity(lapVisual.Opacity);
-                DrawCumulativeLapDelta(drawingContext, lap);
-                drawingContext.Pop();
-            }
             drawingContext.Pop();
             drawingContext.Pop();
         }
+    }
 
+    private void RenderLap(
+        DrawingContext drawingContext,
+        Modules.Dashboard.DashboardHudState? dashboard,
+        Modules.LapAnalysis.LapHudState? lap,
+        DateTimeOffset now,
+        OverlayLayout layout)
+    {
+        if (layoutPreview)
+        {
+            lap = OverlayLayoutPreviewState.Lap(lap, now);
+            DrawCumulativeLapDelta(drawingContext, lap);
+            DrawLapArc(drawingContext, lap);
+            return;
+        }
+
+        var lapVisible = OverlayVisibilityPolicy.ShouldShowLap(lap, now, layout.LiveHudStaleSeconds);
+        var nowSeconds = clock.Elapsed.TotalSeconds;
+        var lapVisual = lapDynamics.Update(lap, lapVisible, layout, nowSeconds);
         if (lapVisible && lapVisual.Opacity > 0.001)
         {
-            if (dashboardVisible) drawingContext.PushTransform(new TranslateTransform(motion.X, motion.Y));
+            var followsDashboard = layout.LapHudAttachedToDashboard &&
+                                   OverlayVisibilityPolicy.ShouldShowDashboard(
+                                       dashboard,
+                                       now,
+                                       layout.LiveHudStaleSeconds);
+            if (followsDashboard)
+            {
+                var dashboardVisual = dashboardDynamics.Update(
+                    dashboard,
+                    true,
+                    layout,
+                    nowSeconds);
+                drawingContext.PushTransform(new TranslateTransform(
+                    dashboardVisual.HorizontalOffset * ActualWidth * 0.018,
+                    dashboardVisual.VerticalOffset * ActualHeight * 0.024));
+            }
             drawingContext.PushOpacity(lapVisual.Opacity);
-            DrawLapArc(drawingContext, lap!, dashboardVisible);
+            DrawCumulativeLapDelta(drawingContext, lap!);
+            DrawLapArc(drawingContext, lap!);
             drawingContext.Pop();
-            if (dashboardVisible) drawingContext.Pop();
+            if (followsDashboard) drawingContext.Pop();
         }
     }
 
@@ -441,11 +515,11 @@ internal sealed class HudSurface : FrameworkElement
             bounds.Top + bounds.Height * 0.52, height * 0.053, White, TextAlignment.Center, true);
     }
 
-    private void DrawLapArc(DrawingContext dc, Modules.LapAnalysis.LapHudState state, bool dashboardVisible)
+    private void DrawLapArc(DrawingContext dc, Modules.LapAnalysis.LapHudState state)
     {
         var width = ActualWidth;
         var height = ActualHeight;
-        var center = new Point(width * 0.5, dashboardVisible ? height * 0.43 : height * 0.58);
+        var center = new Point(width * 0.5, height * 0.43);
         var startAngle = 202d;
         var totalAngle = 136d;
         var totalLength = Math.Max(1, state.Sectors.Count);
@@ -462,14 +536,14 @@ internal sealed class HudSurface : FrameworkElement
                 SectorColorState.Purple => BrushOf(0xB4, 0x3B, 0xDD),
                 _ => BrushOf(0x5A, 0x5F, 0x68)
             };
-            var radiusX = dashboardVisible ? width * 0.447 : width * 0.42;
-            var radiusY = dashboardVisible ? height * 0.358 : height * 0.24;
+            var radiusX = width * 0.447;
+            var radiusY = height * 0.358;
             DrawEllipticalArc(dc, center, radiusX, radiusY, cursor + 1, cursor + span - 1,
                 color, segment.IsCurrent ? height * 0.014 : height * 0.009, 8);
             cursor += span;
         }
 
-        var statusY = dashboardVisible ? height * 0.055 : height * 0.38;
+        var statusY = height * 0.055;
         var approximatePrefix = state.IsPointToPoint ? "≈ " : string.Empty;
         var title = $"{state.TrackName}  ·  {approximatePrefix}{FormatLapTime(state.CurrentLapSeconds)}";
         Text(dc, title, width * 0.5 + 1.2, statusY + 1.2,
