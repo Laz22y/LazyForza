@@ -2575,6 +2575,11 @@ internal sealed partial class MainWindow : Window
         var currentDriftBounds = OverlayLayoutGeometry.Bounds(
             current,
             OverlayHudKind.Drift);
+        var currentDashboardWidgets = DashboardWidgetLayoutSettings.Normalize(
+            current.DashboardWidgets);
+        var visibleDashboardWidgetCount = Enum
+            .GetValues<DashboardWidgetKind>()
+            .Count(kind => currentDashboardWidgets.Get(kind).IsVisible);
         var controls = new StackPanel();
 
         var overlayHeader = new Grid { Margin = new Thickness(0, 0, 0, 14) };
@@ -2586,6 +2591,7 @@ internal sealed partial class MainWindow : Window
             $"仪表盘 {currentDashboardBounds.Width:0} × {currentDashboardBounds.Height:0} · " +
             $"圈速 {currentLapBounds.Width:0} × {currentLapBounds.Height:0} · " +
             $"漂移 {currentDriftBounds.Width:0} × {currentDriftBounds.Height:0} · " +
+            $"仪表盘部件 {visibleDashboardWidgetCount}/7 · " +
             $"{(current.LapHudAttachedToDashboard ? "已吸附" : "独立布局")} · " +
             $"不透明度 {current.Opacity:P0} · {current.MonitorId}",
             11, FontWeights.Normal, "MutedBrush");
@@ -2620,12 +2626,12 @@ internal sealed partial class MainWindow : Window
             Content = "重置 Overlay",
             Margin = new Thickness(12, 0, 0, 0),
             Padding = new Thickness(12, 7, 12, 7),
-            ToolTip = "恢复 Overlay 默认参数；不修改监听 IP 和 UDP 端口"
+            ToolTip = "恢复 Overlay 与仪表盘部件的默认布局；不修改监听 IP 和 UDP 端口"
         };
         resetDefaults.Click += async (_, _) =>
         {
             if (MessageBox.Show(
-                    "确定重置 Overlay 设置吗？\n\n位置、尺寸、透明度、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。",
+                    "确定重置 Overlay 设置吗？\n\n位置、尺寸、仪表盘部件、透明度、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。",
                     "重置 Overlay",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
@@ -2665,7 +2671,7 @@ internal sealed partial class MainWindow : Window
         lapScale.LargeChange = 0.05;
         var driftScale = AddValueSlider(
             appearance,
-            "漂移 HUD 精确缩放 · Preview",
+            "漂移 HUD 精确缩放 · 实验性",
             "按 1% 调整，并保持漂移 HUD 中心点不变",
             current.DriftHudScale ?? current.Scale,
             OverlayScaleSettings.Minimum,
@@ -2730,6 +2736,39 @@ internal sealed partial class MainWindow : Window
         primarySettings.Children.Add(interactionGroup);
         controls.Children.Add(primarySettings);
 
+        var dashboardComponentItems = new[]
+        {
+            (DashboardWidgetKind.RpmArc, "转速灯带"),
+            (DashboardWidgetKind.SpeedGear, "速度 / 挡位"),
+            (DashboardWidgetKind.EngineOutput, "转速 / 动力"),
+            (DashboardWidgetKind.Tires, "轮胎状态"),
+            (DashboardWidgetKind.Pedals, "油门 / 制动"),
+            (DashboardWidgetKind.Steering, "方向指示"),
+            (DashboardWidgetKind.ClassBadge, "等级 / PI")
+        };
+        var componentToggles = new Dictionary<DashboardWidgetKind, ToggleButton>();
+        var componentPanel = new WrapPanel { Margin = new Thickness(-4, -2, 0, 0) };
+        foreach (var (kind, name) in dashboardComponentItems)
+        {
+            var toggle = new ToggleButton
+            {
+                IsChecked = currentDashboardWidgets.Get(kind).IsVisible,
+                Margin = new Thickness(4, 2, 4, 6),
+                Padding = new Thickness(10, 6, 10, 6),
+                MinWidth = 106
+            };
+            void RefreshComponentToggle() => toggle.Content =
+                $"{name}：{(toggle.IsChecked == true ? "开" : "关")}";
+            toggle.Click += (_, _) => RefreshComponentToggle();
+            RefreshComponentToggle();
+            componentToggles[kind] = toggle;
+            componentPanel.Children.Add(toggle);
+        }
+        controls.Children.Add(SettingGroup(
+            "主仪表盘部件",
+            "各部件可独立开关；位置请在 Overlay 布局编辑器中拖动，并可一键恢复当前默认布局。",
+            componentPanel));
+
         var timingItems = new UniformGrid { Columns = 2 };
         var dashboardIdleWait = AddTimeSlider(timingItems, "仪表盘静止等待", current.DashboardIdleWaitSeconds, 0, 15, 0.5);
         var dashboardFade = AddTimeSlider(timingItems, "仪表盘淡入 / 淡出", current.DashboardVisibilityFadeSeconds, 0.1, 3, 0.1);
@@ -2756,6 +2795,15 @@ internal sealed partial class MainWindow : Window
         };
         saveOverlay.Click += async (_, _) =>
         {
+            var dashboardWidgets = DashboardWidgetLayoutSettings.Normalize(
+                overlay.CurrentLayout.DashboardWidgets);
+            foreach (var (kind, toggle) in componentToggles)
+            {
+                var placement = dashboardWidgets.Get(kind);
+                dashboardWidgets = dashboardWidgets.Set(
+                    kind,
+                    placement with { IsVisible = toggle.IsChecked == true });
+            }
             var next = overlay.CurrentLayout with
             {
                 Opacity = opacity.Value,
@@ -2769,7 +2817,8 @@ internal sealed partial class MainWindow : Window
                 LapCompletedHoldSeconds = completedLapHold.Value,
                 LapNoMatchConfirmationSeconds = noMatchConfirmation.Value,
                 LapNoMatchFadeSeconds = noMatchFade.Value,
-                LiveHudStaleSeconds = liveHudStale.Value
+                LiveHudStaleSeconds = liveHudStale.Value,
+                DashboardWidgets = dashboardWidgets
             };
             next = OverlayLayoutGeometry.ScaleAroundCenter(
                 next,

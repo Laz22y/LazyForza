@@ -57,7 +57,16 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(8, layout.LapNoMatchConfirmationSeconds);
         Assert.AreEqual(0.5, layout.LapNoMatchFadeSeconds);
         Assert.AreEqual(0.8, layout.LiveHudStaleSeconds);
-        Assert.AreEqual("1.3.5", LazyForza.App.ApplicationVersionInfo.Display);
+        var widgets = DashboardWidgetLayoutSettings.Normalize(
+            layout.DashboardWidgets);
+        foreach (var kind in Enum.GetValues<DashboardWidgetKind>())
+        {
+            var placement = widgets.Get(kind);
+            Assert.IsTrue(placement.IsVisible, $"{kind} should be visible by default.");
+            Assert.AreEqual(0, placement.OffsetX, 1e-9);
+            Assert.AreEqual(0, placement.OffsetY, 1e-9);
+        }
+        Assert.AreEqual("1.4.0", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]
@@ -119,6 +128,68 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(dashboard.Right + 24, drift.Left, 1e-9);
         Assert.AreEqual(dashboard.Top, drift.Top, 1e-9);
         Assert.AreEqual(dashboard.Width, drift.Width, 1e-9);
+        var widgets = normalized.DashboardWidgets!;
+        foreach (var kind in Enum.GetValues<DashboardWidgetKind>())
+        {
+            var placement = widgets.Get(kind);
+            Assert.IsTrue(placement.IsVisible);
+            Assert.AreEqual(0, placement.OffsetX, 1e-9);
+            Assert.AreEqual(0, placement.OffsetY, 1e-9);
+        }
+    }
+
+    [TestMethod]
+    public void DashboardWidgetsMoveAndHideIndependentlyAndCanReset()
+    {
+        var defaults = DashboardWidgetLayoutSettings.CreateDefault();
+        var steering = defaults.Get(DashboardWidgetKind.Steering) with
+        {
+            IsVisible = false,
+            OffsetX = -0.12,
+            OffsetY = -0.08
+        };
+        var customized = DashboardWidgetLayoutSettings.Normalize(
+            defaults.Set(DashboardWidgetKind.Steering, steering));
+
+        Assert.IsFalse(customized.Get(DashboardWidgetKind.Steering).IsVisible);
+        Assert.AreEqual(
+            -0.12,
+            customized.Get(DashboardWidgetKind.Steering).OffsetX,
+            1e-9);
+        Assert.AreEqual(
+            -0.08,
+            customized.Get(DashboardWidgetKind.Steering).OffsetY,
+            1e-9);
+        foreach (var kind in Enum.GetValues<DashboardWidgetKind>()
+                     .Where(kind => kind != DashboardWidgetKind.Steering))
+            Assert.AreEqual(defaults.Get(kind), customized.Get(kind));
+
+        var reset = DashboardWidgetLayoutSettings.CreateDefault();
+        foreach (var kind in Enum.GetValues<DashboardWidgetKind>())
+            Assert.AreEqual(defaults.Get(kind), reset.Get(kind));
+    }
+
+    [TestMethod]
+    public void DashboardWidgetOffsetsStayFiniteAndInsideDashboardCanvas()
+    {
+        var source = new DashboardWidgetLayout().Set(
+            DashboardWidgetKind.SpeedGear,
+            new DashboardWidgetPlacement(
+                IsVisible: true,
+                OffsetX: double.NaN,
+                OffsetY: 10));
+
+        var normalized = DashboardWidgetLayoutSettings.Normalize(source);
+        var speed = normalized.Get(DashboardWidgetKind.SpeedGear);
+        var bounds = DashboardWidgetLayoutSettings.DefaultBounds(
+            DashboardWidgetKind.SpeedGear);
+
+        Assert.AreEqual(0, speed.OffsetX, 1e-9);
+        Assert.AreEqual(1 - bounds.Bottom, speed.OffsetY, 1e-9);
+        Assert.IsTrue(bounds.Left + speed.OffsetX >= 0);
+        Assert.IsTrue(bounds.Right + speed.OffsetX <= 1);
+        Assert.IsTrue(bounds.Top + speed.OffsetY >= 0);
+        Assert.IsTrue(bounds.Bottom + speed.OffsetY <= 1);
     }
 
     [TestMethod]
@@ -284,6 +355,11 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(DriftPracticePhase.Stable, drift.Phase);
         Assert.IsTrue(drift.DriftAngleDegrees > 0);
         Assert.IsTrue(drift.StabilityScore >= 75);
+        Assert.AreEqual(DriftSpinRiskLevel.Safe, drift.SpinRiskLevel);
+        Assert.AreEqual(DriftSteeringCue.Left, drift.SteeringCue);
+        Assert.AreEqual(DriftGearCue.ShiftUp, drift.GearCue);
+        Assert.IsTrue(drift.AngleScorePotential > 0.5);
+        Assert.IsTrue(drift.CanBuildAngle);
     }
 
     [TestMethod]

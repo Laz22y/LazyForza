@@ -332,8 +332,13 @@ public partial class App : Application
                 await overlay.SetLayoutAsync(
                     captureLayout,
                     CancellationToken.None);
-                await Task.Delay(100);
-                await overlay.CapturePngAsync(Path.Combine(directory, $"hud-{size.Width:0}x{size.Height:0}-demo.png"), CancellationToken.None);
+                await Task.Delay(220);
+                await overlay.CapturePngAsync(
+                    Path.Combine(
+                        directory,
+                        $"hud-{size.Width:0}x{size.Height:0}-demo.png"),
+                    CancellationToken.None,
+                    previewDrift: captureDriftQa || captureDriftOnlyQa);
             }
             await overlay.SetLayoutAsync(original, CancellationToken.None);
         }

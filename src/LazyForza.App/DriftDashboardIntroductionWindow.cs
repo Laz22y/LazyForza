@@ -10,7 +10,7 @@ internal sealed class DriftDashboardIntroductionWindow : Window
 
     public DriftDashboardIntroductionWindow(bool autoCloseDashboardEnabled)
     {
-        Title = "漂移仪表盘（Preview）";
+        Title = "漂移仪表盘（实验性功能）";
         Width = 570;
         SizeToContent = SizeToContent.Height;
         ResizeMode = ResizeMode.NoResize;
@@ -24,20 +24,24 @@ internal sealed class DriftDashboardIntroductionWindow : Window
         var stack = new StackPanel { Margin = new Thickness(26, 22, 26, 22) };
         stack.Children.Add(new TextBlock
         {
-            Text = "漂移仪表盘 · Preview",
+            Text = "漂移仪表盘 · 实验性功能",
             FontSize = 22,
             FontWeight = FontWeights.SemiBold
         });
         stack.Children.Add(Paragraph(
-            "它会用 FH6 官方 UDP 中的本车速度、侧滑、偏航和驾驶输入，显示侧滑角、稳定度、连续稳定时长及实时练习建议。稳定度是 LazyForza 的辅助推导，不是游戏漂移分数。",
+            "它会用 FH6 官方 UDP 中的本车速度、侧滑、偏航和驾驶输入，优先判断 Spin 风险，并用方向箭头、换挡箭头和颜色区间提供练习辅助。控车余量与积分速度趋势均为 LazyForza 推导，不是游戏漂移分数，辅助作用有限。",
             new Thickness(0, 10, 0, 0)));
         stack.Children.Add(Section(
-            "当前为开发预览功能",
-            "漂移识别阈值、稳定度和提示策略仍会结合真实 FH6 漂移数据继续校准。请将它作为练习辅助，不要把当前结果视为游戏计分或裁判结论。"));
+            "实验性功能 · 辅助能力有限",
+            "Spin 风险、方向修正和换挡建议仍需结合更多真实 FH6 漂移数据持续校准，只能作为有限的练习辅助。换挡箭头用于降低失控风险，不代表车辆的最佳换挡点；请勿把当前结果视为游戏计分、裁判结论或稳定控车的保证。"));
+
+        stack.Children.Add(Section(
+            "先控车，再增加角度",
+            "底部 SPIN 色带越靠近红色，失控风险越高；此时优先按方向和换挡图形降低风险。绿色状态下，积分速度格会随侧滑角增大而增加，但不建议为了填满格数强行扩大角度。"));
 
         stack.Children.Add(Section(
             "建议减少信息重叠",
-            "漂移仪表盘可以和主仪表盘同时显示，但练习时建议先关闭主仪表盘，把注意力留给侧滑角、方向和油门。"));
+            "漂移仪表盘可以和主仪表盘同时显示，但练习时建议先关闭主仪表盘，把注意力留给防 Spin 色带、方向箭头、换挡箭头和侧滑角。"));
         autoCloseDashboard = new CheckBox
         {
             Content = "打开漂移仪表盘时自动关闭主仪表盘",
@@ -70,7 +74,7 @@ internal sealed class DriftDashboardIntroductionWindow : Window
         buttons.Children.Add(cancel);
         var enable = new Button
         {
-            Content = "了解并开启 Preview",
+            Content = "了解并开启实验性功能",
             MinWidth = 112,
             Padding = new Thickness(16, 7, 16, 7),
             FontWeight = FontWeights.SemiBold,
