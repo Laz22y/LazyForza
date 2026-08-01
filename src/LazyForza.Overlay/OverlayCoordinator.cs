@@ -116,7 +116,10 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
         }
     }
 
-    public async ValueTask CapturePngAsync(string path, CancellationToken cancellationToken)
+    public async ValueTask CapturePngAsync(
+        string path,
+        CancellationToken cancellationToken,
+        bool previewDrift = false)
     {
         if (Application.Current is null) throw new InvalidOperationException("WPF application is not running.");
         await Application.Current.Dispatcher.InvokeAsync(() =>
@@ -124,7 +127,11 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             EnsureWindow();
             var bounds = OverlayLayoutGeometry.UnionBounds(layout);
-            window!.CapturePng(path, bounds.Width, bounds.Height);
+            window!.CapturePng(
+                path,
+                bounds.Width,
+                bounds.Height,
+                previewDrift);
         });
     }
 

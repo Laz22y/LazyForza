@@ -11,16 +11,31 @@ public enum DriftPracticePhase
     Recovering
 }
 
-public enum DriftGuidanceTone
+public enum DriftSpinRiskLevel
 {
-    Neutral,
-    Positive,
-    Warning
+    Safe,
+    Caution,
+    Critical
+}
+
+public enum DriftSteeringCue
+{
+    Hold,
+    Left,
+    Right
+}
+
+public enum DriftGearCue
+{
+    Hold,
+    ShiftUp,
+    ShiftDown
 }
 
 /// <summary>
 /// Derived practice feedback from the player's own official FH6 Data Out stream.
-/// Stability is a LazyForza training indicator, not an in-game drift score.
+/// Spin risk, control reserve, and angle score potential are LazyForza training
+/// indicators. They are not in-game drift scores or optimal shift points.
 /// </summary>
 public sealed record DriftHudState(
     DateTimeOffset UpdatedAt,
@@ -30,8 +45,13 @@ public sealed record DriftHudState(
     bool IsDriving,
     DriftPracticePhase Phase,
     string PhaseLabel,
-    string Guidance,
-    DriftGuidanceTone GuidanceTone,
+    DriftSpinRiskLevel SpinRiskLevel,
+    double SpinRisk,
+    DriftSteeringCue SteeringCue,
+    double SteeringCueStrength,
+    DriftGearCue GearCue,
+    double AngleScorePotential,
+    bool CanBuildAngle,
     int SpeedKph,
     int? ForwardGear,
     string GearDisplay,

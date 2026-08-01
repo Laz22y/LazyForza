@@ -25,13 +25,144 @@ public sealed record OverlayLayout(
     bool LapHudAttachedToDashboard = true,
     double? DriftHudLeft = null,
     double? DriftHudTop = null,
-    double? DriftHudScale = null);
+    double? DriftHudScale = null,
+    DashboardWidgetLayout? DashboardWidgets = null);
 
 public enum OverlayHudKind
 {
     Dashboard,
     Lap,
     Drift
+}
+
+public enum DashboardWidgetKind
+{
+    RpmArc,
+    SpeedGear,
+    EngineOutput,
+    Tires,
+    Pedals,
+    Steering,
+    ClassBadge
+}
+
+public sealed record DashboardWidgetPlacement(
+    bool IsVisible = true,
+    double OffsetX = 0,
+    double OffsetY = 0);
+
+public sealed record DashboardWidgetLayout(
+    DashboardWidgetPlacement? RpmArc = null,
+    DashboardWidgetPlacement? SpeedGear = null,
+    DashboardWidgetPlacement? EngineOutput = null,
+    DashboardWidgetPlacement? Tires = null,
+    DashboardWidgetPlacement? Pedals = null,
+    DashboardWidgetPlacement? Steering = null,
+    DashboardWidgetPlacement? ClassBadge = null)
+{
+    public DashboardWidgetPlacement Get(DashboardWidgetKind kind) => kind switch
+    {
+        DashboardWidgetKind.RpmArc => RpmArc ?? new(),
+        DashboardWidgetKind.SpeedGear => SpeedGear ?? new(),
+        DashboardWidgetKind.EngineOutput => EngineOutput ?? new(),
+        DashboardWidgetKind.Tires => Tires ?? new(),
+        DashboardWidgetKind.Pedals => Pedals ?? new(),
+        DashboardWidgetKind.Steering => Steering ?? new(),
+        _ => ClassBadge ?? new()
+    };
+
+    public DashboardWidgetLayout Set(
+        DashboardWidgetKind kind,
+        DashboardWidgetPlacement placement) => kind switch
+        {
+            DashboardWidgetKind.RpmArc => this with { RpmArc = placement },
+            DashboardWidgetKind.SpeedGear => this with { SpeedGear = placement },
+            DashboardWidgetKind.EngineOutput => this with { EngineOutput = placement },
+            DashboardWidgetKind.Tires => this with { Tires = placement },
+            DashboardWidgetKind.Pedals => this with { Pedals = placement },
+            DashboardWidgetKind.Steering => this with { Steering = placement },
+            _ => this with { ClassBadge = placement }
+        };
+}
+
+public readonly record struct DashboardWidgetNormalizedBounds(
+    double Left,
+    double Top,
+    double Width,
+    double Height)
+{
+    public double Right => Left + Width;
+    public double Bottom => Top + Height;
+}
+
+public static class DashboardWidgetLayoutSettings
+{
+    private static readonly DashboardWidgetLayout DefaultValue =
+        new DashboardWidgetLayout(
+            new(),
+            new(),
+            new(),
+            new(),
+            new(),
+            new(),
+            new());
+
+    public static DashboardWidgetLayout Default => DefaultValue;
+
+    public static DashboardWidgetLayout CreateDefault() => DefaultValue;
+
+    public static DashboardWidgetLayout Normalize(DashboardWidgetLayout? value)
+    {
+        if (value is null) return DefaultValue;
+        var source = value;
+        var normalized = new DashboardWidgetLayout();
+        foreach (var kind in Enum.GetValues<DashboardWidgetKind>())
+            normalized = normalized.Set(
+                kind,
+                ClampToCanvas(kind, source.Get(kind)));
+        return normalized;
+    }
+
+    public static DashboardWidgetNormalizedBounds DefaultBounds(
+        DashboardWidgetKind kind) => kind switch
+        {
+            DashboardWidgetKind.RpmArc => new(0.055, 0.035, 0.89, 0.39),
+            DashboardWidgetKind.SpeedGear => new(0.245, 0.195, 0.25, 0.43),
+            DashboardWidgetKind.EngineOutput => new(0.505, 0.195, 0.25, 0.43),
+            DashboardWidgetKind.Tires => new(0.075, 0.60, 0.23, 0.275),
+            DashboardWidgetKind.Pedals => new(0.395, 0.61, 0.21, 0.275),
+            DashboardWidgetKind.Steering => new(0.365, 0.875, 0.27, 0.105),
+            _ => new(0.69, 0.61, 0.20, 0.225)
+        };
+
+    public static DashboardWidgetPlacement ClampToCanvas(
+        DashboardWidgetKind kind,
+        DashboardWidgetPlacement placement)
+    {
+        var bounds = DefaultBounds(kind);
+        var normalized = NormalizePlacement(placement);
+        return normalized with
+        {
+            OffsetX = Math.Clamp(
+                normalized.OffsetX,
+                -bounds.Left,
+                1 - bounds.Right),
+            OffsetY = Math.Clamp(
+                normalized.OffsetY,
+                -bounds.Top,
+                1 - bounds.Bottom)
+        };
+    }
+
+    private static DashboardWidgetPlacement NormalizePlacement(
+        DashboardWidgetPlacement value) => value with
+        {
+            OffsetX = Finite(value.OffsetX),
+            OffsetY = Finite(value.OffsetY)
+        };
+
+    private static double Finite(double value) =>
+        double.IsFinite(value) ? Math.Clamp(value, -1, 1) : 0;
 }
 
 public readonly record struct OverlayHudBounds(
@@ -61,7 +192,9 @@ public static class OverlayLayoutGeometry
             Top = top,
             Width = width,
             Height = height,
-            Scale = scale
+            Scale = scale,
+            DashboardWidgets = DashboardWidgetLayoutSettings.Normalize(
+                value.DashboardWidgets)
         };
         var withLap = value.LapHudAttachedToDashboard
             ? AttachLapToDashboard(normalized)

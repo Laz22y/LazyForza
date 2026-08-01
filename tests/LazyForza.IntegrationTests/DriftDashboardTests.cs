@@ -22,10 +22,10 @@ public sealed class DriftDashboardTests
         Assert.IsTrue(module.Descriptor.HasHudContribution);
         StringAssert.Contains(
             module.Descriptor.DisplayName,
-            "Preview");
+            "实验性");
         StringAssert.Contains(
             module.Descriptor.Description,
-            "开发预览");
+            "辅助能力有限");
         Assert.IsNull(module.Descriptor.MainPageKey);
         Assert.IsNull(module.Descriptor.SettingsPageKey);
         Assert.IsNull(typeof(DriftHudState).GetProperty("Rpm"));
@@ -51,8 +51,12 @@ public sealed class DriftDashboardTests
         Assert.IsTrue(state.StableDriftSeconds > 1);
         Assert.IsTrue(
             state.BestStableDriftSeconds >= state.StableDriftSeconds);
-        Assert.AreEqual(DriftGuidanceTone.Positive, state.GuidanceTone);
-        StringAssert.Contains(state.Guidance, "稳定");
+        Assert.AreEqual(DriftSpinRiskLevel.Safe, state.SpinRiskLevel);
+        Assert.IsTrue(state.SpinRisk < 0.20);
+        Assert.AreEqual(DriftSteeringCue.Hold, state.SteeringCue);
+        Assert.AreEqual(DriftGearCue.Hold, state.GearCue);
+        Assert.IsTrue(state.AngleScorePotential > 0.5);
+        Assert.IsTrue(state.CanBuildAngle);
         Assert.IsTrue(OverlayVisibilityPolicy.ShouldShowDrift(
             state,
             state.UpdatedAt));
@@ -77,8 +81,99 @@ public sealed class DriftDashboardTests
 
         Assert.IsNotNull(state);
         Assert.IsTrue(state.IsDrifting);
-        Assert.AreEqual(DriftGuidanceTone.Warning, state.GuidanceTone);
-        StringAssert.Contains(state.Guidance, "后轮空转");
+        Assert.AreNotEqual(DriftSpinRiskLevel.Safe, state.SpinRiskLevel);
+        Assert.IsTrue(state.SpinRisk >= 0.32);
+        Assert.AreEqual(DriftGearCue.ShiftUp, state.GearCue);
+        Assert.IsFalse(state.CanBuildAngle);
+    }
+
+    [TestMethod]
+    public void AnalyzerPrioritizesSpinRecoveryAtExtremeAngleAndYaw()
+    {
+        var analyzer = new DriftTelemetryAnalyzer();
+        DriftHudState? state = null;
+        for (var index = 0; index < 150; index++)
+        {
+            state = analyzer.Observe(DriftFrame(
+                index,
+                driftAngleDegrees: 62,
+                yawRateRadiansPerSecond: 2.6,
+                steer: 0));
+        }
+
+        Assert.IsNotNull(state);
+        Assert.IsTrue(state.IsDrifting);
+        Assert.AreEqual(DriftSpinRiskLevel.Critical, state.SpinRiskLevel);
+        Assert.AreEqual(DriftPracticePhase.Recovering, state.Phase);
+        Assert.AreEqual(DriftSteeringCue.Right, state.SteeringCue);
+        Assert.IsFalse(state.CanBuildAngle);
+        Assert.IsTrue(state.StabilityScore < 45);
+    }
+
+    [TestMethod]
+    public void AngleScorePotentialStartsWithAnyDriftAndGrowsWithAngle()
+    {
+        var lowAngleAnalyzer = new DriftTelemetryAnalyzer();
+        var highAngleAnalyzer = new DriftTelemetryAnalyzer();
+        DriftHudState? lowAngle = null;
+        DriftHudState? highAngle = null;
+        for (var index = 0; index < 120; index++)
+        {
+            lowAngle = lowAngleAnalyzer.Observe(DriftFrame(
+                index,
+                driftAngleDegrees: 10,
+                steer: 28));
+            highAngle = highAngleAnalyzer.Observe(DriftFrame(
+                index,
+                driftAngleDegrees: 42,
+                steer: 62));
+        }
+
+        Assert.IsNotNull(lowAngle);
+        Assert.IsNotNull(highAngle);
+        Assert.IsTrue(lowAngle.IsDrifting);
+        Assert.IsTrue(highAngle.IsDrifting);
+        Assert.IsTrue(lowAngle.AngleScorePotential > 0);
+        Assert.IsTrue(
+            highAngle.AngleScorePotential > lowAngle.AngleScorePotential);
+    }
+
+    [TestMethod]
+    public void AnalyzerProvidesVisualSteeringAndConservativeGearCues()
+    {
+        var rightAnalyzer = new DriftTelemetryAnalyzer();
+        var leftAnalyzer = new DriftTelemetryAnalyzer();
+        var downshiftAnalyzer = new DriftTelemetryAnalyzer();
+        DriftHudState? right = null;
+        DriftHudState? left = null;
+        DriftHudState? downshift = null;
+        for (var index = 0; index < 120; index++)
+        {
+            right = rightAnalyzer.Observe(DriftFrame(
+                index,
+                driftAngleDegrees: 30,
+                steer: 0));
+            left = leftAnalyzer.Observe(DriftFrame(
+                index,
+                driftAngleDegrees: -30,
+                steer: 0));
+            downshift = downshiftAnalyzer.Observe(DriftFrame(
+                index,
+                throttle: 0.82,
+                rearLongitudinalSlip: 0.30,
+                driftAngleDegrees: 10,
+                steer: 28,
+                rearSlip: 0.20,
+                rpmRatio: 0.35));
+        }
+
+        Assert.IsNotNull(right);
+        Assert.IsNotNull(left);
+        Assert.IsNotNull(downshift);
+        Assert.AreEqual(DriftSteeringCue.Right, right.SteeringCue);
+        Assert.AreEqual(DriftSteeringCue.Left, left.SteeringCue);
+        Assert.AreEqual(DriftGearCue.ShiftDown, downshift.GearCue);
+        Assert.AreEqual(DriftSpinRiskLevel.Safe, downshift.SpinRiskLevel);
     }
 
     [TestMethod]
@@ -279,16 +374,25 @@ public sealed class DriftDashboardTests
     private static TelemetryFrame DriftFrame(
         int index,
         double throttle = 0.56,
-        double rearLongitudinalSlip = 0.42)
+        double rearLongitudinalSlip = 0.42,
+        double driftAngleDegrees = 30,
+        double yawRateRadiansPerSecond = 0.55,
+        sbyte steer = 48,
+        double rearSlip = 0.55,
+        double rpmRatio = 0)
     {
         const double forward = 30;
-        var lateral = forward * Math.Tan(Math.PI / 6);
+        var lateral = forward * Math.Tan(
+            driftAngleDegrees * Math.PI / 180);
         var raw = new Fh6RawTelemetry
         {
             IsRaceOn = 1,
             TimestampMS = (uint)Math.Round(index * 1000d / 60),
             Velocity = new Vector3F((float)lateral, 0, (float)forward),
-            AngularVelocity = new Vector3F(0, 0.55f, 0),
+            AngularVelocity = new Vector3F(
+                0,
+                (float)yawRateRadiansPerSecond,
+                0),
             Speed = (float)Math.Sqrt(
                 forward * forward +
                 lateral * lateral),
@@ -300,15 +404,15 @@ public sealed class DriftDashboardTests
             TireCombinedSlip = new WheelValues(
                 0.24f,
                 0.25f,
-                0.54f,
-                0.56f),
+                (float)(rearSlip - 0.01),
+                (float)(rearSlip + 0.01)),
             TireSlipRatio = new WheelValues(
                 0.10f,
                 0.10f,
                 (float)rearLongitudinalSlip,
                 (float)rearLongitudinalSlip),
             Gear = 3,
-            Steer = 48,
+            Steer = steer,
             Accel = (byte)Math.Round(throttle * 255)
         };
         return new TelemetryFrame(
@@ -324,7 +428,7 @@ public sealed class DriftDashboardTests
                 0,
                 0,
                 0,
-                0,
+                rpmRatio,
                 default),
             ReadOnlyMemory<byte>.Empty);
     }

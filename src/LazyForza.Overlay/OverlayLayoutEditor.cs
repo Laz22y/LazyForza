@@ -402,12 +402,27 @@ internal sealed class OverlayLayoutEditorWindow : Window
     private readonly ToggleButton dashboardSelection;
     private readonly ToggleButton lapSelection;
     private readonly ToggleButton driftSelection;
+    private readonly ToggleButton dashboardPreviewVisibility;
+    private readonly ToggleButton lapPreviewVisibility;
+    private readonly ToggleButton driftPreviewVisibility;
+    private readonly Border dashboardWidgetPanel;
+    private readonly ComboBox dashboardWidgetSelection;
+    private readonly ToggleButton dashboardWidgetVisibility;
+    private readonly Border dashboardWidgetFrame;
     private readonly List<(Thumb Thumb, ResizeHandle Handle)> handles = [];
     private EditorHud selectedHud;
     private EditorHud? draggingHud;
     private EditorHud? resizingHud;
+    private DashboardWidgetLayout dashboardWidgets;
+    private DashboardWidgetKind selectedDashboardWidget;
+    private DashboardWidgetPlacement widgetDragStart = new();
+    private bool draggingDashboardWidget;
+    private bool dashboardPreviewVisible = true;
+    private bool lapPreviewVisible = true;
+    private bool driftPreviewVisible = true;
     private bool lapAttached;
     private Point dragOrigin;
+    private Point widgetDragOrigin;
     private double dragStartLeft;
     private double dragStartTop;
     private double resizeStartCenterX;
@@ -424,6 +439,9 @@ internal sealed class OverlayLayoutEditorWindow : Window
         this.target = target;
         original = OverlayLayoutGeometry.Normalize(
             layout with { ClickThrough = true, IsLocked = true });
+        dashboardWidgets = DashboardWidgetLayoutSettings.Normalize(
+            original.DashboardWidgets);
+        selectedDashboardWidget = DashboardWidgetKind.SpeedGear;
         lapAttached = original.LapHudAttachedToDashboard;
         Title = "设置 Overlay 布局";
         WindowStyle = WindowStyle.None;
@@ -465,6 +483,21 @@ internal sealed class OverlayLayoutEditorWindow : Window
         canvas.Children.Add(dashboardHud.Frame);
         canvas.Children.Add(lapHud.Frame);
         canvas.Children.Add(driftHud.Frame);
+
+        dashboardWidgetFrame = new Border
+        {
+            BorderThickness = new Thickness(2),
+            CornerRadius = new CornerRadius(4),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(73, 211, 235)),
+            Background = new SolidColorBrush(Color.FromArgb(18, 73, 211, 235)),
+            Cursor = Cursors.SizeAll,
+            ToolTip = "拖动当前选中的仪表盘部件"
+        };
+        dashboardWidgetFrame.MouseLeftButtonDown += BeginDashboardWidgetDrag;
+        dashboardWidgetFrame.MouseMove += ContinueDashboardWidgetDrag;
+        dashboardWidgetFrame.MouseLeftButtonUp += EndDashboardWidgetDrag;
+        Canvas.SetZIndex(dashboardWidgetFrame, 24);
+        canvas.Children.Add(dashboardWidgetFrame);
 
         verticalGuide = GuideLine();
         horizontalGuide = GuideLine();
@@ -511,7 +544,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         });
         heading.Children.Add(new TextBlock
         {
-            Text = "分别选择三个 HUD 后拖动或缩放；缩放始终以 HUD 中心为固定点。Esc 取消，Ctrl+S 保存。",
+            Text = "选择 HUD 后拖动或固定中心缩放；仪表盘部件可独立显示和移动。Esc 取消，Ctrl+S 保存。",
             Margin = new Thickness(0, 3, 0, 0),
             FontSize = 11,
             Foreground = new SolidColorBrush(Color.FromRgb(179, 192, 201))
@@ -542,7 +575,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         selectionPanel.Children.Add(lapSelection);
         driftSelection = new ToggleButton
         {
-            Content = "漂移 HUD · Preview",
+            Content = "漂移 HUD · 实验性",
             Padding = new Thickness(11, 6, 11, 6),
             Margin = new Thickness(7, 0, 0, 0),
             MinWidth = 126
@@ -572,6 +605,139 @@ internal sealed class OverlayLayoutEditorWindow : Window
         headerGrid.Children.Add(metricsText);
         header.Child = headerGrid;
         root.Children.Add(header);
+
+        var previewVisibilityPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        previewVisibilityPanel.Children.Add(new TextBlock
+        {
+            Text = "编辑器显示",
+            Margin = new Thickness(0, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(179, 192, 201))
+        });
+        dashboardPreviewVisibility = new ToggleButton
+        {
+            Content = "仪表盘：显示",
+            IsChecked = true,
+            Padding = new Thickness(9, 5, 9, 5)
+        };
+        dashboardPreviewVisibility.Click += (_, _) =>
+            SetHudPreviewVisibility(
+                dashboardHud,
+                dashboardPreviewVisibility.IsChecked == true);
+        previewVisibilityPanel.Children.Add(dashboardPreviewVisibility);
+        lapPreviewVisibility = new ToggleButton
+        {
+            Content = "圈速：显示",
+            IsChecked = true,
+            Padding = new Thickness(9, 5, 9, 5),
+            Margin = new Thickness(6, 0, 0, 0)
+        };
+        lapPreviewVisibility.Click += (_, _) =>
+            SetHudPreviewVisibility(
+                lapHud,
+                lapPreviewVisibility.IsChecked == true);
+        previewVisibilityPanel.Children.Add(lapPreviewVisibility);
+        driftPreviewVisibility = new ToggleButton
+        {
+            Content = "漂移：显示",
+            IsChecked = true,
+            Padding = new Thickness(9, 5, 9, 5),
+            Margin = new Thickness(6, 0, 0, 0)
+        };
+        driftPreviewVisibility.Click += (_, _) =>
+            SetHudPreviewVisibility(
+                driftHud,
+                driftPreviewVisibility.IsChecked == true);
+        previewVisibilityPanel.Children.Add(driftPreviewVisibility);
+        var previewVisibilityBar = new Border
+        {
+            Margin = new Thickness(18, 82, 18, 0),
+            Padding = new Thickness(10, 7, 10, 7),
+            CornerRadius = new CornerRadius(8),
+            Background = new SolidColorBrush(Color.FromArgb(225, 13, 18, 23)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(160, 81, 96, 108)),
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = previewVisibilityPanel
+        };
+        root.Children.Add(previewVisibilityBar);
+
+        var widgetControls = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        widgetControls.Children.Add(new TextBlock
+        {
+            Text = "仪表盘部件",
+            Margin = new Thickness(0, 0, 9, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(179, 192, 201))
+        });
+        dashboardWidgetSelection = new ComboBox
+        {
+            Width = 132,
+            Padding = new Thickness(7, 4, 7, 4),
+            ItemsSource = Enum.GetValues<DashboardWidgetKind>()
+                .Select(DashboardWidgetName)
+                .ToArray(),
+            SelectedIndex = (int)selectedDashboardWidget
+        };
+        dashboardWidgetSelection.SelectionChanged += (_, _) =>
+        {
+            if (dashboardWidgetSelection.SelectedIndex < 0) return;
+            selectedDashboardWidget =
+                (DashboardWidgetKind)dashboardWidgetSelection.SelectedIndex;
+            RefreshDashboardWidgetControls();
+            PositionDashboardWidgetFrame();
+        };
+        widgetControls.Children.Add(dashboardWidgetSelection);
+        dashboardWidgetVisibility = new ToggleButton
+        {
+            Padding = new Thickness(10, 5, 10, 5),
+            Margin = new Thickness(7, 0, 0, 0)
+        };
+        dashboardWidgetVisibility.Click += (_, _) =>
+        {
+            var current = dashboardWidgets.Get(selectedDashboardWidget);
+            dashboardWidgets = dashboardWidgets.Set(
+                selectedDashboardWidget,
+                current with
+                {
+                    IsVisible = dashboardWidgetVisibility.IsChecked == true
+                });
+            ApplyHuds(clamp: false);
+        };
+        widgetControls.Children.Add(dashboardWidgetVisibility);
+        var resetDashboardWidgets = new Button
+        {
+            Content = "恢复当前仪表盘布局",
+            Padding = new Thickness(10, 5, 10, 5),
+            Margin = new Thickness(7, 0, 0, 0),
+            ToolTip = "恢复全部仪表盘部件的默认显示状态和当前位置"
+        };
+        resetDashboardWidgets.Click += (_, _) => ResetDashboardWidgets();
+        widgetControls.Children.Add(resetDashboardWidgets);
+        dashboardWidgetPanel = new Border
+        {
+            Margin = new Thickness(18, 82, 18, 0),
+            Padding = new Thickness(10, 7, 10, 7),
+            CornerRadius = new CornerRadius(8),
+            Background = new SolidColorBrush(Color.FromArgb(225, 13, 18, 23)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(160, 81, 96, 108)),
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = widgetControls
+        };
+        root.Children.Add(dashboardWidgetPanel);
 
         var footer = new Border
         {
@@ -638,7 +804,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
     }
 
     private const string DefaultAlignmentText =
-        "三个 HUD 均可独立拖动和固定中心缩放；圈速 HUD 另有吸附辅助";
+        "HUD 可临时隐藏后重叠摆放；仪表盘部件可独立拖动，圈速另有吸附辅助";
 
     public OverlayLayout? Result { get; private set; }
 
@@ -701,6 +867,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
             DriftHudLeft = Left + driftHud.Left,
             DriftHudTop = Top + driftHud.Top,
             DriftHudScale = driftHud.Scale,
+            DashboardWidgets = dashboardWidgets,
             MonitorId = target.MonitorId,
             ClickThrough = true,
             IsLocked = true
@@ -714,6 +881,16 @@ internal sealed class OverlayLayoutEditorWindow : Window
         ApplyHud(dashboardHud, clamp);
         ApplyHud(lapHud, clamp);
         ApplyHud(driftHud, clamp);
+        dashboardHud.Frame.Visibility = dashboardPreviewVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        lapHud.Frame.Visibility = lapPreviewVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        driftHud.Frame.Visibility = driftPreviewVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PositionDashboardWidgetFrame();
         PositionHandles();
         UpdateSelectionVisuals();
     }
@@ -741,6 +918,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         Canvas.SetZIndex(driftHud.Frame, hud == driftHud ? 14 : 10);
         foreach (var (thumb, _) in handles) Canvas.SetZIndex(thumb, 30);
         UpdateSelectionVisuals();
+        PositionDashboardWidgetFrame();
         PositionHandles();
     }
 
@@ -749,6 +927,10 @@ internal sealed class OverlayLayoutEditorWindow : Window
         dashboardSelection.IsChecked = selectedHud == dashboardHud;
         lapSelection.IsChecked = selectedHud == lapHud;
         driftSelection.IsChecked = selectedHud == driftHud;
+        dashboardWidgetPanel.Visibility =
+            selectedHud == dashboardHud && dashboardPreviewVisible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         dashboardHud.Frame.BorderBrush = new SolidColorBrush(
             selectedHud == dashboardHud
                 ? Color.FromRgb(61, 232, 143)
@@ -771,7 +953,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         {
             OverlayHudKind.Dashboard => "仪表盘 HUD",
             OverlayHudKind.Lap => "圈速 HUD",
-            _ => "漂移 HUD · Preview"
+            _ => "漂移 HUD · 实验性"
         };
         var attachment = selectedHud.Kind == OverlayHudKind.Lap && lapAttached
             ? " · 已吸附"
@@ -779,14 +961,20 @@ internal sealed class OverlayLayoutEditorWindow : Window
         metricsText.Text =
             $"{name}{attachment} · {selectedHud.Scale:P1} · " +
             $"{HudWidth(selectedHud):0} × {HudHeight(selectedHud):0}";
+        RefreshDashboardWidgetControls();
     }
 
     private void PositionHandles()
     {
+        var handlesVisible = IsHudPreviewVisible(selectedHud);
         var width = HudWidth(selectedHud);
         var height = HudHeight(selectedHud);
         foreach (var (thumb, handle) in handles)
         {
+            thumb.Visibility = handlesVisible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            if (!handlesVisible) continue;
             var point = handle switch
             {
                 ResizeHandle.TopLeft => new Point(selectedHud.Left, selectedHud.Top),
@@ -802,6 +990,175 @@ internal sealed class OverlayLayoutEditorWindow : Window
             Canvas.SetTop(thumb, point.Y - thumb.Height / 2);
         }
     }
+
+    private bool IsHudPreviewVisible(EditorHud hud) => hud.Kind switch
+    {
+        OverlayHudKind.Dashboard => dashboardPreviewVisible,
+        OverlayHudKind.Lap => lapPreviewVisible,
+        _ => driftPreviewVisible
+    };
+
+    private void SetHudPreviewVisibility(EditorHud hud, bool isVisible)
+    {
+        if (hud == dashboardHud) dashboardPreviewVisible = isVisible;
+        else if (hud == lapHud) lapPreviewVisible = isVisible;
+        else driftPreviewVisible = isVisible;
+
+        dashboardPreviewVisibility.IsChecked = dashboardPreviewVisible;
+        dashboardPreviewVisibility.Content = dashboardPreviewVisible
+            ? "仪表盘：显示"
+            : "仪表盘：隐藏";
+        lapPreviewVisibility.IsChecked = lapPreviewVisible;
+        lapPreviewVisibility.Content = lapPreviewVisible
+            ? "圈速：显示"
+            : "圈速：隐藏";
+        driftPreviewVisibility.IsChecked = driftPreviewVisible;
+        driftPreviewVisibility.Content = driftPreviewVisible
+            ? "漂移：显示"
+            : "漂移：隐藏";
+
+        if (!isVisible && selectedHud == hud)
+        {
+            var replacement = new[] { dashboardHud, lapHud, driftHud }
+                .FirstOrDefault(IsHudPreviewVisible);
+            if (replacement is not null) SelectHud(replacement);
+        }
+        ApplyHuds(clamp: false);
+    }
+
+    private void RefreshDashboardWidgetControls()
+    {
+        var placement = dashboardWidgets.Get(selectedDashboardWidget);
+        dashboardWidgetVisibility.IsChecked = placement.IsVisible;
+        dashboardWidgetVisibility.Content = placement.IsVisible
+            ? "部件：显示"
+            : "部件：隐藏";
+        dashboardWidgetFrame.Visibility =
+            selectedHud == dashboardHud &&
+            dashboardPreviewVisible &&
+            placement.IsVisible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+    }
+
+    private void PositionDashboardWidgetFrame()
+    {
+        var placement = dashboardWidgets.Get(selectedDashboardWidget);
+        if (selectedHud != dashboardHud ||
+            !dashboardPreviewVisible ||
+            !placement.IsVisible)
+        {
+            dashboardWidgetFrame.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var bounds = DashboardWidgetLayoutSettings.DefaultBounds(
+            selectedDashboardWidget);
+        var dashboardWidth = HudWidth(dashboardHud);
+        var dashboardHeight = HudHeight(dashboardHud);
+        dashboardWidgetFrame.Width = Math.Max(16, bounds.Width * dashboardWidth);
+        dashboardWidgetFrame.Height = Math.Max(16, bounds.Height * dashboardHeight);
+        Canvas.SetLeft(
+            dashboardWidgetFrame,
+            dashboardHud.Left +
+            (bounds.Left + placement.OffsetX) * dashboardWidth);
+        Canvas.SetTop(
+            dashboardWidgetFrame,
+            dashboardHud.Top +
+            (bounds.Top + placement.OffsetY) * dashboardHeight);
+        dashboardWidgetFrame.Visibility = Visibility.Visible;
+    }
+
+    private void BeginDashboardWidgetDrag(
+        object sender,
+        MouseButtonEventArgs eventArgs)
+    {
+        if (eventArgs.ChangedButton != MouseButton.Left) return;
+        if (eventArgs.ClickCount >= 2)
+        {
+            var current = dashboardWidgets.Get(selectedDashboardWidget);
+            dashboardWidgets = dashboardWidgets.Set(
+                selectedDashboardWidget,
+                current with { OffsetX = 0, OffsetY = 0 });
+            ApplyHuds(clamp: false);
+            eventArgs.Handled = true;
+            return;
+        }
+
+        draggingDashboardWidget = true;
+        widgetDragOrigin = eventArgs.GetPosition(canvas);
+        widgetDragStart = dashboardWidgets.Get(selectedDashboardWidget);
+        dashboardWidgetFrame.CaptureMouse();
+        eventArgs.Handled = true;
+    }
+
+    private void ContinueDashboardWidgetDrag(
+        object sender,
+        MouseEventArgs eventArgs)
+    {
+        if (!draggingDashboardWidget ||
+            eventArgs.LeftButton != MouseButtonState.Pressed)
+            return;
+        var pointer = eventArgs.GetPosition(canvas);
+        var dashboardWidth = HudWidth(dashboardHud);
+        var dashboardHeight = HudHeight(dashboardHud);
+        var next = widgetDragStart with
+        {
+            OffsetX = widgetDragStart.OffsetX +
+                      (pointer.X - widgetDragOrigin.X) / dashboardWidth,
+            OffsetY = widgetDragStart.OffsetY +
+                      (pointer.Y - widgetDragOrigin.Y) / dashboardHeight
+        };
+        dashboardWidgets = dashboardWidgets.Set(
+            selectedDashboardWidget,
+            DashboardWidgetLayoutSettings.ClampToCanvas(
+                selectedDashboardWidget,
+                next));
+        PositionDashboardWidgetFrame();
+        InvalidateDashboardPreview();
+        alignmentText.Text =
+            $"{DashboardWidgetName(selectedDashboardWidget)} · 双击恢复默认位置";
+        alignmentText.Foreground = new SolidColorBrush(
+            Color.FromRgb(73, 211, 235));
+        eventArgs.Handled = true;
+    }
+
+    private void EndDashboardWidgetDrag(
+        object sender,
+        MouseButtonEventArgs eventArgs)
+    {
+        if (!draggingDashboardWidget) return;
+        draggingDashboardWidget = false;
+        dashboardWidgetFrame.ReleaseMouseCapture();
+        HideGuides();
+        eventArgs.Handled = true;
+    }
+
+    private void ResetDashboardWidgets()
+    {
+        dashboardWidgets = DashboardWidgetLayoutSettings.CreateDefault();
+        RefreshDashboardWidgetControls();
+        PositionDashboardWidgetFrame();
+        InvalidateDashboardPreview();
+        alignmentText.Text = "仪表盘部件已恢复当前默认布局";
+        alignmentText.Foreground = new SolidColorBrush(
+            Color.FromRgb(61, 232, 143));
+    }
+
+    private void InvalidateDashboardPreview() =>
+        (dashboardHud.Frame.Child as HudSurface)?.InvalidateVisual();
+
+    private static string DashboardWidgetName(DashboardWidgetKind kind) =>
+        kind switch
+        {
+            DashboardWidgetKind.RpmArc => "转速灯带",
+            DashboardWidgetKind.SpeedGear => "速度 / 挡位",
+            DashboardWidgetKind.EngineOutput => "转速 / 动力",
+            DashboardWidgetKind.Tires => "轮胎状态",
+            DashboardWidgetKind.Pedals => "油门 / 制动",
+            DashboardWidgetKind.Steering => "方向指示",
+            _ => "等级 / PI"
+        };
 
     private void BeginHudDrag(EditorHud hud, MouseButtonEventArgs eventArgs)
     {
