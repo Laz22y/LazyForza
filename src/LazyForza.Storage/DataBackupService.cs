@@ -87,7 +87,7 @@ public sealed class DataBackupService
         new("TrackTemplates",
             ["Id", "Name", "Direction", "Source", "GameBuild", "LengthMeters", "ToleranceMeters",
                 "Confidence", "CaptureLapCount", "CreatedAt", "UpdatedAt", "LayoutKind",
-                "CatalogKind", "Category"],
+                "CatalogKind", "Category", "TimingKind"],
             ["Id"]),
         new("TrackPoints",
             ["TrackId", "PointIndex", "X", "Y", "Z", "S", "TangentX", "TangentZ"],
@@ -96,6 +96,17 @@ public sealed class DataBackupService
             ["TrackId", "SectorSchemaVersion", "SectorIndex", "StartS", "EndS", "FeatureType",
                 "AlgorithmVersion"],
             ["TrackId", "SectorSchemaVersion", "SectorIndex"]),
+        new("EstateTrackDefinitions",
+            ["TrackId", "MapName", "Creator", "ShareCode", "MapRevision",
+                "LeftX", "LeftY", "LeftZ", "RightX", "RightY", "RightZ", "ForwardX", "ForwardZ",
+                "FitRms", "TraceOffset", "TraceAngle", "HeightTolerance", "EndpointMargin",
+                "ReferenceLapSeconds", "ValidationLapSeconds", "ValidationProjectionRatio", "CreatedAt", "UpdatedAt"],
+            ["TrackId"]),
+        new("EstateCheckpoints",
+            ["TrackId", "CheckpointIndex", "RouteProgressMeters", "LeftX", "LeftY", "LeftZ",
+                "RightX", "RightY", "RightZ", "ForwardX", "ForwardZ", "HeightTolerance", "EndpointMargin"],
+            ["TrackId", "CheckpointIndex"]),
+        new("EstatePitDefinitions", ["TrackId", "DefinitionJson"], ["TrackId"]),
         new("Sessions", ["Id", "Source", "StartedAt", "RawRecordingPath"], ["Id"]),
         new("Laps",
             ["Id", "TrackId", "Direction", "SectorSchemaVersion", "SessionId",
@@ -351,6 +362,9 @@ public sealed class DataBackupService
             requests.Add(("TrackTemplates", trackWhere));
             requests.Add(("TrackPoints", childWhere));
             requests.Add(("SectorDefinitions", childWhere));
+            requests.Add(("EstateTrackDefinitions", childWhere));
+            requests.Add(("EstateCheckpoints", childWhere));
+            requests.Add(("EstatePitDefinitions", childWhere));
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -587,6 +601,9 @@ public sealed class DataBackupService
         {
             yield return $"DELETE FROM TrackPoints WHERE {InFilter("TrackId", importedTrackContentIds)};";
             yield return $"DELETE FROM SectorDefinitions WHERE {InFilter("TrackId", importedTrackContentIds)};";
+            yield return $"DELETE FROM EstateCheckpoints WHERE {InFilter("TrackId", importedTrackContentIds)};";
+            yield return $"DELETE FROM EstatePitDefinitions WHERE {InFilter("TrackId", importedTrackContentIds)};";
+            yield return $"DELETE FROM EstateTrackDefinitions WHERE {InFilter("TrackId", importedTrackContentIds)};";
         }
 
         foreach (var row in trackTemplates.Rows)
@@ -598,7 +615,11 @@ public sealed class DataBackupService
             yield return UpsertSql(trackTemplates, row);
         }
 
-        foreach (var name in new[] { "TrackPoints", "SectorDefinitions" })
+        foreach (var name in new[]
+                 {
+                     "TrackPoints", "SectorDefinitions", "EstateTrackDefinitions", "EstateCheckpoints",
+                     "EstatePitDefinitions"
+                 })
         {
             var table = payload.Table(name);
             foreach (var row in table.Rows)

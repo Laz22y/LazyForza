@@ -206,7 +206,7 @@ internal sealed class HudSurface : FrameworkElement
     private readonly HudSurfaceKind kind;
     private bool layoutPreview;
     private readonly Stopwatch clock = Stopwatch.StartNew();
-    private readonly FrameRateLimiter limiter = new();
+    private readonly FrameRateLimiter limiter;
     private readonly DashboardHudDynamics dashboardDynamics = new();
     private readonly LapHudDynamics lapDynamics = new();
     private double renderedBrake;
@@ -222,6 +222,7 @@ internal sealed class HudSurface : FrameworkElement
         this.getContributions = getContributions;
         this.getLayout = getLayout;
         this.kind = kind;
+        limiter = new FrameRateLimiter(kind == HudSurfaceKind.Lap ? 30 : 60);
         this.layoutPreview = layoutPreview;
         IsHitTestVisible = false;
         Loaded += (_, _) => CompositionTarget.Rendering += OnRendering;
@@ -243,9 +244,10 @@ internal sealed class HudSurface : FrameworkElement
     {
         base.OnRender(drawingContext);
         var contributions = getContributions();
-        var dashboard = contributions.Select(item => item.Snapshot).OfType<Modules.Dashboard.DashboardHudState>().LastOrDefault();
-        var lap = contributions.Select(item => item.Snapshot).OfType<Modules.LapAnalysis.LapHudState>().LastOrDefault();
-        var drift = contributions.Select(item => item.Snapshot).OfType<DriftHudState>().LastOrDefault();
+        var orderedContributions = contributions.OrderBy(item => item.ZIndex).ToArray();
+        var dashboard = orderedContributions.Select(item => item.Snapshot).OfType<Modules.Dashboard.DashboardHudState>().LastOrDefault();
+        var lap = orderedContributions.Select(item => item.Snapshot).OfType<Modules.LapAnalysis.LapHudState>().LastOrDefault();
+        var drift = orderedContributions.Select(item => item.Snapshot).OfType<DriftHudState>().LastOrDefault();
         var now = DateTimeOffset.UtcNow;
         var layout = getLayout();
         if (kind == HudSurfaceKind.Dashboard)

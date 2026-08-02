@@ -17,7 +17,6 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private const string AutomaticMatchRejectedInstruction = "圈速 HUD 即将隐藏。可在赛道页添加自定义赛道。";
     private const string AutomaticMatchRejectedTrackName = "未识别赛事";
     private static readonly TimeSpan AutomaticMatchMaximumDuration = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan CumulativeHistoricalDeltaDisplayDuration = TimeSpan.FromSeconds(2);
     private readonly LazyForzaStore store;
     private readonly Func<OverlayLayout> getOverlayLayout;
     private readonly Action<DiagnosticSignal>? diagnosticSink;
@@ -137,8 +136,15 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         store.SetAppSetting(selectionSettingKey, string.Empty);
         if (compatibleTracks.Count == 0)
         {
-            var latest = store.LoadLatestTrack(expectedTrackSource);
-            if (latest is not null) incompatibleTrackName = latest.Value.Track.Name;
+            var latestGameEventTrack = store.ListTracks(expectedTrackSource)
+                .Where(summary => summary.TimingKind == TrackTimingKind.GameEvent)
+                .Select(summary => store.LoadTrack(summary.Id))
+                .Where(saved => saved is not null)
+                .Select(saved => saved!.Value)
+                .OrderByDescending(saved => saved.Track.UpdatedAt)
+                .FirstOrDefault();
+            if (latestGameEventTrack.Track is not null)
+                incompatibleTrackName = latestGameEventTrack.Track.Name;
         }
         trackMatchDiagnostics = new TrackMatchDiagnostics(
             DateTimeOffset.MinValue,
@@ -589,7 +595,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                     heldCumulativeHistoricalDeltaSeconds = CompletedLapDelta(completedLap, historicalReference);
                     heldCumulativeHistoricalDeltaUntil = heldCumulativeHistoricalDeltaSeconds is null
                         ? DateTimeOffset.MinValue
-                        : frame.ArrivalTime + CumulativeHistoricalDeltaDisplayDuration;
+                        : frame.ArrivalTime + LapHudDisplayTiming.CumulativeHistoricalDeltaDuration;
                     holdComparisonsUntil = frame.ArrivalTime + CompletedLapHoldDuration();
                 }
                 if (finalLapSignal)
@@ -1359,7 +1365,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     public void SelectTrack(Guid trackId)
     {
-        if (store.LoadTrack(trackId) is not { } saved || !IsCompatible(saved.Track, saved.Sectors))
+        if (store.LoadTrack(trackId) is not { } saved || !IsAnalysisCompatible(saved.Track, saved.Sectors))
             throw new InvalidOperationException("所选赛道与当前遥测来源或分段算法版本不兼容。");
 
         track = saved.Track;
@@ -1377,7 +1383,14 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         competitionActive = false;
         ClearRecentCompetition();
         sessionId = Guid.NewGuid();
-        PublishWaitingForCompetition();
+        if (track.TimingKind == TrackTimingKind.EstateGeometry) PublishSelectedEstateHistory();
+        else PublishWaitingForCompetition();
+    }
+
+    public void RefreshSelectedTrackHistory()
+    {
+        ReloadVisibleLaps();
+        if (track?.TimingKind == TrackTimingKind.EstateGeometry) PublishSelectedEstateHistory();
     }
 
     public TrackCorrectionResult CorrectTrackMatch(Guid trackId)
@@ -1635,6 +1648,33 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         });
     }
 
+    private void PublishSelectedEstateHistory()
+    {
+        if (track?.TimingKind != TrackTimingKind.EstateGeometry) return;
+        Volatile.Write(ref currentCompetitionSnapshot, null);
+        var placeholders = Enumerable.Range(0, Math.Max(1, sectors.Count))
+            .Select(index => new SectorComparison(index, null, null, null, null, SectorColorState.Gray, false))
+            .ToArray();
+        Volatile.Write(ref snapshot, new LapHudState(
+            DateTimeOffset.UtcNow,
+            TelemetrySourceKind.Live,
+            false,
+            TrackLearningPhase.ComparingLaps,
+            "正在查看地产环道圈速。",
+            "地产计时请在“赛道”页手动启动；这里用于筛选、比较和导出已保存的单圈数据。",
+            TrackMatchState.Confirmed,
+            1,
+            track.Name,
+            0,
+            placeholders,
+            1,
+            VisibleLapCount,
+            false)
+        {
+            CompetitionSessionId = sessionId
+        });
+    }
+
     private void PublishLearning(TelemetryFrame frame, TrackLearningPhase phase, string status, string instruction, double progress)
     {
         var placeholders = Enumerable.Range(0, 4)
@@ -1684,7 +1724,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 CurrentCumulativeHistoricalDelta(currentSector, performanceClass);
             liveCumulativeHistoricalDeltaUntil = liveCumulativeHistoricalDeltaSeconds is null
                 ? DateTimeOffset.MinValue
-                : frame.ArrivalTime + CumulativeHistoricalDeltaDisplayDuration;
+                : frame.ArrivalTime + LapHudDisplayTiming.CumulativeHistoricalDeltaDuration;
         }
         if (heldCumulativeHistoricalDeltaSeconds is not null &&
             frame.ArrivalTime >= heldCumulativeHistoricalDeltaUntil)
@@ -1786,7 +1826,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         heldCumulativeHistoricalDeltaSeconds = CompletedLapDelta(completedLap, historicalReference);
         heldCumulativeHistoricalDeltaUntil = heldCumulativeHistoricalDeltaSeconds is null
             ? DateTimeOffset.MinValue
-            : frame.ArrivalTime + CumulativeHistoricalDeltaDisplayDuration;
+            : frame.ArrivalTime + LapHudDisplayTiming.CumulativeHistoricalDeltaDuration;
         holdComparisonsUntil = frame.ArrivalTime + CompletedLapHoldDuration();
         return completedLap;
     }
@@ -2099,8 +2139,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         if (currentTrackGeometryPlausible) trackMatchEverPlausible = true;
     }
 
-    private TimeSpan CompletedLapHoldDuration() => TimeSpan.FromSeconds(
-        Math.Clamp(getOverlayLayout().LapCompletedHoldSeconds, 0, 15));
+    private TimeSpan CompletedLapHoldDuration() =>
+        LapHudDisplayTiming.CompletedLapHoldDuration(getOverlayLayout());
 
     private void ReloadVisibleLaps()
     {
@@ -2188,6 +2228,14 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     private bool IsCompatible(TrackTemplate candidate, IReadOnlyList<SectorDefinition> candidateSectors) =>
         (expectedTrackSource is null || candidate.Source == expectedTrackSource) &&
+        candidate.TimingKind == TrackTimingKind.GameEvent &&
+        HasCompatibleSectors(candidateSectors);
+
+    private bool IsAnalysisCompatible(TrackTemplate candidate, IReadOnlyList<SectorDefinition> candidateSectors) =>
+        (expectedTrackSource is null || candidate.Source == expectedTrackSource) &&
+        HasCompatibleSectors(candidateSectors);
+
+    private static bool HasCompatibleSectors(IReadOnlyList<SectorDefinition> candidateSectors) =>
         candidateSectors.Count > 0 &&
         candidateSectors.All(sector =>
             sector.SectorSchemaVersion == TrackAlgorithms.SectorSchemaVersion &&

@@ -50,6 +50,9 @@ public partial class App : Application
             var captureDriftOnlyQa = e.Args.Contains(
                 "--capture-drift-only-qa",
                 StringComparer.OrdinalIgnoreCase);
+            var captureEstateQa = e.Args.Contains(
+                "--capture-estate-qa",
+                StringComparer.OrdinalIgnoreCase);
             var recordSeconds = AutoRecordSeconds(e.Args);
             var simulatorRequested = e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase) || captureDirectory is not null || recordSeconds is not null;
             var isolatedData = simulatorRequested || replayPath is not null;
@@ -152,7 +155,8 @@ public partial class App : Application
                 _ = CaptureQaAsync(
                     captureDirectory,
                     captureDriftQa,
-                    captureDriftOnlyQa);
+                    captureDriftOnlyQa,
+                    captureEstateQa);
             }
             else if (recordSeconds is not null) _ = AutoRecordAndExitAsync(recordSeconds.Value);
         }
@@ -298,11 +302,17 @@ public partial class App : Application
     private async Task CaptureQaAsync(
         string directory,
         bool captureDriftQa,
-        bool captureDriftOnlyQa)
+        bool captureDriftOnlyQa,
+        bool captureEstateQa)
     {
         try
         {
             await Task.Delay(1800);
+            if (captureEstateQa)
+            {
+                await ((MainWindow)MainWindow).CaptureEstateQaAsync(directory);
+                return;
+            }
             var original = overlay!.CurrentLayout;
             foreach (var size in new[] { (Width: 1280d, Height: 720d), (Width: 1920d, Height: 1080d), (Width: 2560d, Height: 1440d) })
             {
@@ -440,6 +450,7 @@ internal static class BuiltInModuleCatalog
     [
         new DashboardModule(),
         new LapAnalysisModule(store, sourceKind, getOverlayLayout, diagnosticSink),
+        new EstateCircuitModule(store, sourceKind, getOverlayLayout),
         new DriftDashboardModule()
     ];
 }

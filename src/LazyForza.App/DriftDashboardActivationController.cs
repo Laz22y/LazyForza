@@ -152,6 +152,9 @@ internal sealed class DriftDashboardActivationController(
         CancellationToken cancellationToken)
     {
         if (IsDriftActive) return;
+        var estate = modules.Modules.OfType<EstateCircuitModule>().FirstOrDefault();
+        if (estate?.State is { IsTimingActive: true } or { IsEnrollmentActive: true })
+            throw new InvalidOperationException("请先停止地产环道计时或取消录入，再开启漂移仪表盘。");
         var lapWasRunning = Module(LapAnalysisModule.ModuleId).Status.IsEnabled;
         var dashboardWasRunning = Module(DashboardModule.ModuleId).Status.IsEnabled;
         try

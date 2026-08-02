@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 
@@ -13,6 +14,7 @@ public sealed record TrackSummary(
     int Laps,
     TrackLayoutKind LayoutKind,
     TrackCatalogKind CatalogKind,
+    TrackTimingKind TimingKind,
     string? Category);
 
 public sealed record VehicleProfileSummary(
@@ -29,7 +31,7 @@ public sealed record VehicleProfileSummary(
 
 public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisposable
 {
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
     public const int MaxLapsPerTrack = 50;
     private readonly WinSqliteDatabase database;
     private bool disposed;
@@ -201,25 +203,35 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
 
     public int CountVehicleProfiles() => int.Parse(database.QueryText("SELECT COUNT(*) FROM VehicleProfiles;") ?? "0", CultureInfo.InvariantCulture);
 
-    public void SaveTrack(TrackTemplate track, IReadOnlyList<SectorDefinition> sectors)
+    public void SaveTrack(
+        TrackTemplate track,
+        IReadOnlyList<SectorDefinition> sectors,
+        EstateTrackDefinition? estate = null)
     {
+        if (track.TimingKind == TrackTimingKind.EstateGeometry && estate is null)
+            throw new ArgumentException("地产几何赛道必须同时保存地产定义。", nameof(estate));
+        if (estate is not null && estate.TrackId != track.Id)
+            throw new ArgumentException("地产定义与赛道 ID 不一致。", nameof(estate));
         var trackId = Quote(track.Id.ToString());
         var sql = new StringBuilder(32_768)
             .Append("BEGIN IMMEDIATE;\n")
-            .Append("INSERT INTO TrackTemplates(Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category) VALUES(")
+            .Append("INSERT INTO TrackTemplates(Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind) VALUES(")
             .Append(trackId).Append(',').Append(Quote(track.Name)).Append(',').Append(track.Direction).Append(',')
             .Append(Quote(track.Source)).Append(',').Append(Quote(track.GameBuild)).Append(',')
             .Append(N(track.LengthMeters)).Append(',').Append(N(track.MatchingToleranceMeters)).Append(',')
             .Append(N(track.Confidence)).Append(',').Append(track.CaptureLapCount).Append(',')
             .Append(Quote(track.CreatedAt.ToString("O"))).Append(',').Append(Quote(track.UpdatedAt.ToString("O"))).Append(',')
             .Append(Quote(track.LayoutKind.ToString())).Append(',').Append(Quote(track.CatalogKind.ToString())).Append(',')
-            .Append(Quote(track.Category)).Append(") ")
+            .Append(Quote(track.Category)).Append(',').Append(Quote(track.TimingKind.ToString())).Append(") ")
             .Append("ON CONFLICT(Id) DO UPDATE SET Name=excluded.Name,Direction=excluded.Direction,Source=excluded.Source,GameBuild=excluded.GameBuild,")
             .Append("LengthMeters=excluded.LengthMeters,ToleranceMeters=excluded.ToleranceMeters,Confidence=excluded.Confidence,")
             .Append("CaptureLapCount=excluded.CaptureLapCount,UpdatedAt=excluded.UpdatedAt,LayoutKind=excluded.LayoutKind,")
-            .Append("CatalogKind=excluded.CatalogKind,Category=excluded.Category;\n")
+            .Append("CatalogKind=excluded.CatalogKind,Category=excluded.Category,TimingKind=excluded.TimingKind;\n")
             .Append("DELETE FROM TrackPoints WHERE TrackId=").Append(trackId).Append(";\n")
-            .Append("DELETE FROM SectorDefinitions WHERE TrackId=").Append(trackId).Append(";\n");
+            .Append("DELETE FROM SectorDefinitions WHERE TrackId=").Append(trackId).Append(";\n")
+            .Append("DELETE FROM EstateCheckpoints WHERE TrackId=").Append(trackId).Append(";\n")
+            .Append("DELETE FROM EstatePitDefinitions WHERE TrackId=").Append(trackId).Append(";\n")
+            .Append("DELETE FROM EstateTrackDefinitions WHERE TrackId=").Append(trackId).Append(";\n");
         for (var index = 0; index < track.Points.Count; index++)
         {
             var point = track.Points[index];
@@ -237,6 +249,11 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
                 .Append(N(sector.StartS)).Append(',').Append(N(sector.EndS)).Append(',')
                 .Append(Quote(sector.FeatureType.ToString())).Append(',').Append(Quote(sector.AlgorithmVersion))
                 .Append(");\n");
+        }
+
+        if (estate is not null)
+        {
+            AppendEstateDefinition(sql, estate);
         }
 
         database.Execute(sql.Append("COMMIT;").ToString());
@@ -285,7 +302,7 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
     {
         var filter = source is null ? string.Empty : $" WHERE t.Source={Quote(source)}";
         return database.QueryRows(
-        $"SELECT t.Id,t.Name,t.Source,t.LengthMeters,COUNT(l.Id),t.LayoutKind,t.CatalogKind,t.Category FROM TrackTemplates t LEFT JOIN Laps l ON l.TrackId=t.Id{filter} GROUP BY t.Id ORDER BY t.CatalogKind,t.Category,t.Name;")
+        $"SELECT t.Id,t.Name,t.Source,t.LengthMeters,COUNT(l.Id),t.LayoutKind,t.CatalogKind,t.TimingKind,t.Category FROM TrackTemplates t LEFT JOIN Laps l ON l.TrackId=t.Id{filter} GROUP BY t.Id ORDER BY t.CatalogKind,t.TimingKind,t.Category,t.Name;")
         .Select(row => new TrackSummary(
             Guid.Parse(row[0]!),
             row[1] ?? "Unnamed",
@@ -294,7 +311,8 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
             int.Parse(row[4]!, CultureInfo.InvariantCulture),
             ParseLayoutKind(row[5]),
             ParseCatalogKind(row[6]),
-            row[7]))
+            ParseTimingKind(row[7]),
+            row[8]))
         .ToArray();
     }
 
@@ -305,7 +323,7 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
     public (TrackTemplate Track, IReadOnlyList<SectorDefinition> Sectors)? LoadLatestTrack(string? source = null)
     {
         var sourceFilter = source is null ? string.Empty : $" WHERE Source={Quote(source)}";
-        var row = database.QueryRows($"SELECT Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category FROM TrackTemplates{sourceFilter} ORDER BY UpdatedAt DESC LIMIT 1;").SingleOrDefault();
+        var row = database.QueryRows($"SELECT Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind FROM TrackTemplates{sourceFilter} ORDER BY UpdatedAt DESC LIMIT 1;").SingleOrDefault();
         if (row is null) return null;
         var id = Guid.Parse(row[0]!);
         var points = database.QueryRows($"SELECT X,Y,Z,S,TangentX,TangentZ FROM TrackPoints WHERE TrackId={Quote(id.ToString())} ORDER BY PointIndex;")
@@ -325,7 +343,8 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
         {
             LayoutKind = ParseLayoutKind(row[11]),
             CatalogKind = ParseCatalogKind(row[12]),
-            Category = row[13]
+            Category = row[13],
+            TimingKind = ParseTimingKind(row[14])
         };
         var sectors = database.QueryRows($"SELECT SectorSchemaVersion,SectorIndex,StartS,EndS,FeatureType,AlgorithmVersion FROM SectorDefinitions WHERE TrackId={Quote(id.ToString())} ORDER BY SectorIndex;")
             .Select(sector => new SectorDefinition(id, int.Parse(sector[0]!, CultureInfo.InvariantCulture), int.Parse(sector[1]!, CultureInfo.InvariantCulture),
@@ -337,7 +356,7 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
 
     public (TrackTemplate Track, IReadOnlyList<SectorDefinition> Sectors)? LoadTrack(Guid trackId)
     {
-        var row = database.QueryRows($"SELECT Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category FROM TrackTemplates WHERE Id={Quote(trackId.ToString())} LIMIT 1;").SingleOrDefault();
+        var row = database.QueryRows($"SELECT Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind FROM TrackTemplates WHERE Id={Quote(trackId.ToString())} LIMIT 1;").SingleOrDefault();
         if (row is null) return null;
         var id = Guid.Parse(row[0]!);
         var points = database.QueryRows($"SELECT X,Y,Z,S,TangentX,TangentZ FROM TrackPoints WHERE TrackId={Quote(id.ToString())} ORDER BY PointIndex;")
@@ -357,7 +376,8 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
         {
             LayoutKind = ParseLayoutKind(row[11]),
             CatalogKind = ParseCatalogKind(row[12]),
-            Category = row[13]
+            Category = row[13],
+            TimingKind = ParseTimingKind(row[14])
         };
         var sectors = database.QueryRows($"SELECT SectorSchemaVersion,SectorIndex,StartS,EndS,FeatureType,AlgorithmVersion FROM SectorDefinitions WHERE TrackId={Quote(id.ToString())} ORDER BY SectorIndex;")
             .Select(sector => new SectorDefinition(id, int.Parse(sector[0]!, CultureInfo.InvariantCulture), int.Parse(sector[1]!, CultureInfo.InvariantCulture),
@@ -365,6 +385,58 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
                 Enum.Parse<SectorFeatureType>(sector[4]!), sector[5] ?? "unknown"))
             .ToArray();
         return (track, sectors);
+    }
+
+    public EstateTrackDefinition? LoadEstateTrackDefinition(Guid trackId)
+    {
+        var id = Quote(trackId.ToString());
+        var row = database.QueryRows(
+            "SELECT MapName,Creator,ShareCode,MapRevision," +
+            "LeftX,LeftY,LeftZ,RightX,RightY,RightZ,ForwardX,ForwardZ,FitRms,TraceOffset,TraceAngle,HeightTolerance,EndpointMargin," +
+            "ReferenceLapSeconds,ValidationLapSeconds,ValidationProjectionRatio,CreatedAt,UpdatedAt " +
+            $"FROM EstateTrackDefinitions WHERE TrackId={id} LIMIT 1;").SingleOrDefault();
+        if (row is null) return null;
+        var gate = new EstateTimingGate(
+            new EstateGatePoint(ParseDouble(row[4]), ParseDouble(row[5]), ParseDouble(row[6])),
+            new EstateGatePoint(ParseDouble(row[7]), ParseDouble(row[8]), ParseDouble(row[9])),
+            ParseDouble(row[10]),
+            ParseDouble(row[11]),
+            ParseDouble(row[12]),
+            ParseDouble(row[13]),
+            ParseDouble(row[14]),
+            ParseDouble(row[15]),
+            ParseDouble(row[16]));
+        var checkpoints = database.QueryRows(
+            "SELECT CheckpointIndex,RouteProgressMeters,LeftX,LeftY,LeftZ,RightX,RightY,RightZ,ForwardX,ForwardZ,HeightTolerance,EndpointMargin " +
+            $"FROM EstateCheckpoints WHERE TrackId={id} ORDER BY CheckpointIndex;")
+            .Select(checkpoint => new EstateCheckpoint(
+                ParseInt(checkpoint[0]),
+                new EstateTimingGate(
+                    new EstateGatePoint(ParseDouble(checkpoint[2]), ParseDouble(checkpoint[3]), ParseDouble(checkpoint[4])),
+                    new EstateGatePoint(ParseDouble(checkpoint[5]), ParseDouble(checkpoint[6]), ParseDouble(checkpoint[7])),
+                    ParseDouble(checkpoint[8]), ParseDouble(checkpoint[9]), 0, 0, 0,
+                    ParseDouble(checkpoint[10]), ParseDouble(checkpoint[11])),
+                ParseDouble(checkpoint[1])))
+            .ToArray();
+        EstatePitDefinition? pit = null;
+        var pitRow = database.QueryRows(
+            $"SELECT DefinitionJson FROM EstatePitDefinitions WHERE TrackId={id} LIMIT 1;").SingleOrDefault();
+        if (pitRow?[0] is { Length: > 0 } pitJson)
+            pit = JsonSerializer.Deserialize<EstatePitDefinition>(pitJson);
+        return new EstateTrackDefinition(
+            trackId,
+            row[0] ?? "未命名地产",
+            row[1],
+            row[2],
+            row[3] ?? "1",
+            gate,
+            checkpoints,
+            pit,
+            ParseDouble(row[17]),
+            ParseDouble(row[18]),
+            ParseDouble(row[19]),
+            DateTimeOffset.Parse(row[20]!, CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse(row[21]!, CultureInfo.InvariantCulture));
     }
 
     public int CountLaps(Guid trackId) => int.Parse(database.QueryText($"SELECT COUNT(*) FROM Laps WHERE TrackId={Quote(trackId.ToString())};") ?? "0", CultureInfo.InvariantCulture);
@@ -662,6 +734,36 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
             version = 9;
         }
 
+        if (version < 10)
+        {
+            var hasTimingKind = database.QueryText(
+                "SELECT COUNT(*) FROM pragma_table_info('TrackTemplates') WHERE name='TimingKind';") == "1";
+            database.Execute(
+                "BEGIN IMMEDIATE;\n" +
+                (hasTimingKind
+                    ? string.Empty
+                    : "ALTER TABLE TrackTemplates ADD COLUMN TimingKind TEXT NOT NULL DEFAULT 'GameEvent';\n") +
+                "CREATE TABLE IF NOT EXISTS EstateTrackDefinitions(" +
+                "TrackId TEXT PRIMARY KEY,MapName TEXT NOT NULL,Creator TEXT,ShareCode TEXT,MapRevision TEXT NOT NULL," +
+                "LeftX REAL NOT NULL,LeftY REAL NOT NULL,LeftZ REAL NOT NULL,RightX REAL NOT NULL,RightY REAL NOT NULL,RightZ REAL NOT NULL," +
+                "ForwardX REAL NOT NULL,ForwardZ REAL NOT NULL,FitRms REAL NOT NULL,TraceOffset REAL NOT NULL,TraceAngle REAL NOT NULL," +
+                "HeightTolerance REAL NOT NULL,EndpointMargin REAL NOT NULL,ReferenceLapSeconds REAL NOT NULL,ValidationLapSeconds REAL NOT NULL," +
+                "ValidationProjectionRatio REAL NOT NULL,CreatedAt TEXT NOT NULL,UpdatedAt TEXT NOT NULL," +
+                "FOREIGN KEY(TrackId) REFERENCES TrackTemplates(Id) ON DELETE CASCADE);\n" +
+                "CREATE TABLE IF NOT EXISTS EstateCheckpoints(" +
+                "TrackId TEXT NOT NULL,CheckpointIndex INTEGER NOT NULL,RouteProgressMeters REAL NOT NULL," +
+                "LeftX REAL NOT NULL,LeftY REAL NOT NULL,LeftZ REAL NOT NULL,RightX REAL NOT NULL,RightY REAL NOT NULL,RightZ REAL NOT NULL," +
+                "ForwardX REAL NOT NULL,ForwardZ REAL NOT NULL,HeightTolerance REAL NOT NULL,EndpointMargin REAL NOT NULL," +
+                "PRIMARY KEY(TrackId,CheckpointIndex),FOREIGN KEY(TrackId) REFERENCES TrackTemplates(Id) ON DELETE CASCADE);\n" +
+                "CREATE TABLE IF NOT EXISTS EstatePitDefinitions(" +
+                "TrackId TEXT PRIMARY KEY,DefinitionJson TEXT NOT NULL," +
+                "FOREIGN KEY(TrackId) REFERENCES TrackTemplates(Id) ON DELETE CASCADE);\n" +
+                "CREATE INDEX IF NOT EXISTS IX_TrackTemplates_TimingKind ON TrackTemplates(TimingKind,CatalogKind,Name);\n" +
+                "UPDATE SchemaVersion SET Version=10;\n" +
+                "COMMIT;");
+            version = 10;
+        }
+
         if (SchemaVersion != CurrentSchemaVersion) throw new InvalidOperationException("Database schema version is newer than this LazyForza build.");
     }
 
@@ -788,6 +890,43 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
         Enum.TryParse<TrackLayoutKind>(value, true, out var parsed) ? parsed : TrackLayoutKind.Circuit;
     private static TrackCatalogKind ParseCatalogKind(string? value) =>
         Enum.TryParse<TrackCatalogKind>(value, true, out var parsed) ? parsed : TrackCatalogKind.UserCustom;
+    private static TrackTimingKind ParseTimingKind(string? value) =>
+        Enum.TryParse<TrackTimingKind>(value, true, out var parsed) ? parsed : TrackTimingKind.GameEvent;
+
+    private static void AppendEstateDefinition(StringBuilder sql, EstateTrackDefinition estate)
+    {
+        var trackId = Quote(estate.TrackId.ToString());
+        var gate = estate.StartFinishGate;
+        sql.Append("INSERT INTO EstateTrackDefinitions(TrackId,MapName,Creator,ShareCode,MapRevision,")
+            .Append("LeftX,LeftY,LeftZ,RightX,RightY,RightZ,ForwardX,ForwardZ,FitRms,TraceOffset,TraceAngle,HeightTolerance,EndpointMargin,")
+            .Append("ReferenceLapSeconds,ValidationLapSeconds,ValidationProjectionRatio,CreatedAt,UpdatedAt) VALUES(")
+            .Append(trackId).Append(',').Append(Quote(estate.MapName)).Append(',').Append(Quote(estate.Creator)).Append(',')
+            .Append(Quote(estate.ShareCode)).Append(',').Append(Quote(estate.MapRevision)).Append(',')
+            .Append(N(gate.Left.X)).Append(',').Append(N(gate.Left.Y)).Append(',').Append(N(gate.Left.Z)).Append(',')
+            .Append(N(gate.Right.X)).Append(',').Append(N(gate.Right.Y)).Append(',').Append(N(gate.Right.Z)).Append(',')
+            .Append(N(gate.ForwardX)).Append(',').Append(N(gate.ForwardZ)).Append(',').Append(N(gate.FitRmsMeters)).Append(',')
+            .Append(N(gate.TraceOffsetMeters)).Append(',').Append(N(gate.TraceAngleDifferenceDegrees)).Append(',')
+            .Append(N(gate.HeightToleranceMeters)).Append(',').Append(N(gate.EndpointMarginMeters)).Append(',')
+            .Append(N(estate.ReferenceLapSeconds)).Append(',').Append(N(estate.ValidationLapSeconds)).Append(',')
+            .Append(N(estate.ValidationProjectionRatio)).Append(',').Append(Quote(estate.CreatedAt.ToString("O"))).Append(',')
+            .Append(Quote(estate.UpdatedAt.ToString("O"))).Append(");\n");
+        foreach (var checkpoint in estate.Checkpoints)
+        {
+            var checkpointGate = checkpoint.Gate;
+            sql.Append("INSERT INTO EstateCheckpoints(TrackId,CheckpointIndex,RouteProgressMeters,")
+                .Append("LeftX,LeftY,LeftZ,RightX,RightY,RightZ,ForwardX,ForwardZ,HeightTolerance,EndpointMargin) VALUES(")
+                .Append(trackId).Append(',').Append(checkpoint.Index).Append(',').Append(N(checkpoint.RouteProgressMeters)).Append(',')
+                .Append(N(checkpointGate.Left.X)).Append(',').Append(N(checkpointGate.Left.Y)).Append(',').Append(N(checkpointGate.Left.Z)).Append(',')
+                .Append(N(checkpointGate.Right.X)).Append(',').Append(N(checkpointGate.Right.Y)).Append(',').Append(N(checkpointGate.Right.Z)).Append(',')
+                .Append(N(checkpointGate.ForwardX)).Append(',').Append(N(checkpointGate.ForwardZ)).Append(',')
+                .Append(N(checkpointGate.HeightToleranceMeters)).Append(',').Append(N(checkpointGate.EndpointMarginMeters)).Append(");\n");
+        }
+        if (estate.Pit is not null)
+        {
+            sql.Append("INSERT INTO EstatePitDefinitions(TrackId,DefinitionJson) VALUES(")
+                .Append(trackId).Append(',').Append(Quote(JsonSerializer.Serialize(estate.Pit))).Append(");\n");
+        }
+    }
 
     private void EnsureTrackIsMutable(Guid trackId)
     {

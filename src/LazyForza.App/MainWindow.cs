@@ -136,6 +136,94 @@ internal sealed partial class MainWindow : Window
         }
     }
 
+    internal async Task CaptureEstateQaAsync(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        EnsureEstateQaTrack();
+        WindowState = WindowState.Normal;
+        Width = 1440;
+        Height = 900;
+        navigation.SelectedIndex = 5;
+        UpdateLayout();
+        if (content.Content is ScrollViewer trackPageScroll) trackPageScroll.ScrollToHome();
+        await Task.Delay(250);
+        CaptureVisual(this, Path.Combine(directory, "estate-tracks-1440x900.png"));
+
+        var module = moduleManager.Modules.OfType<EstateCircuitModule>().Single();
+        var enrollment = new EstateCircuitEnrollmentWindow(module) { Owner = this };
+        enrollment.Show();
+        enrollment.UpdateLayout();
+        await Task.Delay(250);
+        CaptureVisual(enrollment, Path.Combine(directory, "estate-enrollment-820x720.png"));
+        if (enrollment.Content is Grid enrollmentRoot)
+        {
+            var scroll = enrollmentRoot.Children.OfType<ScrollViewer>().SingleOrDefault();
+            scroll?.ScrollToEnd();
+            enrollment.UpdateLayout();
+            await Task.Delay(150);
+            CaptureVisual(enrollment, Path.Combine(directory, "estate-enrollment-steps-820x720.png"));
+        }
+        enrollment.Close();
+    }
+
+    private void EnsureEstateQaTrack()
+    {
+        if (store.ListTracks(CurrentTrackSource).Any(track => track.TimingKind == TrackTimingKind.EstateGeometry))
+            return;
+
+        var route = Enumerable.Range(0, 181)
+            .Select(index =>
+            {
+                var angle = index * Math.PI * 2 / 180;
+                return new TrackPoint(100 * Math.Cos(angle), 2, 100 * Math.Sin(angle), 0, 0, 0);
+            })
+            .ToArray();
+        var track = TrackAlgorithms.BuildTemplate("英国塔地产环道", route) with
+        {
+            Source = CurrentTrackSource,
+            TimingKind = TrackTimingKind.EstateGeometry,
+            Category = "地产环道",
+            CaptureLapCount = 2,
+            Confidence = 0.99
+        };
+        var gate = new EstateTimingGate(
+            new EstateGatePoint(88, 2, 0),
+            new EstateGatePoint(112, 2, 0),
+            0,
+            1,
+            0.06,
+            0.04,
+            0.12);
+        var definition = new EstateTrackDefinition(
+            track.Id,
+            "英国塔地产环道",
+            "LazyForza QA",
+            "QA-ESTATE-001",
+            "3",
+            gate,
+            EstateTrackAlgorithms.CreateCheckpoints(track, 8),
+            null,
+            72.314,
+            72.502,
+            0.99,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+        store.SaveTrack(track, TrackAlgorithms.CreateSectors(track, requestedCount: 7), definition);
+    }
+
+    private static void CaptureVisual(FrameworkElement visual, string path)
+    {
+        var dpi = VisualTreeHelper.GetDpi(visual);
+        var width = Math.Max(1, (int)Math.Ceiling(visual.ActualWidth * dpi.DpiScaleX));
+        var height = Math.Max(1, (int)Math.Ceiling(visual.ActualHeight * dpi.DpiScaleY));
+        var bitmap = new RenderTargetBitmap(width, height, dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = File.Create(path);
+        encoder.Save(stream);
+    }
+
     private UIElement BuildShell()
     {
         var root = new Grid { Background = Brush("WindowBrush") };
@@ -441,7 +529,7 @@ internal sealed partial class MainWindow : Window
             selectorText.Children.Add(Label("分析赛道", 16, FontWeights.SemiBold));
             selectorText.Children.Add(Label(module.HasCurrentCompetitionSession
                 ? "比赛中会自动识别赛道；手动切换将结束当前分析。"
-                : "可手动查看；进入比赛后会自动识别并切换赛道。", 11, FontWeights.Normal, "MutedBrush"));
+                : "普通赛事会自动识别；地产环道需要在这里手动选择后查看圈速。", 11, FontWeights.Normal, "MutedBrush"));
             selectorGrid.Children.Add(selectorText);
             var selector = new ComboBox { MinWidth = 320, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center };
             var emptySelection = new ComboBoxItem
@@ -455,7 +543,7 @@ internal sealed partial class MainWindow : Window
             {
                 var item = new ComboBoxItem
                 {
-                    Content = $"{candidate.Summary.Name} · {(candidate.Summary.LayoutKind == TrackLayoutKind.PointToPoint ? "定点" : "环道")} · {candidate.RecordedLaps} 圈",
+                    Content = $"{candidate.Summary.Name} · {TrackAnalysisKind(candidate.Summary)} · {candidate.RecordedLaps} 圈",
                     Tag = candidate.Summary.Id
                 };
                 selector.Items.Add(item);
@@ -856,9 +944,18 @@ internal sealed partial class MainWindow : Window
         RenderComparisonVisuals();
         stack.Children.Add(Card(Label(SectorColorClassifier.DatasetBestExplanation, 12, FontWeights.Normal, "MutedBrush")));
         var initialTrackId = module.CurrentTrack?.Id;
+        var initialTrackTimingKind = module.CurrentTrack?.TimingKind;
         var initialCompletedLaps = hud.CompletedLaps;
         refreshVisiblePage = () =>
         {
+            if (initialTrackId is Guid estateTrackId &&
+                initialTrackTimingKind == TrackTimingKind.EstateGeometry &&
+                store.LoadLapSummaries(estateTrackId, LazyForzaStore.MaxLapsPerTrack).Count != module.VisibleLaps.Count)
+            {
+                module.RefreshSelectedTrackHistory();
+                RenderSelectedPage(true);
+                return;
+            }
             if (module.Snapshot is not LapHudState current ||
                 current.Sectors.Count != sectorRows.Count ||
                 current.CompletedLaps != initialCompletedLaps ||
@@ -884,6 +981,12 @@ internal sealed partial class MainWindow : Window
         };
         refreshVisiblePage();
         return Scroll(stack);
+
+        static string TrackAnalysisKind(TrackSummary summary) => summary.TimingKind == TrackTimingKind.EstateGeometry
+            ? "地产环道"
+            : summary.LayoutKind == TrackLayoutKind.PointToPoint
+                ? "定点"
+                : "环道";
 
         void RenderComparisonVisuals()
         {
@@ -1387,6 +1490,7 @@ internal sealed partial class MainWindow : Window
     {
         var stack = PageStack("赛道", "管理自定义赛道，浏览内置官方赛事。");
         var lapModule = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
+        var estateModule = moduleManager.Modules.OfType<EstateCircuitModule>().Single();
         if (lapModule.IncompatibleTrackName is { } incompatibleTrack)
         {
             stack.Children.Add(Card(Label(
@@ -1397,14 +1501,23 @@ internal sealed partial class MainWindow : Window
         var allTracks = store.ListTracks();
         var customTracks = allTracks
             .Where(track => track.CatalogKind == TrackCatalogKind.UserCustom &&
+                            track.TimingKind == TrackTimingKind.GameEvent &&
+                            string.Equals(track.Source, CurrentTrackSource, StringComparison.Ordinal))
+            .ToArray();
+        var estateTracks = allTracks
+            .Where(track => track.CatalogKind == TrackCatalogKind.UserCustom &&
+                            track.TimingKind == TrackTimingKind.EstateGeometry &&
                             string.Equals(track.Source, CurrentTrackSource, StringComparison.Ordinal))
             .ToArray();
         var officialTracks = allTracks
             .Where(track => track.CatalogKind == TrackCatalogKind.PlaygroundOfficial)
             .ToArray();
 
+        var estateSection = EstateTrackSection(estateTracks, estateModule);
+        stack.Children.Add(estateSection.View);
         stack.Children.Add(CustomTrackSection(customTracks, lapModule));
         stack.Children.Add(OfficialTrackSection(officialTracks, lapModule));
+        refreshVisiblePage = estateSection.Refresh;
         return Scroll(stack);
     }
 

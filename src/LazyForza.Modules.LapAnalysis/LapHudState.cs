@@ -41,3 +41,11 @@ public sealed record LapHudState(
     public bool MatchRejectionEligible { get; init; }
     public bool IsPointToPoint { get; init; }
 }
+
+internal static class LapHudDisplayTiming
+{
+    public static readonly TimeSpan CumulativeHistoricalDeltaDuration = TimeSpan.FromSeconds(2);
+
+    public static TimeSpan CompletedLapHoldDuration(OverlayLayout layout) => TimeSpan.FromSeconds(
+        Math.Clamp(layout.LapCompletedHoldSeconds, 0, 15));
+}

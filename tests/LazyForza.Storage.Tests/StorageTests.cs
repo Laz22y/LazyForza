@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using LazyForza.Analysis;
 using LazyForza.Domain;
 using LazyForza.Storage;
@@ -16,8 +17,8 @@ public sealed class StorageTests
         {
             using var first = new LazyForzaStore(firstPath);
             using var second = new LazyForzaStore(secondPath);
-            Assert.AreEqual(9, first.SchemaVersion);
-            Assert.AreEqual(9, second.SchemaVersion);
+            Assert.AreEqual(10, first.SchemaVersion);
+            Assert.AreEqual(10, second.SchemaVersion);
             await first.SetAsync("dashboard", "enabled", "True", CancellationToken.None);
             Assert.AreEqual("True", await first.GetAsync("dashboard", "enabled", CancellationToken.None));
             Assert.IsNull(await second.GetAsync("dashboard", "enabled", CancellationToken.None));
@@ -177,7 +178,7 @@ public sealed class StorageTests
         try
         {
             using (var initialized = new LazyForzaStore(path))
-                Assert.AreEqual(9, initialized.SchemaVersion);
+                Assert.AreEqual(10, initialized.SchemaVersion);
 
             using (var raw = new WinSqliteDatabase(path))
             {
@@ -196,7 +197,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(9, migrated.SchemaVersion);
+            Assert.AreEqual(10, migrated.SchemaVersion);
             var profile = migrated.ListVehicleProfiles().Single();
             Assert.AreEqual("2014 Alfa Romeo 4C", profile.CustomName);
             Assert.IsFalse(profile.ShiftRecommendationsEnabled);
@@ -286,7 +287,7 @@ public sealed class StorageTests
 
             using (var store = new LazyForzaStore(path))
             {
-                Assert.AreEqual(9, store.SchemaVersion);
+                Assert.AreEqual(10, store.SchemaVersion);
                 var databaseField = typeof(LazyForzaStore).GetField(
                     "database",
                     System.Reflection.BindingFlags.Instance |
@@ -452,7 +453,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(9, migrated.SchemaVersion);
+            Assert.AreEqual(10, migrated.SchemaVersion);
             var migratedField = typeof(LazyForzaStore).GetField(
                 "database",
                 System.Reflection.BindingFlags.Instance |
@@ -643,6 +644,221 @@ public sealed class StorageTests
         {
             DeleteDatabase(path);
         }
+    }
+
+    [TestMethod]
+    public void SavesAndLoadsEstateCircuitDefinitionWithReservedPitGeometry()
+    {
+        var path = TempDatabasePath();
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var raw = Enumerable.Range(0, 121)
+                .Select(index =>
+                {
+                    var angle = index * Math.PI * 2 / 120;
+                    return new TrackPoint(120 * Math.Cos(angle), 3, 120 * Math.Sin(angle), 0, 0, 0);
+                })
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("测试地产环道", raw) with
+            {
+                Source = "live",
+                TimingKind = TrackTimingKind.EstateGeometry,
+                Category = "地产环道",
+                CaptureLapCount = 2
+            };
+            var start = new EstateTimingGate(
+                new EstateGatePoint(-6, 3, 0), new EstateGatePoint(6, 3, 0), 0, 1,
+                0.08, 0.06, 0.2);
+            var checkpoints = EstateTrackAlgorithms.CreateCheckpoints(track, 8);
+            var pit = new EstatePitDefinition(
+                checkpoints[0].Gate,
+                checkpoints[1].Gate,
+                [new EstateGatePoint(2, 3, 4), new EstateGatePoint(8, 3, 12)],
+                new EstateGatePoint(5, 3, 8),
+                4,
+                60,
+                10);
+            var definition = new EstateTrackDefinition(
+                track.Id, "测试地产", "作者", "123 456 789", "2", start, checkpoints, pit,
+                72.3, 71.9, 0.98, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+
+            var sectors = TrackAlgorithms.CreateSectors(track);
+            store.SaveTrack(track, sectors, definition);
+            store.SaveLap(new LapRecord(
+                Guid.NewGuid(), track.Id, track.Direction, TrackAlgorithms.SectorSchemaVersion, Guid.NewGuid(),
+                new VehicleProfileFingerprint(1, 5, 850, 2, 6, 8_000, "g", "c"),
+                DateTimeOffset.UnixEpoch, 72.1, true, null,
+                sectors.Select(sector => new LapSegment(sector.Index, 72.1 / sectors.Count, true)).ToArray(),
+                []));
+
+            var loadedTrack = store.LoadTrack(track.Id);
+            var loadedDefinition = store.LoadEstateTrackDefinition(track.Id);
+            Assert.IsNotNull(loadedTrack);
+            Assert.IsNotNull(loadedDefinition);
+            Assert.AreEqual(TrackTimingKind.EstateGeometry, loadedTrack.Value.Track.TimingKind);
+            Assert.AreEqual(TrackTimingKind.EstateGeometry, store.ListTracks().Single(item => item.Id == track.Id).TimingKind);
+            Assert.AreEqual("123 456 789", loadedDefinition.ShareCode);
+            Assert.HasCount(8, loadedDefinition.Checkpoints);
+            Assert.IsNotNull(loadedDefinition.Pit);
+            Assert.AreEqual(60, loadedDefinition.Pit.SpeedLimitKph, 0.001);
+
+            store.DeleteTrack(track.Id);
+            Assert.IsNull(store.LoadTrack(track.Id));
+            Assert.IsNull(store.LoadEstateTrackDefinition(track.Id));
+            Assert.AreEqual(0, store.CountLaps(track.Id));
+            var databaseField = typeof(LazyForzaStore).GetField(
+                "database",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            var database = (WinSqliteDatabase?)databaseField?.GetValue(store);
+            Assert.IsNotNull(database);
+            Assert.AreEqual(
+                "0",
+                database.QueryText(
+                    "SELECT " +
+                    "(SELECT COUNT(*) FROM EstateTrackDefinitions) + " +
+                    "(SELECT COUNT(*) FROM EstateCheckpoints) + " +
+                    "(SELECT COUNT(*) FROM EstatePitDefinitions);"),
+                "删除地产环道后不能残留终点、检查点或维修区定义。");
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public void EstateTrackPackageRoundTripsGeometryWithoutLapRecords()
+    {
+        var sourcePath = TempDatabasePath();
+        var targetPath = TempDatabasePath();
+        var packagePath = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-{Guid.NewGuid():N}.lfzestate");
+        try
+        {
+            using var source = new LazyForzaStore(sourcePath);
+            var (track, sectors, definition) = EstatePackageFixture("fh6_udp_live");
+            source.SaveTrack(track, sectors, definition);
+            source.SaveLap(new LapRecord(
+                Guid.NewGuid(), track.Id, track.Direction, TrackAlgorithms.SectorSchemaVersion, Guid.NewGuid(),
+                new VehicleProfileFingerprint(1, 5, 850, 2, 6, 8_000, "g", "c"),
+                DateTimeOffset.UnixEpoch, 70, true, null,
+                sectors.Select(sector => new LapSegment(sector.Index, 70d / sectors.Count, true)).ToArray(),
+                []));
+
+            var exporter = new EstateTrackPackageService(source, "test-version");
+            var manifest = exporter.Export(track.Id, packagePath);
+            Assert.AreEqual(EstateTrackPackageService.PackageFormat, manifest.Format);
+            Assert.AreEqual(track.Id, manifest.TrackId);
+
+            using var target = new LazyForzaStore(targetPath);
+            var importer = new EstateTrackPackageService(target, "target-version");
+            var preview = importer.Preview(packagePath);
+            Assert.AreEqual(track.Id, preview.Track.Id);
+            Assert.AreEqual(definition.MapRevision, preview.Definition.MapRevision);
+            Assert.HasCount(sectors.Count, preview.Sectors);
+
+            var result = importer.Import(packagePath, "fh6_udp_replay");
+            Assert.IsTrue(result.Imported);
+            Assert.IsFalse(result.AlreadyExists);
+            var imported = target.LoadTrack(track.Id);
+            Assert.IsNotNull(imported);
+            Assert.AreEqual("fh6_udp_replay", imported.Value.Track.Source);
+            Assert.AreEqual(TrackTimingKind.EstateGeometry, imported.Value.Track.TimingKind);
+            Assert.AreEqual(definition.StartFinishGate, target.LoadEstateTrackDefinition(track.Id)?.StartFinishGate);
+            Assert.AreEqual(0, target.CountLaps(track.Id), "地产环道文件不能夹带圈速记录。");
+
+            var duplicate = importer.Import(packagePath, "fh6_udp_replay");
+            Assert.IsFalse(duplicate.Imported);
+            Assert.IsTrue(duplicate.AlreadyExists);
+            Assert.AreEqual(1, target.CountTracks());
+        }
+        finally
+        {
+            DeleteDatabase(sourcePath);
+            DeleteDatabase(targetPath);
+            try { File.Delete(packagePath); } catch (IOException) { }
+        }
+    }
+
+    [TestMethod]
+    public void EstateTrackPackageRejectsPayloadWhoseDigestChanged()
+    {
+        var databasePath = TempDatabasePath();
+        var packagePath = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-tamper-{Guid.NewGuid():N}.lfzestate");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            var (track, sectors, definition) = EstatePackageFixture("fh6_udp_live");
+            store.SaveTrack(track, sectors, definition);
+            var service = new EstateTrackPackageService(store, "test-version");
+            service.Export(track.Id, packagePath);
+
+            using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Update))
+            {
+                var original = archive.GetEntry("track.json") ?? throw new AssertFailedException("Missing track.json.");
+                byte[] payload;
+                using (var input = original.Open())
+                using (var output = new MemoryStream())
+                {
+                    input.CopyTo(output);
+                    payload = output.ToArray();
+                }
+                original.Delete();
+                var replacement = archive.CreateEntry("track.json");
+                using var stream = replacement.Open();
+                stream.Write(payload);
+                stream.WriteByte((byte)' ');
+            }
+
+            var exception = Assert.ThrowsExactly<InvalidDataException>(() => service.Preview(packagePath));
+            StringAssert.Contains(exception.Message, "摘要不一致");
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+            try { File.Delete(packagePath); } catch (IOException) { }
+        }
+    }
+
+    private static (TrackTemplate Track, IReadOnlyList<SectorDefinition> Sectors, EstateTrackDefinition Definition)
+        EstatePackageFixture(string source)
+    {
+        var raw = Enumerable.Range(0, 181)
+            .Select(index =>
+            {
+                var angle = index * Math.PI * 2 / 180;
+                return new TrackPoint(90 * Math.Cos(angle), 2, 90 * Math.Sin(angle), 0, 0, 0);
+            })
+            .ToArray();
+        var track = TrackAlgorithms.BuildTemplate("可分享地产环道", raw) with
+        {
+            Source = source,
+            TimingKind = TrackTimingKind.EstateGeometry,
+            LayoutKind = TrackLayoutKind.Circuit,
+            Category = "地产环道",
+            CaptureLapCount = 2
+        };
+        var sectors = TrackAlgorithms.CreateSectors(track, requestedCount: 7);
+        var gate = new EstateTimingGate(
+            new EstateGatePoint(78, 2, 0),
+            new EstateGatePoint(102, 2, 0),
+            0, 1, 0.05, 0.04, 0.1);
+        var definition = new EstateTrackDefinition(
+            track.Id,
+            track.Name,
+            "测试作者",
+            "123 456 789",
+            "3",
+            gate,
+            EstateTrackAlgorithms.CreateCheckpoints(track, 6),
+            null,
+            70,
+            69.8,
+            0.99,
+            DateTimeOffset.UnixEpoch,
+            DateTimeOffset.UnixEpoch);
+        return (track, sectors, definition);
     }
 
     private static ShiftLearningSnapshot VehicleSnapshot(
