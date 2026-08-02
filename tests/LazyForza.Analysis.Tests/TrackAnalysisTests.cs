@@ -258,6 +258,12 @@ public sealed class TrackAnalysisTests
         Assert.AreEqual(4, first.Count);
         CollectionAssert.AreEqual(first.ToArray(), second.ToArray());
         Assert.IsTrue(first.All(sector => sector.SectorSchemaVersion == 2 && sector.EndS > sector.StartS));
+        var userDefined = TrackAlgorithms.CreateSectors(track, requestedCount: 7);
+        Assert.HasCount(7, userDefined);
+        Assert.AreEqual(0, userDefined[0].StartS, 0.001);
+        Assert.AreEqual(track.LengthMeters, userDefined[^1].EndS, 0.001);
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            TrackAlgorithms.CreateSectors(track, requestedCount: TrackAlgorithms.MaximumSectorCount + 1));
     }
 
     [TestMethod]

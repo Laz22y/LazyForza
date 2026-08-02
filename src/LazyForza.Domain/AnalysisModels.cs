@@ -112,6 +112,12 @@ public enum TrackCatalogKind
     PlaygroundOfficial
 }
 
+public enum TrackTimingKind
+{
+    GameEvent,
+    EstateGeometry
+}
+
 public sealed record TrackTemplate(
     Guid Id,
     string Name,
@@ -134,6 +140,7 @@ public sealed record TrackTemplate(
 {
     public TrackLayoutKind LayoutKind { get; init; } = TrackLayoutKind.Circuit;
     public TrackCatalogKind CatalogKind { get; init; } = TrackCatalogKind.UserCustom;
+    public TrackTimingKind TimingKind { get; init; } = TrackTimingKind.GameEvent;
     public string? Category { get; init; }
 }
 

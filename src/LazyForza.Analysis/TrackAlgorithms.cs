@@ -4,6 +4,8 @@ namespace LazyForza.Analysis;
 
 public static class TrackAlgorithms
 {
+    public const int MinimumSectorCount = 2;
+    public const int MaximumSectorCount = 16;
     public const string SectorAlgorithmVersion = "sector-v1.1.0-start-line";
     public const int SectorSchemaVersion = 2;
 
@@ -69,9 +71,16 @@ public static class TrackAlgorithms
             : TrackLayoutKind.PointToPoint;
     }
 
-    public static IReadOnlyList<SectorDefinition> CreateSectors(TrackTemplate track, IReadOnlyList<LapSample>? validLap = null)
+    public static IReadOnlyList<SectorDefinition> CreateSectors(
+        TrackTemplate track,
+        IReadOnlyList<LapSample>? validLap = null,
+        int? requestedCount = null)
     {
-        var targetCount = Math.Clamp((int)Math.Round(track.LengthMeters / 350), 4, 16);
+        if (requestedCount is < MinimumSectorCount or > MaximumSectorCount)
+            throw new ArgumentOutOfRangeException(
+                nameof(requestedCount),
+                $"分段数必须在 {MinimumSectorCount} 到 {MaximumSectorCount} 之间。");
+        var targetCount = requestedCount ?? Math.Clamp((int)Math.Round(track.LengthMeters / 350), 4, 16);
         var candidates = new SortedSet<double>();
         if (validLap is not null && validLap.Count > 0)
         {

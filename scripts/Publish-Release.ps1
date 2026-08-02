@@ -233,6 +233,43 @@ function Send-GitCodeAsset {
     }
 }
 
+function Receive-GitCodePublicAsset {
+    param(
+        [Parameter(Mandatory)]
+        [Net.Http.HttpClient]$Client,
+        [Parameter(Mandatory)]
+        [string]$Uri,
+        [Parameter(Mandatory)]
+        [string]$DestinationPath
+    )
+
+    $response = $Client.GetAsync(
+        $Uri,
+        [Net.Http.HttpCompletionOption]::ResponseHeadersRead
+    ).GetAwaiter().GetResult()
+    try {
+        if (-not $response.IsSuccessStatusCode) {
+            throw "GitCode public download failed with HTTP $([int]$response.StatusCode): $Uri"
+        }
+        $input = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        try {
+            $output = [IO.File]::Create($DestinationPath)
+            try {
+                $input.CopyTo($output)
+            }
+            finally {
+                $output.Dispose()
+            }
+        }
+        finally {
+            $input.Dispose()
+        }
+    }
+    finally {
+        $response.Dispose()
+    }
+}
+
 function Get-TestCount {
     param([Parameter(Mandatory)][string]$ResultsPath)
 
@@ -649,16 +686,23 @@ try {
     $downloadedChecksum = "$downloadedPackage.sha256"
     $downloadBase =
         "$gitCodeRepositoryUri/releases/$tag/attach_files"
-    & curl.exe -sS -fL --retry 3 --connect-timeout 30 `
-        -A 'LazyForza-Updater/release-validation' `
-        -o $downloadedPackage `
-        "$downloadBase/$packageName/download"
-    Assert-LastExitCode -Operation 'Download GitCode package'
-    & curl.exe -sS -fL --retry 3 --connect-timeout 30 `
-        -A 'LazyForza-Updater/release-validation' `
-        -o $downloadedChecksum `
-        "$downloadBase/$packageName.sha256/download"
-    Assert-LastExitCode -Operation 'Download GitCode checksum'
+    $downloadClient = New-GitCodeHttpClient
+    try {
+        $downloadClient.Timeout = [TimeSpan]::FromMinutes(10)
+        $downloadClient.DefaultRequestHeaders.UserAgent.ParseAdd(
+            'LazyForza-Updater/release-validation')
+        Receive-GitCodePublicAsset `
+            -Client $downloadClient `
+            -Uri "$downloadBase/$packageName/download" `
+            -DestinationPath $downloadedPackage
+        Receive-GitCodePublicAsset `
+            -Client $downloadClient `
+            -Uri "$downloadBase/$packageName.sha256/download" `
+            -DestinationPath $downloadedChecksum
+    }
+    finally {
+        $downloadClient.Dispose()
+    }
 
     $downloadedHash =
         (Get-FileHash -LiteralPath $downloadedPackage -Algorithm SHA256).Hash

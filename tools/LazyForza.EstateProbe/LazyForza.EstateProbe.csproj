@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Version>0.1.1</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\LazyForza.Domain\LazyForza.Domain.csproj" />
+    <ProjectReference Include="..\..\src\LazyForza.Telemetry\LazyForza.Telemetry.csproj" />
+    <ProjectReference Include="..\..\src\LazyForza.Analysis\LazyForza.Analysis.csproj" />
+  </ItemGroup>
+</Project>
