@@ -193,6 +193,27 @@ internal sealed partial class MainWindow
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(12, 0, 0, 0)
             };
+            var raceInfo = new Button
+            {
+                Content = "赛事信息",
+                MinWidth = 86,
+                Margin = new Thickness(0, 0, 8, 0),
+                IsEnabled = !estateModule.State.IsEnrollmentActive
+            };
+            raceInfo.Click += (_, _) =>
+            {
+                try
+                {
+                    var packageIdentity = packageService.Identify(track.Id);
+                    new EstateTrackIdentityWindow(packageIdentity) { Owner = this }.ShowDialog();
+                }
+                catch (Exception exception)
+                {
+                    MessageBox.Show(this, exception.Message, "无法读取赛事赛道信息", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            };
+            rowActions.Children.Add(raceInfo);
+            exportButtons.Add(raceInfo);
             var export = new Button
             {
                 Content = "导出",
@@ -213,13 +234,14 @@ internal sealed partial class MainWindow
                 if (dialog.ShowDialog(this) != true) return;
                 try
                 {
-                    packageService.Export(track.Id, dialog.FileName);
-                    MessageBox.Show(
-                        this,
-                        "地产环道已导出。文件包含路线、终点门、检查点和维修区定义，不包含圈速记录或个人配置。",
-                        "导出地产环道",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
+                    var manifest = packageService.Export(track.Id, dialog.FileName);
+                    var packageIdentity = new EstateTrackPackageIdentity(
+                        manifest.TrackId,
+                        manifest.TrackName,
+                        manifest.MapRevision,
+                        manifest.PayloadSha256,
+                        sectorCount);
+                    new EstateTrackIdentityWindow(packageIdentity, dialog.FileName) { Owner = this }.ShowDialog();
                 }
                 catch (Exception exception)
                 {
@@ -228,6 +250,28 @@ internal sealed partial class MainWindow
             };
             rowActions.Children.Add(export);
             exportButtons.Add(export);
+
+            var configurePit = new Button
+            {
+                Content = definition.Pit is null ? "配置维修区" : "重录维修区",
+                MinWidth = 96,
+                Margin = new Thickness(0, 0, 8, 0),
+                IsEnabled = !estateModule.State.IsEnrollmentActive && !estateModule.State.IsTimingActive
+            };
+            configurePit.Click += (_, _) =>
+            {
+                var loadedTrack = store.LoadTrack(track.Id);
+                var currentDefinition = store.LoadEstateTrackDefinition(track.Id);
+                if (loadedTrack is null || currentDefinition is null)
+                {
+                    MessageBox.Show(this, "赛道定义已经不存在，请刷新列表。", "无法配置维修区", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                var window = new EstatePitEnrollmentWindow(estateModule, loadedTrack.Value.Track, currentDefinition) { Owner = this };
+                window.ShowDialog();
+                RenderSelectedPage(true);
+            };
+            rowActions.Children.Add(configurePit);
 
             var delete = new Button
             {

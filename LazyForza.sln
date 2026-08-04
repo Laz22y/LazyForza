@@ -34,6 +34,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LazyForza.Performance", "to
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LazyForza.EstateProbe", "tools\LazyForza.EstateProbe\LazyForza.EstateProbe.csproj", "{A1000016-1111-4111-8111-111111111111}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LazyForza.Modules.EstateRace", "src\LazyForza.Modules.EstateRace\LazyForza.Modules.EstateRace.csproj", "{A1000017-1111-4111-8111-111111111111}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -104,6 +106,10 @@ Global
 		{A1000016-1111-4111-8111-111111111111}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A1000016-1111-4111-8111-111111111111}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A1000016-1111-4111-8111-111111111111}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000017-1111-4111-8111-111111111111}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000017-1111-4111-8111-111111111111}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000017-1111-4111-8111-111111111111}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000017-1111-4111-8111-111111111111}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

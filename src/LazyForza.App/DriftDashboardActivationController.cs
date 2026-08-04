@@ -1,6 +1,7 @@
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
 using LazyForza.Modules.DriftDashboard;
+using LazyForza.Modules.EstateRace;
 using LazyForza.Modules.LapAnalysis;
 
 namespace LazyForza.App;
@@ -37,7 +38,9 @@ internal sealed class DriftDashboardActivationController(
             StringComparer.OrdinalIgnoreCase);
         foreach (var module in modules.Modules)
         {
-            desired[module.Descriptor.Id] = captureQa
+            desired[module.Descriptor.Id] = IsAlwaysOnModule(module)
+                ? true
+                : captureQa
                 ? module.Descriptor.DefaultEnabled
                 : await DesiredPreferenceAsync(module, cancellationToken)
                     .ConfigureAwait(false);
@@ -76,6 +79,20 @@ internal sealed class DriftDashboardActivationController(
         bool enabled,
         CancellationToken cancellationToken)
     {
+        var requestedModule = Module(moduleId);
+        if (IsAlwaysOnModule(requestedModule))
+        {
+            if (!enabled)
+                throw new InvalidOperationException(
+                    "地产环道与地产赛事为按需工作的常驻模块，不能停用。");
+            await modules.SetRuntimeEnabledAsync(
+                    moduleId,
+                    true,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
         if (string.Equals(
                 moduleId,
                 LapAnalysisModule.ModuleId,
@@ -246,6 +263,16 @@ internal sealed class DriftDashboardActivationController(
             ? parsed
             : module.Descriptor.DefaultEnabled;
     }
+
+    private static bool IsAlwaysOnModule(ILazyForzaModule module) =>
+        string.Equals(
+            module.Descriptor.Id,
+            EstateCircuitModule.ModuleId,
+            StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(
+            module.Descriptor.Id,
+            EstateRaceModule.ModuleId,
+            StringComparison.OrdinalIgnoreCase);
 
     private async ValueTask<bool> ReadBooleanAsync(
         string moduleId,

@@ -19,6 +19,7 @@ using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
 using LazyForza.Modules.LapAnalysis;
+using LazyForza.Modules.EstateRace;
 using LazyForza.Overlay;
 using LazyForza.Storage;
 using LazyForza.Update;
@@ -27,20 +28,22 @@ namespace LazyForza.App;
 
 internal sealed partial class MainWindow : Window
 {
+    private const string ShowDiagnosticsNavigationSetting = "ui.showDiagnosticsNavigation";
     private static readonly FontFamily UiFont = new("Microsoft YaHei UI");
-    private static readonly (string IconData, string Title)[] Pages =
+    private static readonly (string IconData, string Title)[] PrimaryPages =
     [
         ("M 4 18 A 8 8 0 0 1 20 18 M 7 18 A 5 5 0 0 1 17 18 M 12 18 L 16.5 12.5 M 4 18 L 20 18", "概览"),
         ("M 12 3 L 21 8 L 12 13 L 3 8 Z M 5 12 L 12 16 L 19 12 M 5 16 L 12 20 L 19 16", "模块"),
         ("M 5 21 L 5 4 M 6 5 C 9 3.5 11 6.5 14 5 C 16.5 3.8 18.5 4.5 20 5.5 L 20 13 C 18 12 16.5 11.8 14.5 13 C 11.5 14.5 9 11.5 6 13 Z M 10 4.8 L 10 12.7 M 15 4.8 L 15 12.8 M 6 8.8 C 9 7.3 11.5 10.3 14.5 8.8 C 16.5 7.8 18 8.1 20 9", "当前比赛"),
+        ("M 4 18 L 4 10 L 8 10 L 8 6 L 12 6 L 12 3 M 12 6 L 16 6 L 16 10 L 20 10 L 20 18 M 3 18 L 21 18 M 7 21 L 17 21", "地产赛事"),
         ("M 12 6 A 7 7 0 1 1 12 20 A 7 7 0 1 1 12 6 M 9 3 L 15 3 M 12 3 L 12 6 M 12 10 L 12 13 L 16 15", "圈速分析"),
         ("M 5 5 L 5 19 L 17 12 Z M 19 5 L 19 19", "回放工作台"),
         ("M 11 3 C 16 2 20 5 21 9 C 22 13 20 18 16 20 C 12 22 6 21 4 17 C 2 13 3 8 6 5 C 8 3 9 3 11 3 Z M 11 7 C 8 7 7 9 7 12 C 7 15 9 17 12 17 C 15 17 17 15 17 12 C 17 9 15 7 11 7 Z M 16 16 L 18.5 18 M 17.2 14.8 L 19.7 16.8", "赛道"),
         ("M 4 16 L 5.5 11 L 8 8 L 16 8 L 18.5 11 L 20 16 L 20 19 L 18 19 L 18 17 L 6 17 L 6 19 L 4 19 Z M 6 12 L 18 12 M 8 15 L 8.01 15 M 16 15 L 16.01 15", "车辆与换挡"),
-        ("M 4 7 L 9 7 M 15 7 L 20 7 M 12 4 L 12 10 M 4 17 L 13 17 M 19 17 L 20 17 M 16 14 L 16 20", "设置"),
-        ("M 3 12 L 7 12 L 9 7 L 13 17 L 16 10 L 18 12 L 21 12 M 4 4 L 20 4 L 20 20 L 4 20 Z", "诊断"),
-        ("M 5 5 L 19 5 L 19 19 L 5 19 Z M 8 2 L 16 2 L 16 8 L 8 8 Z M 9 12 L 15 12 M 9 15 L 15 15", "数据")
+        ("M 4 7 L 9 7 M 15 7 L 20 7 M 12 4 L 12 10 M 4 17 L 13 17 M 19 17 L 20 17 M 16 14 L 16 20", "设置")
     ];
+    private static readonly (string IconData, string Title) DiagnosticsPageEntry =
+        ("M 3 12 L 7 12 L 9 7 L 13 17 L 16 10 L 18 12 L 21 12 M 4 4 L 20 4 L 20 20 L 4 20 Z", "诊断");
     private readonly ModuleManager moduleManager;
     private readonly ITelemetryFeed telemetry;
     private readonly OverlayCoordinator overlay;
@@ -63,6 +66,7 @@ internal sealed partial class MainWindow : Window
     private readonly Dictionary<Guid, TrackTemplate> trackPreviewCache = [];
     private Action? refreshVisiblePage;
     private bool changingModule;
+    private bool showDiagnosticsNavigation;
     private string CurrentTrackSource => TelemetryDataPartition.TrackSource(sourceKind);
 
     public MainWindow(
@@ -87,6 +91,9 @@ internal sealed partial class MainWindow : Window
         this.updateManager = updateManager;
         this.diagnosticCapture = diagnosticCapture;
         this.moduleActivation = moduleActivation;
+        showDiagnosticsNavigation = bool.TryParse(
+            store.GetAppSetting(ShowDiagnosticsNavigationSetting),
+            out var showDiagnostics) && showDiagnostics;
         Title = $"LazyForza {ApplicationVersionInfo.Display}";
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForza.png", UriKind.Absolute));
         Width = 1280;
@@ -143,7 +150,7 @@ internal sealed partial class MainWindow : Window
         WindowState = WindowState.Normal;
         Width = 1440;
         Height = 900;
-        navigation.SelectedIndex = 5;
+        navigation.SelectedIndex = 6;
         UpdateLayout();
         if (content.Content is ScrollViewer trackPageScroll) trackPageScroll.ScrollToHome();
         await Task.Delay(250);
@@ -164,6 +171,55 @@ internal sealed partial class MainWindow : Window
             CaptureVisual(enrollment, Path.Combine(directory, "estate-enrollment-steps-820x720.png"));
         }
         enrollment.Close();
+    }
+
+    internal async Task CaptureEstateRacePageQaAsync(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        EnsureEstateQaTrack();
+        WindowState = WindowState.Normal;
+        Width = 1440;
+        Height = 900;
+        navigation.SelectedIndex = 3;
+        UpdateLayout();
+        if (content.Content is ScrollViewer scroll) scroll.ScrollToHome();
+        await Task.Delay(300);
+        CaptureVisual(this, Path.Combine(directory, "estate-race-page-1440x900.png"));
+
+        var summary = store.ListTracks(CurrentTrackSource)
+            .First(track => track.TimingKind == TrackTimingKind.EstateGeometry);
+        var loaded = store.LoadTrack(summary.Id);
+        var definition = store.LoadEstateTrackDefinition(summary.Id);
+        if (loaded is null || definition is null) return;
+        var estate = moduleManager.Modules.OfType<EstateCircuitModule>().Single();
+        var pit = new EstatePitEnrollmentWindow(estate, loaded.Value.Track, definition) { Owner = this };
+        pit.Show();
+        pit.UpdateLayout();
+        await Task.Delay(250);
+        CaptureVisual(pit, Path.Combine(directory, "estate-pit-enrollment-940x780.png"));
+        pit.Close();
+
+        navigation.SelectedIndex = 1;
+        UpdateLayout();
+        await Task.Delay(200);
+        CaptureVisual(this, Path.Combine(directory, "modules-without-estate-1440x900.png"));
+
+        navigation.SelectedIndex = 8;
+        UpdateLayout();
+        if (content.Content is ScrollViewer settingsScroll)
+            settingsScroll.ScrollToVerticalOffset(520);
+        await Task.Delay(250);
+        CaptureVisual(this, Path.Combine(directory, "estate-hud-settings-1440x900.png"));
+
+        if (content.Content is ScrollViewer interfaceScroll)
+            interfaceScroll.ScrollToVerticalOffset(1320);
+        await Task.Delay(200);
+        CaptureVisual(this, Path.Combine(directory, "diagnostics-navigation-setting-1440x900.png"));
+
+        if (content.Content is ScrollViewer dataScroll)
+            dataScroll.ScrollToEnd();
+        await Task.Delay(200);
+        CaptureVisual(this, Path.Combine(directory, "settings-data-1440x900.png"));
     }
 
     private void EnsureEstateQaTrack()
@@ -246,7 +302,7 @@ internal sealed partial class MainWindow : Window
         brand.Children.Add(sourceLabel);
         DockPanel.SetDock(brand, Dock.Top);
         sideStack.Children.Add(brand);
-        foreach (var page in Pages) navigation.Items.Add(NavigationEntry(page.IconData, page.Title));
+        PopulateNavigation();
         sideStack.Children.Add(navigation);
         sidebar.Child = sideStack;
         Grid.SetColumn(sidebar, 0);
@@ -273,6 +329,17 @@ internal sealed partial class MainWindow : Window
         return root;
     }
 
+    private void PopulateNavigation()
+    {
+        navigation.Items.Clear();
+        foreach (var page in PrimaryPages)
+            navigation.Items.Add(NavigationEntry(page.IconData, page.Title));
+        if (showDiagnosticsNavigation)
+            navigation.Items.Add(NavigationEntry(
+                DiagnosticsPageEntry.IconData,
+                DiagnosticsPageEntry.Title));
+    }
+
     private void RenderSelectedPage(bool preserveScroll = false)
     {
         if (changingModule || navigation.SelectedIndex < 0) return;
@@ -283,13 +350,13 @@ internal sealed partial class MainWindow : Window
             0 => OverviewPage(),
             1 => ModulesPage(),
             2 => CurrentCompetitionPage(),
-            3 => LapAnalysisPage(),
-            4 => ReplayWorkbenchPage(),
-            5 => TracksPage(),
-            6 => ShiftPage(),
-            7 => SettingsPage(),
-            8 => DiagnosticsPage(),
-            _ => DataProtectionPage()
+            3 => EstateRacePage(),
+            4 => LapAnalysisPage(),
+            5 => ReplayWorkbenchPage(),
+            6 => TracksPage(),
+            7 => ShiftPage(),
+            8 => SettingsPage(),
+            _ => DiagnosticsPage()
         };
         content.Content = page;
         if (preserveScroll && page is ScrollViewer newScroll)
@@ -1820,8 +1887,8 @@ internal sealed partial class MainWindow : Window
             }
         }
 
-        navigation.SelectedIndex = 3;
-        if (navigation.SelectedIndex == 3 && content.Content is not ScrollViewer)
+        navigation.SelectedIndex = 4;
+        if (navigation.SelectedIndex == 4 && content.Content is not ScrollViewer)
             RenderSelectedPage();
     }
 
@@ -2321,11 +2388,17 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-    private UIElement DataProtectionPage()
+    private StackPanel BuildDataProtectionSettings()
     {
-        var stack = PageStack(
-            "数据备份与迁移",
-            "备份、迁移并恢复 LazyForza 的个人数据。");
+        var stack = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
+        stack.Children.Add(Label("数据备份与迁移", 22, FontWeights.SemiBold));
+        var dataDescription = Label(
+            "备份、迁移并恢复 LazyForza 的个人数据。",
+            12,
+            FontWeights.Normal,
+            "MutedBrush");
+        dataDescription.Margin = new Thickness(0, 3, 0, 14);
+        stack.Children.Add(dataDescription);
         var backupService = new DataBackupService(store, CurrentApplicationVersion());
         var automaticBackups = Directory.Exists(directories.BackupsPath)
             ? Directory.EnumerateFiles(directories.BackupsPath, "auto-*.lfzbackup").Count()
@@ -2640,12 +2713,12 @@ internal sealed partial class MainWindow : Window
         Grid.SetColumn(importCard, 1);
         operations.Children.Add(importCard);
         stack.Children.Add(operations);
-        return Scroll(stack);
+        return stack;
     }
 
     private UIElement SettingsPage()
     {
-        var stack = PageStack("设置", "设置 Live UDP 与 Overlay。监听设置重启后生效。");
+        var stack = PageStack("设置", "管理 Live UDP、HUD、界面、录制、更新与本地数据。监听设置重启后生效。");
         var network = new Grid();
         network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
         network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
@@ -2690,9 +2763,14 @@ internal sealed partial class MainWindow : Window
             OverlayHudKind.Drift);
         var currentDashboardWidgets = DashboardWidgetLayoutSettings.Normalize(
             current.DashboardWidgets);
+        var currentEstateRaceWidgets = EstateRaceHudLayoutSettings.Normalize(
+            current.EstateRaceWidgets);
         var visibleDashboardWidgetCount = Enum
             .GetValues<DashboardWidgetKind>()
             .Count(kind => currentDashboardWidgets.Get(kind).IsVisible);
+        var visibleEstateRaceWidgetCount = Enum
+            .GetValues<EstateRaceHudWidgetKind>()
+            .Count(kind => currentEstateRaceWidgets.Get(kind).IsVisible);
         var controls = new StackPanel();
 
         var overlayHeader = new Grid { Margin = new Thickness(0, 0, 0, 14) };
@@ -2705,6 +2783,7 @@ internal sealed partial class MainWindow : Window
             $"圈速 {currentLapBounds.Width:0} × {currentLapBounds.Height:0} · " +
             $"漂移 {currentDriftBounds.Width:0} × {currentDriftBounds.Height:0} · " +
             $"仪表盘部件 {visibleDashboardWidgetCount}/7 · " +
+            $"赛事部件 {visibleEstateRaceWidgetCount}/4 · " +
             $"{(current.LapHudAttachedToDashboard ? "已吸附" : "独立布局")} · " +
             $"不透明度 {current.Opacity:P0} · {current.MonitorId}",
             11, FontWeights.Normal, "MutedBrush");
@@ -2739,12 +2818,12 @@ internal sealed partial class MainWindow : Window
             Content = "重置 Overlay",
             Margin = new Thickness(12, 0, 0, 0),
             Padding = new Thickness(12, 7, 12, 7),
-            ToolTip = "恢复 Overlay 与仪表盘部件的默认布局；不修改监听 IP 和 UDP 端口"
+            ToolTip = "恢复 Overlay、仪表盘部件与地产赛事部件的默认布局；不修改监听 IP 和 UDP 端口"
         };
         resetDefaults.Click += async (_, _) =>
         {
             if (MessageBox.Show(
-                    "确定重置 Overlay 设置吗？\n\n位置、尺寸、仪表盘部件、透明度、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。",
+                    "确定重置 Overlay 设置吗？\n\n位置、尺寸、仪表盘部件、地产赛事部件、透明度、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。",
                     "重置 Overlay",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
@@ -2805,7 +2884,7 @@ internal sealed partial class MainWindow : Window
         appearance.Children.Add(monitor);
         primarySettings.Children.Add(SettingGroup(
             "外观",
-            "分别调整三个 HUD；缩放时位置会围绕各自中心点补偿。",
+            "分别调整三个主 HUD；地产赛事部件在可视化布局编辑器中独立缩放。",
             appearance));
 
         var interaction = new StackPanel();
@@ -2882,6 +2961,56 @@ internal sealed partial class MainWindow : Window
             "各部件可独立开关；位置请在 Overlay 布局编辑器中拖动，并可一键恢复当前默认布局。",
             componentPanel));
 
+        var estateRaceComponentItems = new[]
+        {
+            (EstateRaceHudWidgetKind.Leaderboard, "比赛排行榜"),
+            (EstateRaceHudWidgetKind.TrackMap, "赛道一览"),
+            (EstateRaceHudWidgetKind.GripStatus, "抓地提示"),
+            (EstateRaceHudWidgetKind.Banner, "赛事横幅")
+        };
+        var estateRaceToggles = new Dictionary<EstateRaceHudWidgetKind, ToggleButton>();
+        var estateRaceComponentPanel = new WrapPanel { Margin = new Thickness(-4, -2, 0, 0) };
+        foreach (var (kind, name) in estateRaceComponentItems)
+        {
+            var toggle = new ToggleButton
+            {
+                IsChecked = currentEstateRaceWidgets.Get(kind).IsVisible,
+                Margin = new Thickness(4, 2, 4, 6),
+                Padding = new Thickness(10, 6, 10, 6),
+                MinWidth = 116
+            };
+            void RefreshEstateRaceToggle() => toggle.Content =
+                $"{name}：{(toggle.IsChecked == true ? "开" : "关")}";
+            toggle.Click += (_, _) => RefreshEstateRaceToggle();
+            RefreshEstateRaceToggle();
+            estateRaceToggles[kind] = toggle;
+            estateRaceComponentPanel.Children.Add(toggle);
+        }
+        controls.Children.Add(SettingGroup(
+            "地产赛事 HUD 部件",
+            "四个部件可独立开关；进入 Overlay 布局编辑器后可直接选择、拖动、缩放或恢复赛事默认布局。",
+            estateRaceComponentPanel));
+        var estateRaceOpacitySliders = new Dictionary<EstateRaceHudWidgetKind, Slider>();
+        var estateRaceOpacityPanel = new UniformGrid { Columns = 2 };
+        foreach (var (kind, name) in estateRaceComponentItems)
+        {
+            var opacityItem = new StackPanel { Margin = new Thickness(6, 3, 14, 4) };
+            estateRaceOpacitySliders[kind] = AddValueSlider(
+                opacityItem,
+                name,
+                "只调整这个部件，不影响其他 HUD。",
+                currentEstateRaceWidgets.Get(kind).Opacity,
+                0.15,
+                1,
+                0.05,
+                value => $"{value:P0}");
+            estateRaceOpacityPanel.Children.Add(opacityItem);
+        }
+        controls.Children.Add(SettingGroup(
+            "地产赛事 HUD 透明度",
+            "排行榜、赛道一览、抓地提示和赛事横幅分别保存透明度。",
+            estateRaceOpacityPanel));
+
         var timingItems = new UniformGrid { Columns = 2 };
         var dashboardIdleWait = AddTimeSlider(timingItems, "仪表盘静止等待", current.DashboardIdleWaitSeconds, 0, 15, 0.5);
         var dashboardFade = AddTimeSlider(timingItems, "仪表盘淡入 / 淡出", current.DashboardVisibilityFadeSeconds, 0.1, 3, 0.1);
@@ -2917,6 +3046,19 @@ internal sealed partial class MainWindow : Window
                     kind,
                     placement with { IsVisible = toggle.IsChecked == true });
             }
+            var estateRaceWidgets = EstateRaceHudLayoutSettings.Normalize(
+                overlay.CurrentLayout.EstateRaceWidgets);
+            foreach (var (kind, toggle) in estateRaceToggles)
+            {
+                var placement = estateRaceWidgets.Get(kind);
+                estateRaceWidgets = estateRaceWidgets.Set(
+                    kind,
+                    placement with
+                    {
+                        IsVisible = toggle.IsChecked == true,
+                        Opacity = estateRaceOpacitySliders[kind].Value
+                    });
+            }
             var next = overlay.CurrentLayout with
             {
                 Opacity = opacity.Value,
@@ -2931,7 +3073,8 @@ internal sealed partial class MainWindow : Window
                 LapNoMatchConfirmationSeconds = noMatchConfirmation.Value,
                 LapNoMatchFadeSeconds = noMatchFade.Value,
                 LiveHudStaleSeconds = liveHudStale.Value,
-                DashboardWidgets = dashboardWidgets
+                DashboardWidgets = dashboardWidgets,
+                EstateRaceWidgets = estateRaceWidgets
             };
             next = OverlayLayoutGeometry.ScaleAroundCenter(
                 next,
@@ -2958,8 +3101,42 @@ internal sealed partial class MainWindow : Window
         controls.Children.Add(footer);
         stack.Children.Add(Card(controls));
 
+        var interfacePanel = new StackPanel();
+        interfacePanel.Children.Add(Label("界面与诊断", 17, FontWeights.SemiBold));
+        var diagnosticsNavigation = new ToggleButton
+        {
+            IsChecked = showDiagnosticsNavigation,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 10, 0, 0),
+            Padding = new Thickness(12, 7, 12, 7),
+            ToolTip = "诊断页用于排查 UDP、赛道识别、模块与本地文件问题；日常使用可以保持隐藏。"
+        };
+        void RefreshDiagnosticsNavigationText() => diagnosticsNavigation.Content =
+            $"在侧边栏显示诊断：{(diagnosticsNavigation.IsChecked == true ? "开" : "关")}";
+        diagnosticsNavigation.Click += (_, _) =>
+        {
+            showDiagnosticsNavigation = diagnosticsNavigation.IsChecked == true;
+            store.SetAppSetting(
+                ShowDiagnosticsNavigationSetting,
+                showDiagnosticsNavigation.ToString());
+            PopulateNavigation();
+            navigation.SelectedIndex = 8;
+            RefreshDiagnosticsNavigationText();
+        };
+        RefreshDiagnosticsNavigationText();
+        interfacePanel.Children.Add(diagnosticsNavigation);
+        var diagnosticsHelp = Label(
+            "默认隐藏诊断入口。开启后，侧边栏会增加“诊断”；关闭不会删除诊断记录或影响一键诊断包。",
+            11,
+            FontWeights.Normal,
+            "MutedBrush");
+        diagnosticsHelp.Margin = new Thickness(0, 8, 0, 0);
+        interfacePanel.Children.Add(diagnosticsHelp);
+        stack.Children.Add(Card(interfacePanel));
+
         stack.Children.Add(BuildRecordingSettingsCard());
         stack.Children.Add(BuildUpdateSettingsCard());
+        stack.Children.Add(BuildDataProtectionSettings());
 
         return Scroll(stack);
 

@@ -10,6 +10,7 @@
     <PackageReference Include="MSTest.TestFramework" />
   </ItemGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\LazyForza.Domain\LazyForza.Domain.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Telemetry\LazyForza.Telemetry.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Analysis\LazyForza.Analysis.csproj" />
@@ -18,6 +19,7 @@
     <ProjectReference Include="..\..\src\LazyForza.Modules.Abstractions\LazyForza.Modules.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Modules.Dashboard\LazyForza.Modules.Dashboard.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Modules.LapAnalysis\LazyForza.Modules.LapAnalysis.csproj" />
+    <ProjectReference Include="..\..\src\LazyForza.Modules.EstateRace\LazyForza.Modules.EstateRace.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Overlay\LazyForza.Overlay.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.App\LazyForza.App.csproj" />
   </ItemGroup>

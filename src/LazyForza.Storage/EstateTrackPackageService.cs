@@ -27,6 +27,13 @@ public sealed record EstateTrackImportResult(
     bool Imported,
     bool AlreadyExists);
 
+public sealed record EstateTrackPackageIdentity(
+    Guid TrackId,
+    string TrackName,
+    string MapRevision,
+    string PayloadSha256,
+    int SectorCount);
+
 /// <summary>
 /// Portable estate-circuit geometry. Lap records and other user data are
 /// deliberately excluded so the package can become the shared track identity
@@ -106,6 +113,26 @@ public sealed class EstateTrackPackageService
         {
             if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
         }
+    }
+
+    public EstateTrackPackageIdentity Identify(
+        Guid trackId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var loaded = store.LoadTrack(trackId) ??
+                     throw new InvalidOperationException("没有找到要识别的地产环道。");
+        var definition = store.LoadEstateTrackDefinition(trackId) ??
+                         throw new InvalidOperationException("所选赛道缺少地产环道定义。");
+        var payload = new EstateTrackPackagePayload(loaded.Track, loaded.Sectors, definition);
+        ValidatePayload(payload);
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
+        return new EstateTrackPackageIdentity(
+            loaded.Track.Id,
+            loaded.Track.Name,
+            definition.MapRevision,
+            Convert.ToHexString(SHA256.HashData(payloadBytes)),
+            loaded.Sectors.Count);
     }
 
     public EstateTrackPackagePreview Preview(

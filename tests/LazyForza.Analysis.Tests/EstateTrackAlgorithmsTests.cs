@@ -144,6 +144,44 @@ public sealed class EstateTrackAlgorithmsTests
         Assert.IsTrue(checkpoints.All(checkpoint => checkpoint.Gate.HasDirection));
     }
 
+    [TestMethod]
+    public void CreatesDedicatedFinishGateWherePitLaneCrossesTimingPlane()
+    {
+        var centerLine = new[]
+        {
+            new EstateGatePoint(12, 0, -8),
+            new EstateGatePoint(12.5, 0, -2),
+            new EstateGatePoint(13, 0, 3),
+            new EstateGatePoint(13.5, 0, 9)
+        };
+
+        var created = EstateTrackAlgorithms.TryCreatePitStartFinishGate(
+            DirectedGate(), centerLine, 3.5, out var pitGate);
+
+        Assert.IsTrue(created);
+        Assert.AreEqual(7, EstateTrackAlgorithms.GateWidth(pitGate), 0.001);
+        Assert.IsTrue(pitGate.ForwardZ > 0.9);
+        var previous = new EstateTimedPosition(12.7, 0, -1, 15, 1_000);
+        var current = new EstateTimedPosition(12.9, 0, 1, 15, 1_100);
+        Assert.IsFalse(EstateTrackAlgorithms.TryDetectForwardCrossing(
+            DirectedGate(), previous, current, out _), "The main finite gate must not cover the separate pit lane.");
+        Assert.IsTrue(EstateTrackAlgorithms.TryDetectForwardCrossing(
+            pitGate, previous, current, out _), "The dedicated pit gate must count the legal pit-lane pass.");
+    }
+
+    [TestMethod]
+    public void RejectsPitLaneThatDoesNotCrossFinishPlaneInRaceDirection()
+    {
+        var reverseLane = new[]
+        {
+            new EstateGatePoint(12, 0, 5),
+            new EstateGatePoint(12, 0, -5)
+        };
+
+        Assert.IsFalse(EstateTrackAlgorithms.TryCreatePitStartFinishGate(
+            DirectedGate(), reverseLane, 3.5, out _));
+    }
+
     private static EstateTimingGate DirectedGate() => new(
         new EstateGatePoint(-5, 0, 0),
         new EstateGatePoint(5, 0, 0),

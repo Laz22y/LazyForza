@@ -6,6 +6,7 @@ using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
 using LazyForza.Modules.DriftDashboard;
+using LazyForza.Modules.EstateRace;
 using LazyForza.Modules.LapAnalysis;
 
 namespace LazyForza.App;
@@ -68,8 +69,11 @@ internal sealed partial class MainWindow
 
     private UIElement ModulesPage()
     {
-        var stack = PageStack("模块", "启用或停用功能。关闭模块会同时停止订阅、后台任务和 HUD。");
-        foreach (var module in moduleManager.Modules)
+        var stack = PageStack(
+            "模块",
+            "管理需要手动开关的功能。地产环道与地产赛事仅在用户主动操作时工作，因此保持常驻且不在这里显示。");
+        foreach (var module in moduleManager.Modules.Where(module =>
+                     module is not EstateCircuitModule and not EstateRaceModule))
         {
             var row = new Grid();
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });

@@ -3,6 +3,7 @@ using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
 using LazyForza.Modules.DriftDashboard;
+using LazyForza.Modules.EstateRace;
 using LazyForza.Modules.LapAnalysis;
 using LazyForza.Overlay;
 using LazyForza.Storage;
@@ -369,6 +370,48 @@ public sealed class DriftDashboardTests
         {
             DeleteDatabaseFiles(databasePath);
         }
+    }
+
+    [TestMethod]
+    public async Task EstateModulesStayRunningEvenWhenAnOldPreferenceDisabledThem()
+    {
+        var settings = new MemorySettings();
+        await settings.SetAsync(
+            EstateCircuitModule.ModuleId,
+            "enabled",
+            bool.FalseString,
+            CancellationToken.None);
+        await settings.SetAsync(
+            EstateRaceModule.ModuleId,
+            "enabled",
+            bool.FalseString,
+            CancellationToken.None);
+        var estateCircuit = new FakeModule(
+            EstateCircuitModule.ModuleId,
+            defaultEnabled: false);
+        var estateRace = new FakeModule(
+            EstateRaceModule.ModuleId,
+            defaultEnabled: false);
+        var manager = new ModuleManager(
+            [estateCircuit, estateRace],
+            new FakeContext(settings));
+        await manager.InitializeAsync(CancellationToken.None);
+        var controller = new DriftDashboardActivationController(manager, settings);
+
+        await controller.InitializeAsync(
+            captureQa: false,
+            captureDriftQa: false,
+            captureDriftOnlyQa: false,
+            CancellationToken.None);
+
+        Assert.AreEqual(ModuleRuntimeState.Running, estateCircuit.Status.State);
+        Assert.AreEqual(ModuleRuntimeState.Running, estateRace.Status.State);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await controller.SetEnabledAsync(
+                EstateRaceModule.ModuleId,
+                false,
+                CancellationToken.None));
+        await manager.DisposeAsync();
     }
 
     private static TelemetryFrame DriftFrame(

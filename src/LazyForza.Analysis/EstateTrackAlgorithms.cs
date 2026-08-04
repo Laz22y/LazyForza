@@ -255,6 +255,62 @@ public static class EstateTrackAlgorithms
         return true;
     }
 
+    public static bool TryCreatePitStartFinishGate(
+        EstateTimingGate referenceGate,
+        IReadOnlyList<EstateGatePoint> pitCenterLine,
+        double laneHalfWidthMeters,
+        out EstateTimingGate pitGate)
+    {
+        pitGate = null!;
+        if (!referenceGate.HasDirection || pitCenterLine.Count < 2) return false;
+
+        var referenceMagnitude = Math.Sqrt(
+            referenceGate.ForwardX * referenceGate.ForwardX +
+            referenceGate.ForwardZ * referenceGate.ForwardZ);
+        var referenceForwardX = referenceGate.ForwardX / referenceMagnitude;
+        var referenceForwardZ = referenceGate.ForwardZ / referenceMagnitude;
+        var halfWidth = Math.Clamp(laneHalfWidthMeters, 1, 20);
+
+        for (var index = 1; index < pitCenterLine.Count; index++)
+        {
+            var previous = pitCenterLine[index - 1];
+            var current = pitCenterLine[index];
+            var previousSide = SignedDistanceToGate(referenceGate, previous);
+            var currentSide = SignedDistanceToGate(referenceGate, current);
+            var sideDelta = currentSide - previousSide;
+            if (sideDelta <= 0.05 || previousSide > 0.25 || currentSide < -0.25) continue;
+
+            var segmentX = current.X - previous.X;
+            var segmentZ = current.Z - previous.Z;
+            var segmentLength = Math.Sqrt(segmentX * segmentX + segmentZ * segmentZ);
+            if (segmentLength < 0.25) continue;
+            var forwardX = segmentX / segmentLength;
+            var forwardZ = segmentZ / segmentLength;
+            if (forwardX * referenceForwardX + forwardZ * referenceForwardZ < 0.2) continue;
+
+            var interpolation = Math.Clamp(-previousSide / sideDelta, 0, 1);
+            var center = new EstateGatePoint(
+                Lerp(previous.X, current.X, interpolation),
+                Lerp(previous.Y, current.Y, interpolation),
+                Lerp(previous.Z, current.Z, interpolation));
+            var perpendicularX = -forwardZ * halfWidth;
+            var perpendicularZ = forwardX * halfWidth;
+            pitGate = new EstateTimingGate(
+                new EstateGatePoint(center.X + perpendicularX, center.Y, center.Z + perpendicularZ),
+                new EstateGatePoint(center.X - perpendicularX, center.Y, center.Z - perpendicularZ),
+                forwardX,
+                forwardZ,
+                0,
+                0,
+                0,
+                referenceGate.HeightToleranceMeters,
+                Math.Max(0.75, referenceGate.EndpointMarginMeters));
+            return true;
+        }
+
+        return false;
+    }
+
     private static double SignedDistanceToGate(EstateTimingGate gate, EstateGatePoint point)
     {
         var magnitude = Math.Sqrt(gate.ForwardX * gate.ForwardX + gate.ForwardZ * gate.ForwardZ);

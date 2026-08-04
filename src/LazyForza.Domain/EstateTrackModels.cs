@@ -37,7 +37,10 @@ public sealed record EstatePitDefinition(
     EstateGatePoint ServiceCenter,
     double ServiceRadiusMeters,
     double SpeedLimitKph,
-    double MinimumServiceSeconds);
+    double MinimumServiceSeconds,
+    double LaneHalfWidthMeters = 3.5,
+    IReadOnlyList<EstateGatePoint>? ServiceZoneBoundary = null,
+    EstateTimingGate? StartFinishGate = null);
 
 public sealed record EstateTrackDefinition(
     Guid TrackId,

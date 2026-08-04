@@ -182,6 +182,14 @@ public sealed class EstateCircuitModuleTests
                     () => module.State.ToString());
                 Assert.AreEqual(2, store.CountLaps(track.Id), "暂停后应能从下一次正向过线重新开始完整计时。");
 
+                module.SetEstateRacePauseCancellation(false);
+                PublishPosition(feed, 0, 100, 2, 0, 0);
+                await Task.Delay(50);
+                Assert.AreEqual(
+                    EstateCircuitPhase.TimingLap,
+                    module.State.Phase,
+                    "正赛暂停帧应保留当前圈，而不是切回等待下一次过线。");
+
                 PublishLap(feed, timestampStart: 500_000, injectSmallReorderAtFinish: true);
                 await WaitUntilAsync(
                     () => module.State.CompletedLaps == 3,
@@ -202,6 +210,98 @@ public sealed class EstateCircuitModuleTests
                     TimeSpan.FromSeconds(2),
                     () => module.State.ToString());
                 Assert.AreEqual(3, store.CountLaps(track.Id), "时间回退或游戏倒带必须取消当前圈，不能保存成绩。");
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task LegalPitLaneFinishCrossingCompletesOneValidLapWithoutMainGateHit()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-pit-lap-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var route = Enumerable.Range(0, 361)
+                .Select(index =>
+                {
+                    var angle = index * Math.PI * 2 / 360;
+                    return new TrackPoint(100 * Math.Cos(angle), 2, 100 * Math.Sin(angle), 0, 0, 0);
+                })
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("维修区冲线测试", route) with
+            {
+                Source = TelemetryDataPartition.TrackSource(TelemetrySourceKind.Live),
+                TimingKind = TrackTimingKind.EstateGeometry,
+                Category = "地产环道",
+                CaptureLapCount = 2
+            };
+            var mainGate = new EstateTimingGate(
+                new EstateGatePoint(88, 2, 0), new EstateGatePoint(112, 2, 0),
+                0, 1, 0, 0, 0);
+            var pitGate = new EstateTimingGate(
+                new EstateGatePoint(114, 2, 0), new EstateGatePoint(122, 2, 0),
+                0, 1, 0, 0, 0);
+            var pit = new EstatePitDefinition(
+                new EstateTimingGate(new EstateGatePoint(114, 2, -20), new EstateGatePoint(122, 2, -20), 0, 1, 0, 0, 0),
+                new EstateTimingGate(new EstateGatePoint(114, 2, 20), new EstateGatePoint(122, 2, 20), 0, 1, 0, 0, 0),
+                [
+                    new EstateGatePoint(118, 2, -22),
+                    new EstateGatePoint(118, 2, -10),
+                    new EstateGatePoint(118, 2, 0),
+                    new EstateGatePoint(118, 2, 10),
+                    new EstateGatePoint(118, 2, 22)
+                ],
+                new EstateGatePoint(118, 2, 8),
+                3,
+                80,
+                3,
+                4,
+                null,
+                pitGate);
+            var definition = new EstateTrackDefinition(
+                track.Id, track.Name, "test", "pit-lap", "1", mainGate,
+                EstateTrackAlgorithms.CreateCheckpoints(track, 6), pit,
+                90, 90, 1, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+            store.SaveTrack(track, TrackAlgorithms.CreateSectors(track), definition);
+
+            var feed = new TestFeed();
+            var module = new EstateCircuitModule(store, TelemetrySourceKind.Live);
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                module.StartTiming(track.Id);
+                PublishPosition(feed, 1_000, 100, 2, -2, 20);
+                PublishPosition(feed, 1_100, 100, 2, 2, 20);
+                for (var index = 2; index <= 350; index += 2)
+                {
+                    var angle = index * Math.PI * 2 / 360;
+                    PublishPosition(feed, (uint)(1_100 + index * 250),
+                        100 * Math.Cos(angle), 2, 100 * Math.Sin(angle), 20);
+                }
+                PublishPosition(feed, 89_000, 118, 2, -22, 15);
+                PublishPosition(feed, 89_250, 118, 2, -18, 15);
+                PublishPosition(feed, 90_000, 118, 2, -1, 15);
+                PublishPosition(feed, 90_100, 118, 2, 1, 15);
+
+                await WaitUntilAsync(
+                    () => module.State.CompletedLaps == 1,
+                    TimeSpan.FromSeconds(5),
+                    () => module.State.ToString());
+
+                Assert.AreEqual(1, store.CountLaps(track.Id));
+                var lap = store.LoadLapSummaries(track.Id, 2).Single();
+                Assert.IsTrue(lap.IsValid, lap.InvalidReason);
+                Assert.AreEqual(1, module.LastCompletedLap?.LapNumber);
             }
             finally
             {
@@ -330,6 +430,139 @@ public sealed class EstateCircuitModuleTests
                         { CurrentSector: >= 2, CumulativeHistoricalDeltaSeconds: not null },
                     TimeSpan.FromSeconds(3),
                     () => module.State.ToString());
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task PitEnrollmentBuildsDirectedEntryLaneServicePolygonAndExit()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-pit-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var route = Enumerable.Range(0, 121)
+                .Select(index =>
+                {
+                    var angle = index * Math.PI * 2 / 120;
+                    return new TrackPoint(80 * Math.Cos(angle), 2, 80 * Math.Sin(angle), 0, 0, 0);
+                })
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("维修区录入测试", route) with
+            {
+                Source = TelemetryDataPartition.TrackSource(TelemetrySourceKind.Live),
+                TimingKind = TrackTimingKind.EstateGeometry,
+                Category = "地产环道",
+                CaptureLapCount = 2
+            };
+            var definition = new EstateTrackDefinition(
+                track.Id,
+                track.Name,
+                "test",
+                "pit-test",
+                "1",
+                new EstateTimingGate(
+                    new EstateGatePoint(-8, 2, 0),
+                    new EstateGatePoint(8, 2, 0),
+                    0,
+                    1,
+                    0,
+                    0,
+                    0),
+                EstateTrackAlgorithms.CreateCheckpoints(track, 4),
+                null,
+                60,
+                60,
+                1,
+                DateTimeOffset.UnixEpoch,
+                DateTimeOffset.UnixEpoch);
+            store.SaveTrack(track, TrackAlgorithms.CreateSectors(track), definition);
+
+            var feed = new TestFeed();
+            var module = new EstateCircuitModule(store, TelemetrySourceKind.Live);
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                module.BeginPitEnrollment(new EstatePitEnrollmentRequest(track.Id, 4, 80, 3));
+                module.StartPitLaneCapture();
+                static double PitLaneX(double z) => z < -10 ? 14 + 6 * ((z + 20) / 10) : 20;
+                for (var index = 0; index <= 80; index++)
+                {
+                    var z = -20 + index * 0.5;
+                    PublishPosition(feed, (uint)(10_000 + index * 100), PitLaneX(z), 2, z, 5);
+                }
+                await WaitUntilAsync(
+                    () => module.PitState.LaneSamples >= 40,
+                    TimeSpan.FromSeconds(2),
+                    () => module.PitState.ToString());
+                module.StopPitLaneCapture();
+
+                var gateTimestamp = 25_000u;
+                var gateArrival = DateTimeOffset.UtcNow;
+                for (var sample = 0; sample < 8; sample++)
+                    PublishPosition(feed, gateTimestamp++, PitLaneX(-18), 2, -18, 0, gateArrival.AddMilliseconds(sample * 15));
+                await Task.Delay(40);
+                _ = module.CapturePitEntryGate();
+                gateArrival = DateTimeOffset.UtcNow;
+                for (var sample = 0; sample < 8; sample++)
+                    PublishPosition(feed, gateTimestamp++, 20, 2, 18, 0, gateArrival.AddMilliseconds(sample * 15));
+                await Task.Delay(40);
+                _ = module.CapturePitExitGate();
+
+                var corners = new[]
+                {
+                    (X: 15d, Z: -2d),
+                    (X: 21d, Z: -2d),
+                    (X: 21d, Z: 2d),
+                    (X: 15d, Z: 2d)
+                };
+                var timestamp = 30_000u;
+                foreach (var cornerPoint in corners)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    for (var sample = 0; sample < 8; sample++)
+                    {
+                        PublishPosition(
+                            feed,
+                            timestamp++,
+                            cornerPoint.X,
+                            2,
+                            cornerPoint.Z,
+                            0,
+                            now.AddMilliseconds(sample * 15));
+                    }
+                    await Task.Delay(40);
+                    _ = module.CaptureServiceZoneCorner();
+                }
+
+                var pit = module.SavePitEnrollment();
+                Assert.IsTrue(pit.EntryGate.HasDirection);
+                Assert.IsTrue(pit.ExitGate.HasDirection);
+                Assert.IsTrue(pit.EntryGate.ForwardX > 0.1, "弯道入口门应使用入口附近的局部通道方向。");
+                Assert.IsTrue(pit.EntryGate.ForwardZ > 0.7);
+                Assert.IsTrue(module.PitState.EntryLineCaptured);
+                Assert.IsTrue(module.PitState.ExitLineCaptured);
+                Assert.IsNotNull(pit.StartFinishGate);
+                Assert.IsTrue(pit.StartFinishGate.HasDirection);
+                Assert.AreEqual(4, pit.LaneHalfWidthMeters, 0.001);
+                Assert.IsTrue(pit.CenterLine.Count >= 20);
+                Assert.HasCount(4, pit.ServiceZoneBoundary!);
+                Assert.AreEqual(EstatePitCapturePhase.Saved, module.PitState.Phase);
+                var stored = store.LoadEstateTrackDefinition(track.Id)?.Pit;
+                Assert.IsNotNull(stored);
+                Assert.HasCount(4, stored.ServiceZoneBoundary!);
+                Assert.AreEqual(80, stored.SpeedLimitKph, 0.001);
+                Assert.AreEqual(3, stored.MinimumServiceSeconds, 0.001);
             }
             finally
             {
