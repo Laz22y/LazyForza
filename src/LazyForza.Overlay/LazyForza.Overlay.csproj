@@ -8,6 +8,6 @@
     <ProjectReference Include="..\LazyForza.Modules.Abstractions\LazyForza.Modules.Abstractions.csproj" />
     <ProjectReference Include="..\LazyForza.Modules.Dashboard\LazyForza.Modules.Dashboard.csproj" />
     <ProjectReference Include="..\LazyForza.Modules.LapAnalysis\LazyForza.Modules.LapAnalysis.csproj" />
+    <ProjectReference Include="..\LazyForza.Modules.EstateRace\LazyForza.Modules.EstateRace.csproj" />
   </ItemGroup>
 </Project>
-

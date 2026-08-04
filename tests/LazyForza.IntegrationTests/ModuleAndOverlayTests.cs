@@ -66,7 +66,7 @@ public sealed class ModuleAndOverlayTests
             Assert.AreEqual(0, placement.OffsetX, 1e-9);
             Assert.AreEqual(0, placement.OffsetY, 1e-9);
         }
-        Assert.AreEqual("1.4.1", LazyForza.App.ApplicationVersionInfo.Display);
+        Assert.AreEqual("1.4.2", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]
@@ -398,6 +398,97 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(260, drift.Top, 1e-9);
         Assert.AreEqual(drift.Right, union.Right, 1e-9);
         Assert.IsTrue(union.Left <= dashboardBefore.Left);
+    }
+
+    [TestMethod]
+    public void EstateRaceViewportRemainsIndependentFromDashboardChanges()
+    {
+        var original = OverlayLayoutGeometry.Normalize(new OverlayLayout(
+            Left: 100,
+            Top: 150,
+            Width: 1_000,
+            Height: 500,
+            Scale: 0.5,
+            EstateRaceHudLeft: 20,
+            EstateRaceHudTop: 30,
+            EstateRaceHudWidth: 1_920,
+            EstateRaceHudHeight: 1_080));
+        var estateBefore = OverlayLayoutGeometry.Bounds(
+            original,
+            OverlayHudKind.EstateRace);
+
+        var moved = OverlayLayoutGeometry.Move(
+            original,
+            OverlayHudKind.Dashboard,
+            740,
+            480);
+        var scaled = OverlayLayoutGeometry.ScaleAroundCenter(
+            moved,
+            OverlayHudKind.Dashboard,
+            0.8);
+
+        Assert.AreEqual(
+            estateBefore,
+            OverlayLayoutGeometry.Bounds(scaled, OverlayHudKind.EstateRace));
+        Assert.AreEqual(20, estateBefore.Left, 1e-9);
+        Assert.AreEqual(30, estateBefore.Top, 1e-9);
+        Assert.AreEqual(1_920, estateBefore.Width, 1e-9);
+        Assert.AreEqual(1_080, estateBefore.Height, 1e-9);
+    }
+
+    [TestMethod]
+    public void EstateRaceStartLightsAreAnIndependentConfigurableWidget()
+    {
+        var defaults = EstateRaceHudLayoutSettings.Normalize(null);
+        foreach (var kind in Enum.GetValues<EstateRaceHudWidgetKind>())
+            Assert.IsTrue(defaults.Get(kind).IsVisible, $"{kind} should be visible by default.");
+
+        var customized = EstateRaceHudLayoutSettings.Normalize(defaults.Set(
+            EstateRaceHudWidgetKind.StartLights,
+            defaults.Get(EstateRaceHudWidgetKind.StartLights) with
+            {
+                Left = .41,
+                Top = .08,
+                Scale = 1.25,
+                Opacity = .55
+            }));
+        var startLights = customized.Get(EstateRaceHudWidgetKind.StartLights);
+        Assert.AreEqual(.41, startLights.Left, 1e-9);
+        Assert.AreEqual(.08, startLights.Top, 1e-9);
+        Assert.AreEqual(1.25, startLights.Scale, 1e-9);
+        Assert.AreEqual(.55, startLights.Opacity, 1e-9);
+        Assert.AreEqual(defaults.Get(EstateRaceHudWidgetKind.Leaderboard),
+            customized.Get(EstateRaceHudWidgetKind.Leaderboard));
+    }
+
+    [TestMethod]
+    public void LegacyEstateRaceViewportMigratesOnceAndJoinsUnionBounds()
+    {
+        var migrated = OverlayLayoutGeometry.Normalize(new OverlayLayout(
+            Left: 320,
+            Top: 240,
+            Width: 1_000,
+            Height: 500,
+            Scale: 0.6));
+        var migratedEstate = OverlayLayoutGeometry.Bounds(
+            migrated,
+            OverlayHudKind.EstateRace);
+        Assert.AreEqual(
+            OverlayLayoutGeometry.Bounds(migrated, OverlayHudKind.Dashboard),
+            migratedEstate);
+
+        var independent = migrated with
+        {
+            EstateRaceHudLeft = 0,
+            EstateRaceHudTop = 0,
+            EstateRaceHudWidth = 1_920,
+            EstateRaceHudHeight = 1_080
+        };
+        var union = OverlayLayoutGeometry.UnionBounds(independent);
+        Assert.AreEqual(0, union.Left, 1e-9);
+        Assert.AreEqual(0, union.Top, 1e-9);
+        Assert.AreEqual(1_920, union.Width, 1e-9);
+        Assert.AreEqual(1_080, union.Height, 1e-9);
     }
 
     [TestMethod]

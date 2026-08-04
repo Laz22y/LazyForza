@@ -26,13 +26,19 @@ public sealed record OverlayLayout(
     double? DriftHudLeft = null,
     double? DriftHudTop = null,
     double? DriftHudScale = null,
-    DashboardWidgetLayout? DashboardWidgets = null);
+    DashboardWidgetLayout? DashboardWidgets = null,
+    EstateRaceHudLayout? EstateRaceWidgets = null,
+    double? EstateRaceHudLeft = null,
+    double? EstateRaceHudTop = null,
+    double? EstateRaceHudWidth = null,
+    double? EstateRaceHudHeight = null);
 
 public enum OverlayHudKind
 {
     Dashboard,
     Lap,
-    Drift
+    Drift,
+    EstateRace
 }
 
 public enum DashboardWidgetKind
@@ -44,6 +50,83 @@ public enum DashboardWidgetKind
     Pedals,
     Steering,
     ClassBadge
+}
+
+public enum EstateRaceHudWidgetKind
+{
+    Leaderboard,
+    TrackMap,
+    GripStatus,
+    Banner,
+    StartLights
+}
+
+public sealed record EstateRaceHudWidgetPlacement(
+    bool IsVisible,
+    double Left,
+    double Top,
+    double Scale = 1,
+    double Opacity = 1);
+
+public sealed record EstateRaceHudLayout(
+    EstateRaceHudWidgetPlacement? Leaderboard = null,
+    EstateRaceHudWidgetPlacement? TrackMap = null,
+    EstateRaceHudWidgetPlacement? GripStatus = null,
+    EstateRaceHudWidgetPlacement? Banner = null,
+    EstateRaceHudWidgetPlacement? StartLights = null)
+{
+    public EstateRaceHudWidgetPlacement Get(EstateRaceHudWidgetKind kind) => kind switch
+    {
+        EstateRaceHudWidgetKind.Leaderboard => Leaderboard ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        EstateRaceHudWidgetKind.TrackMap => TrackMap ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        EstateRaceHudWidgetKind.GripStatus => GripStatus ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        EstateRaceHudWidgetKind.Banner => Banner ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        _ => StartLights ?? EstateRaceHudLayoutSettings.Default.Get(kind)
+    };
+
+    public EstateRaceHudLayout Set(
+        EstateRaceHudWidgetKind kind,
+        EstateRaceHudWidgetPlacement placement) => kind switch
+        {
+            EstateRaceHudWidgetKind.Leaderboard => this with { Leaderboard = placement },
+            EstateRaceHudWidgetKind.TrackMap => this with { TrackMap = placement },
+            EstateRaceHudWidgetKind.GripStatus => this with { GripStatus = placement },
+            EstateRaceHudWidgetKind.Banner => this with { Banner = placement },
+            _ => this with { StartLights = placement }
+        };
+}
+
+public static class EstateRaceHudLayoutSettings
+{
+    private static readonly EstateRaceHudLayout DefaultValue = new(
+        new(true, 0.025, 0.14, 1),
+        new(true, 0.80, 0.17, 0.88),
+        new(true, 0.80, 0.47, 0.92),
+        new(true, 0.25, 0.025, 1),
+        new(true, 0.35, 0.12, 1));
+
+    public static EstateRaceHudLayout Default => DefaultValue;
+
+    public static EstateRaceHudLayout Normalize(EstateRaceHudLayout? value)
+    {
+        var source = value ?? DefaultValue;
+        var normalized = new EstateRaceHudLayout();
+        foreach (var kind in Enum.GetValues<EstateRaceHudWidgetKind>())
+            normalized = normalized.Set(kind, Normalize(source.Get(kind)));
+        return normalized;
+    }
+
+    private static EstateRaceHudWidgetPlacement Normalize(
+        EstateRaceHudWidgetPlacement value) => value with
+        {
+            Left = Finite(value.Left, 0),
+            Top = Finite(value.Top, 0),
+            Scale = double.IsFinite(value.Scale) ? Math.Clamp(value.Scale, 0.5, 1.75) : 1,
+            Opacity = double.IsFinite(value.Opacity) ? Math.Clamp(value.Opacity, 0.15, 1) : 1
+        };
+
+    private static double Finite(double value, double fallback) =>
+        double.IsFinite(value) ? Math.Clamp(value, 0, 1) : fallback;
 }
 
 public sealed record DashboardWidgetPlacement(
@@ -194,7 +277,17 @@ public static class OverlayLayoutGeometry
             Height = height,
             Scale = scale,
             DashboardWidgets = DashboardWidgetLayoutSettings.Normalize(
-                value.DashboardWidgets)
+                value.DashboardWidgets),
+            EstateRaceWidgets = EstateRaceHudLayoutSettings.Normalize(
+                value.EstateRaceWidgets),
+            EstateRaceHudLeft = Finite(value.EstateRaceHudLeft, left),
+            EstateRaceHudTop = Finite(value.EstateRaceHudTop, top),
+            EstateRaceHudWidth = FinitePositive(
+                value.EstateRaceHudWidth ?? OverlayScaleSettings.ScaledDimension(width, scale),
+                OverlayScaleSettings.ScaledDimension(width, scale)),
+            EstateRaceHudHeight = FinitePositive(
+                value.EstateRaceHudHeight ?? OverlayScaleSettings.ScaledDimension(height, scale),
+                OverlayScaleSettings.ScaledDimension(height, scale))
         };
         var withLap = value.LapHudAttachedToDashboard
             ? AttachLapToDashboard(normalized)
@@ -231,23 +324,30 @@ public static class OverlayLayoutGeometry
         {
             OverlayHudKind.Dashboard => layout.Scale,
             OverlayHudKind.Lap => layout.LapHudScale ?? layout.Scale,
-            _ => layout.DriftHudScale ?? layout.Scale
+            OverlayHudKind.Drift => layout.DriftHudScale ?? layout.Scale,
+            _ => 1
         };
         return new OverlayHudBounds(
             kind switch
             {
                 OverlayHudKind.Dashboard => layout.Left,
                 OverlayHudKind.Lap => layout.LapHudLeft ?? layout.Left,
-                _ => layout.DriftHudLeft ?? layout.Left
+                OverlayHudKind.Drift => layout.DriftHudLeft ?? layout.Left,
+                _ => layout.EstateRaceHudLeft ?? layout.Left
             },
             kind switch
             {
                 OverlayHudKind.Dashboard => layout.Top,
                 OverlayHudKind.Lap => layout.LapHudTop ?? layout.Top,
-                _ => layout.DriftHudTop ?? layout.Top
+                OverlayHudKind.Drift => layout.DriftHudTop ?? layout.Top,
+                _ => layout.EstateRaceHudTop ?? layout.Top
             },
-            OverlayScaleSettings.ScaledDimension(layout.Width, scale),
-            OverlayScaleSettings.ScaledDimension(layout.Height, scale));
+            kind == OverlayHudKind.EstateRace
+                ? layout.EstateRaceHudWidth ?? OverlayScaleSettings.ScaledDimension(layout.Width, layout.Scale)
+                : OverlayScaleSettings.ScaledDimension(layout.Width, scale),
+            kind == OverlayHudKind.EstateRace
+                ? layout.EstateRaceHudHeight ?? OverlayScaleSettings.ScaledDimension(layout.Height, layout.Scale)
+                : OverlayScaleSettings.ScaledDimension(layout.Height, scale));
     }
 
     public static OverlayHudBounds UnionBounds(OverlayLayout value)
@@ -255,12 +355,13 @@ public static class OverlayLayoutGeometry
         var dashboard = Bounds(value, OverlayHudKind.Dashboard);
         var lap = Bounds(value, OverlayHudKind.Lap);
         var drift = Bounds(value, OverlayHudKind.Drift);
-        var left = Math.Min(dashboard.Left, Math.Min(lap.Left, drift.Left));
-        var top = Math.Min(dashboard.Top, Math.Min(lap.Top, drift.Top));
-        var right = Math.Max(dashboard.Right, Math.Max(lap.Right, drift.Right));
+        var estateRace = Bounds(value, OverlayHudKind.EstateRace);
+        var left = Math.Min(estateRace.Left, Math.Min(dashboard.Left, Math.Min(lap.Left, drift.Left)));
+        var top = Math.Min(estateRace.Top, Math.Min(dashboard.Top, Math.Min(lap.Top, drift.Top)));
+        var right = Math.Max(estateRace.Right, Math.Max(dashboard.Right, Math.Max(lap.Right, drift.Right)));
         var bottom = Math.Max(
-            dashboard.Bottom,
-            Math.Max(lap.Bottom, drift.Bottom));
+            estateRace.Bottom,
+            Math.Max(dashboard.Bottom, Math.Max(lap.Bottom, drift.Bottom)));
         return new OverlayHudBounds(left, top, right - left, bottom - top);
     }
 
@@ -316,6 +417,15 @@ public static class OverlayLayoutGeometry
             };
         }
 
+        if (kind == OverlayHudKind.EstateRace)
+        {
+            return normalized with
+            {
+                EstateRaceHudLeft = left,
+                EstateRaceHudTop = top
+            };
+        }
+
         return normalized with
         {
             DriftHudLeft = left,
@@ -329,6 +439,8 @@ public static class OverlayLayoutGeometry
         double nextScale)
     {
         var normalized = Normalize(value);
+        if (kind == OverlayHudKind.EstateRace)
+            return normalized;
         var current = Bounds(normalized, kind);
         nextScale = OverlayScaleSettings.Normalize(nextScale);
         var width = OverlayScaleSettings.ScaledDimension(normalized.Width, nextScale);
@@ -358,7 +470,6 @@ public static class OverlayLayoutGeometry
                 LapHudScale = nextScale
             };
         }
-
         return normalized with
         {
             DriftHudLeft = left,

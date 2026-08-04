@@ -7,6 +7,7 @@ using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.Dashboard;
 using LazyForza.Modules.DriftDashboard;
 using LazyForza.Modules.LapAnalysis;
+using LazyForza.Modules.EstateRace;
 using LazyForza.Overlay;
 using LazyForza.Storage;
 using LazyForza.Telemetry;
@@ -52,6 +53,9 @@ public partial class App : Application
                 StringComparer.OrdinalIgnoreCase);
             var captureEstateQa = e.Args.Contains(
                 "--capture-estate-qa",
+                StringComparer.OrdinalIgnoreCase);
+            var captureEstateRaceQa = e.Args.Contains(
+                "--capture-estate-race-qa",
                 StringComparer.OrdinalIgnoreCase);
             var recordSeconds = AutoRecordSeconds(e.Args);
             var simulatorRequested = e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase) || captureDirectory is not null || recordSeconds is not null;
@@ -156,7 +160,8 @@ public partial class App : Application
                     captureDirectory,
                     captureDriftQa,
                     captureDriftOnlyQa,
-                    captureEstateQa);
+                    captureEstateQa,
+                    captureEstateRaceQa);
             }
             else if (recordSeconds is not null) _ = AutoRecordAndExitAsync(recordSeconds.Value);
         }
@@ -303,7 +308,8 @@ public partial class App : Application
         string directory,
         bool captureDriftQa,
         bool captureDriftOnlyQa,
-        bool captureEstateQa)
+        bool captureEstateQa,
+        bool captureEstateRaceQa)
     {
         try
         {
@@ -313,6 +319,8 @@ public partial class App : Application
                 await ((MainWindow)MainWindow).CaptureEstateQaAsync(directory);
                 return;
             }
+            if (captureEstateRaceQa)
+                await ((MainWindow)MainWindow).CaptureEstateRacePageQaAsync(directory);
             var original = overlay!.CurrentLayout;
             foreach (var size in new[] { (Width: 1280d, Height: 720d), (Width: 1920d, Height: 1080d), (Width: 2560d, Height: 1440d) })
             {
@@ -337,7 +345,14 @@ public partial class App : Application
                         ? 0.50
                         : captureDriftOnlyQa
                             ? 1
-                            : original.DriftHudScale
+                            : original.DriftHudScale,
+                    EstateRaceWidgets = captureEstateRaceQa
+                        ? EstateRaceHudLayoutSettings.Default
+                        : original.EstateRaceWidgets,
+                    EstateRaceHudLeft = captureEstateRaceQa ? 0 : original.EstateRaceHudLeft,
+                    EstateRaceHudTop = captureEstateRaceQa ? 0 : original.EstateRaceHudTop,
+                    EstateRaceHudWidth = captureEstateRaceQa ? size.Width : original.EstateRaceHudWidth,
+                    EstateRaceHudHeight = captureEstateRaceQa ? size.Height : original.EstateRaceHudHeight
                 };
                 await overlay.SetLayoutAsync(
                     captureLayout,
@@ -348,7 +363,8 @@ public partial class App : Application
                         directory,
                         $"hud-{size.Width:0}x{size.Height:0}-demo.png"),
                     CancellationToken.None,
-                    previewDrift: captureDriftQa || captureDriftOnlyQa);
+                    previewDrift: captureDriftQa || captureDriftOnlyQa,
+                    previewEstateRace: captureEstateRaceQa);
             }
             await overlay.SetLayoutAsync(original, CancellationToken.None);
         }
@@ -446,11 +462,63 @@ internal static class BuiltInModuleCatalog
         LazyForzaStore store,
         TelemetrySourceKind sourceKind,
         Func<OverlayLayout>? getOverlayLayout = null,
-        Action<DiagnosticSignal>? diagnosticSink = null) =>
-    [
-        new DashboardModule(),
-        new LapAnalysisModule(store, sourceKind, getOverlayLayout, diagnosticSink),
-        new EstateCircuitModule(store, sourceKind, getOverlayLayout),
-        new DriftDashboardModule()
-    ];
+        Action<DiagnosticSignal>? diagnosticSink = null)
+    {
+        var estate = new EstateCircuitModule(store, sourceKind, getOverlayLayout);
+        var estatePackages = new EstateTrackPackageService(
+            store,
+            typeof(BuiltInModuleCatalog).Assembly.GetName().Version?.ToString(3) ?? "development");
+        Guid? identityTrackId = null;
+        EstateTrackPackageIdentity? identity = null;
+        var estateRace = new EstateRaceModule(() =>
+        {
+            var track = estate.ActiveTrack;
+            var definition = estate.ActiveDefinition;
+            if (track is null || definition is null) return null;
+            var state = estate.State;
+            var completed = estate.LastCompletedLap;
+            if (identityTrackId != track.Id)
+            {
+                identity = estatePackages.Identify(track.Id);
+                identityTrackId = track.Id;
+            }
+            return new EstateRaceTrackContext(
+                track,
+                definition,
+                state.CurrentLapSeconds,
+                state.CompletedLaps,
+                estate.ActiveCurrentSector,
+                state.IsTimingActive,
+                completed is null
+                    ? null
+                    : new EstateCompletedLapEvent(
+                        completed.EventId,
+                        completed.LapNumber,
+                        completed.LapSeconds,
+                        completed.SectorSeconds,
+                        completed.IsValid,
+                        completed.InvalidReason),
+                estate.ActiveSectorCount,
+                identity?.PayloadSha256);
+        }, (trackId, enabled, cancelLapOnPause) =>
+        {
+            if (enabled)
+            {
+                if (!estate.State.IsTimingActive)
+                    estate.StartTiming(trackId, cancelLapOnPause);
+                else
+                    estate.SetEstateRacePauseCancellation(cancelLapOnPause);
+            }
+            else
+                estate.PauseTimingForEstateRace();
+        });
+        return
+        [
+            new DashboardModule(),
+            new LapAnalysisModule(store, sourceKind, getOverlayLayout, diagnosticSink),
+            estate,
+            estateRace,
+            new DriftDashboardModule()
+        ];
+    }
 }

@@ -748,7 +748,10 @@ public sealed class StorageTests
 
             var exporter = new EstateTrackPackageService(source, "test-version");
             var manifest = exporter.Export(track.Id, packagePath);
+            var identity = exporter.Identify(track.Id);
             Assert.AreEqual(EstateTrackPackageService.PackageFormat, manifest.Format);
+            Assert.AreEqual(manifest.PayloadSha256, identity.PayloadSha256);
+            Assert.AreEqual(track.Id, identity.TrackId);
             Assert.AreEqual(track.Id, manifest.TrackId);
 
             using var target = new LazyForzaStore(targetPath);

@@ -46,7 +46,8 @@ public enum HudContributionKind
 {
     Dashboard,
     LapSectors,
-    DriftDashboard
+    DriftDashboard,
+    EstateRace
 }
 
 public interface IHudContribution

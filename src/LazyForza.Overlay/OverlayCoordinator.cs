@@ -119,7 +119,8 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
     public async ValueTask CapturePngAsync(
         string path,
         CancellationToken cancellationToken,
-        bool previewDrift = false)
+        bool previewDrift = false,
+        bool previewEstateRace = false)
     {
         if (Application.Current is null) throw new InvalidOperationException("WPF application is not running.");
         await Application.Current.Dispatcher.InvokeAsync(() =>
@@ -131,7 +132,8 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
                 path,
                 bounds.Width,
                 bounds.Height,
-                previewDrift);
+                previewDrift,
+                previewEstateRace);
         });
     }
 

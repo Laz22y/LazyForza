@@ -186,6 +186,23 @@ public static class WindowsUpdateLauncher
             return $fullPath
         }
 
+        function Get-Sha256 {
+            param([string]$Path)
+            $stream = [System.IO.File]::OpenRead($Path)
+            try {
+                $sha = [System.Security.Cryptography.SHA256]::Create()
+                try {
+                    return [System.BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '')
+                }
+                finally {
+                    $sha.Dispose()
+                }
+            }
+            finally {
+                $stream.Dispose()
+            }
+        }
+
         function Start-LazyForza {
             if ($NoRestart) { return }
             $env:LAZYFORZA_DATA_DIR = $DataRoot
@@ -277,7 +294,7 @@ public static class WindowsUpdateLauncher
                 if (-not (Test-Path -LiteralPath $installed -PathType Leaf)) {
                     throw "Installed file is missing: $relative"
                 }
-                $actual = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
+                $actual = Get-Sha256 -Path $installed
                 if ($actual -ne $expected) {
                     throw "Installed file hash mismatch: $relative"
                 }
