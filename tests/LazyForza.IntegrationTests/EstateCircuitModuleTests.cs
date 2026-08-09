@@ -167,7 +167,8 @@ public sealed class EstateCircuitModuleTests
                     2,
                     10,
                     20,
-                    DateTimeOffset.UnixEpoch.AddMilliseconds(300_000));
+                    DateTimeOffset.UnixEpoch.AddMilliseconds(300_000),
+                    isRaceOn: false);
                 await WaitUntilAsync(
                     () => module.State.Phase == EstateCircuitPhase.WaitingForTimingStart,
                     TimeSpan.FromSeconds(2),
@@ -182,34 +183,86 @@ public sealed class EstateCircuitModuleTests
                     () => module.State.ToString());
                 Assert.AreEqual(2, store.CountLaps(track.Id), "暂停后应能从下一次正向过线重新开始完整计时。");
 
-                module.SetEstateRacePauseCancellation(false);
-                PublishPosition(feed, 0, 100, 2, 0, 0);
+                PublishPosition(feed, 480_000, 96, 2, 18, 20);
+                await Task.Delay(100);
+                Assert.AreEqual(EstateCircuitPhase.TimingLap, module.State.Phase,
+                    "仅有时间戳回退不能被当作暂停或回转遥测。");
+                PublishPosition(feed, 481_000, 96, 2, 18, 20, isRaceOn: false);
+                await WaitUntilAsync(
+                    () => module.State.Phase == EstateCircuitPhase.WaitingForTimingStart,
+                    TimeSpan.FromSeconds(2),
+                    () => module.State.ToString());
+                Assert.AreEqual(2, store.CountLaps(track.Id),
+                    "手动计时和排位赛模式下，明确的暂停或回转遥测必须取消当前圈。");
+                Assert.IsFalse(module.LastCompletedLap?.IsValid ?? true,
+                    "取消的圈必须形成无效事件，确保排位最后飞驰圈不会一直挂起。");
+
+                PublishLap(feed, timestampStart: 500_000, injectTrackDeviation: true);
+                await WaitUntilAsync(
+                    () => module.State.CompletedLaps == 3,
+                    TimeSpan.FromSeconds(5),
+                    () => module.State.ToString());
+                var strictDeviation = store.LoadLapSummaries(track.Id, 1).Single();
+                Assert.IsFalse(strictDeviation.IsValid,
+                    "手动计时和排位赛模式下，持续偏离参考路线必须使该圈无效。");
+                Assert.AreEqual("estate-track-deviation", strictDeviation.InvalidReason);
+
+                PublishCircularRange(feed, 591_000, 0, 30);
+                PublishShortcutChord(feed, 599_000, 30, 150);
+                await WaitUntilAsync(
+                    () => module.State.Phase == EstateCircuitPhase.WaitingForTimingStart,
+                    TimeSpan.FromSeconds(2),
+                    () => module.State.ToString());
+                Assert.IsFalse(module.LastCompletedLap?.IsValid ?? true,
+                    "跨过大半圆弧的捷径必须立即取消手动计时或排位赛圈。");
+                StringAssert.Contains(module.LastCompletedLap?.InvalidReason ?? string.Empty, "跨越赛道大段路线");
+
+                PublishPosition(feed, 606_000, 100, 2, -1, 20);
+                PublishPosition(feed, 606_100, 100, 2, 1, 20);
+                await WaitUntilAsync(
+                    () => module.State.Phase == EstateCircuitPhase.TimingLap,
+                    TimeSpan.FromSeconds(2),
+                    () => module.State.ToString());
+
+                module.SetEstateRaceInterventionInvalidation(false);
+                PublishPosition(feed, 0, 100, 2, 0, 0, isRaceOn: false);
                 await Task.Delay(50);
                 Assert.AreEqual(
                     EstateCircuitPhase.TimingLap,
                     module.State.Phase,
                     "正赛暂停帧应保留当前圈，而不是切回等待下一次过线。");
 
-                PublishLap(feed, timestampStart: 500_000, injectSmallReorderAtFinish: true);
+                PublishLap(
+                    feed,
+                    timestampStart: 700_000,
+                    injectSmallReorderAtFinish: true,
+                    injectTrackDeviation: true);
                 await WaitUntilAsync(
-                    () => module.State.CompletedLaps == 3,
+                    () => module.State.CompletedLaps >= 5,
                     TimeSpan.FromSeconds(5),
                     () => module.State.ToString());
-                Assert.AreEqual(3, store.CountLaps(track.Id),
-                    "高速冲线附近的轻微 UDP 乱序不能清空线前位置并漏掉整次穿越。");
+                Assert.AreEqual(5, store.CountLaps(track.Id),
+                    "暂停前已经开始的正赛圈应在首次冲线完成，随后完整一圈也必须正常计入。");
+                Assert.IsTrue(store.LoadLapSummaries(track.Id, 1).Single().IsValid,
+                    "正赛中的偏离路线只交由服务端判罚，不能使该圈失效或阻止计圈。");
 
-                PublishPosition(feed, 590_900, 99, 2, 3, 20);
+                PublishPosition(feed, 790_900, 99, 2, 3, 20);
                 await Task.Delay(50);
                 Assert.AreEqual(
                     EstateCircuitPhase.TimingLap,
                     module.State.Phase,
                     "少量 UDP 乱序不应被误判成游戏倒带。");
-                PublishPosition(feed, 580_000, 96, 2, 18, 20);
+                PublishPosition(feed, 780_000, 96, 2, 18, 20);
+                await Task.Delay(100);
+                Assert.AreEqual(EstateCircuitPhase.TimingLap, module.State.Phase,
+                    "正赛中的时间回退或回转只能重新同步位置，不能取消当前圈。");
+                PublishLap(feed, timestampStart: 900_000);
                 await WaitUntilAsync(
-                    () => module.State.Phase == EstateCircuitPhase.WaitingForTimingStart,
-                    TimeSpan.FromSeconds(2),
+                    () => module.State.CompletedLaps >= 7,
+                    TimeSpan.FromSeconds(5),
                     () => module.State.ToString());
-                Assert.AreEqual(3, store.CountLaps(track.Id), "时间回退或游戏倒带必须取消当前圈，不能保存成绩。");
+                Assert.AreEqual(7, store.CountLaps(track.Id),
+                    "正赛回转后保留的当前圈与随后完整行驶的一圈都应正常计入。");
             }
             finally
             {
@@ -579,21 +632,23 @@ public sealed class EstateCircuitModuleTests
     private static void PublishLap(
         TestFeed feed,
         uint timestampStart,
-        bool injectSmallReorderAtFinish = false)
+        bool injectSmallReorderAtFinish = false,
+        bool injectTrackDeviation = false)
     {
         const int samples = 360;
         for (var index = -2; index <= samples + 2; index++)
         {
             var angle = (index + 0.5) * Math.PI * 2 / samples;
             var timestamp = timestampStart + (uint)((index + 2) * 250);
+            var radius = injectTrackDeviation && index is >= 80 and <= 88 ? 125 : 100;
             if (injectSmallReorderAtFinish && index == samples)
             {
                 PublishPosition(
                     feed,
                     timestamp - 350,
-                    100 * Math.Cos(angle),
+                    radius * Math.Cos(angle),
                     2,
-                    100 * Math.Sin(angle),
+                    radius * Math.Sin(angle),
                     20);
             }
             var raw = new Fh6RawTelemetry
@@ -602,7 +657,7 @@ public sealed class EstateCircuitModuleTests
                 TimestampMS = timestamp,
                 EngineMaxRpm = 8_000,
                 CurrentEngineRpm = 5_000,
-                Position = new Vector3F((float)(100 * Math.Cos(angle)), 2, (float)(100 * Math.Sin(angle))),
+                Position = new Vector3F((float)(radius * Math.Cos(angle)), 2, (float)(radius * Math.Sin(angle))),
                 Speed = 20,
                 CarOrdinal = 1_234,
                 CarClass = 5,
@@ -648,6 +703,32 @@ public sealed class EstateCircuitModuleTests
         }
     }
 
+    private static void PublishShortcutChord(
+        TestFeed feed,
+        uint timestampStart,
+        int fromDegrees,
+        int toDegrees)
+    {
+        var from = fromDegrees * Math.PI / 180;
+        var to = toDegrees * Math.PI / 180;
+        var startX = 100 * Math.Cos(from);
+        var startZ = 100 * Math.Sin(from);
+        var endX = 100 * Math.Cos(to);
+        var endZ = 100 * Math.Sin(to);
+        const int samples = 24;
+        for (var index = 1; index <= samples; index++)
+        {
+            var amount = index / (double)samples;
+            PublishPosition(
+                feed,
+                timestampStart + (uint)(index * 250),
+                startX + (endX - startX) * amount,
+                2,
+                startZ + (endZ - startZ) * amount,
+                20);
+        }
+    }
+
     private static void PublishDirectionTrace(TestFeed feed, uint timestampStart)
     {
         for (var index = 0; index < 41; index++)
@@ -677,11 +758,12 @@ public sealed class EstateCircuitModuleTests
         double y,
         double z,
         double speed,
-        DateTimeOffset? arrivalTime = null)
+        DateTimeOffset? arrivalTime = null,
+        bool isRaceOn = true)
     {
         var raw = new Fh6RawTelemetry
         {
-            IsRaceOn = 1,
+            IsRaceOn = isRaceOn ? 1 : 0,
             TimestampMS = timestamp,
             EngineMaxRpm = 8_000,
             CurrentEngineRpm = 4_000,

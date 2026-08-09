@@ -43,7 +43,8 @@ internal sealed record RaceLoginRequest(
     string? TrackId,
     string? TrackRevision,
     string? TrackPackageHash,
-    int? SectorCount = null);
+    int? SectorCount = null,
+    string? TeamId = null);
 
 internal sealed record RaceLoginAccepted(
     Guid ParticipantId,
@@ -72,7 +73,12 @@ internal sealed record RaceTelemetryUpdate(
     RaceGripCondition GripCondition,
     double PitServiceElapsedSeconds,
     bool PitServiceRequirementMet,
-    int CompletedPitServices);
+    int CompletedPitServices,
+    double TrackToleranceMeters = 18,
+    double TrackLengthMeters = 0,
+    double PitSpeedLimitKph = 0,
+    double PitLaneElapsedSeconds = 0,
+    bool IsApproachingPit = false);
 
 internal sealed record RaceLapCompleted(
     Guid EventId,
@@ -81,6 +87,7 @@ internal sealed record RaceLapCompleted(
     IReadOnlyList<double> SectorSeconds,
     bool IsValid,
     string? InvalidReason,
-    long ClientMonotonicMilliseconds);
+    long ClientMonotonicMilliseconds,
+    bool IsBestLapEligible = true);
 
 internal sealed record RaceProtocolError(string Code, string Message);

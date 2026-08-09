@@ -497,17 +497,18 @@ internal static class BuiltInModuleCatalog
                         completed.LapSeconds,
                         completed.SectorSeconds,
                         completed.IsValid,
-                        completed.InvalidReason),
+                        completed.InvalidReason,
+                        completed.IsBestLapEligible),
                 estate.ActiveSectorCount,
                 identity?.PayloadSha256);
-        }, (trackId, enabled, cancelLapOnPause) =>
+        }, (trackId, enabled, invalidateLapOnDriverIntervention) =>
         {
             if (enabled)
             {
                 if (!estate.State.IsTimingActive)
-                    estate.StartTiming(trackId, cancelLapOnPause);
+                    estate.StartTiming(trackId, invalidateLapOnDriverIntervention);
                 else
-                    estate.SetEstateRacePauseCancellation(cancelLapOnPause);
+                    estate.SetEstateRaceInterventionInvalidation(invalidateLapOnDriverIntervention);
             }
             else
                 estate.PauseTimingForEstateRace();

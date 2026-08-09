@@ -7,6 +7,7 @@ using LazyForza.Analysis;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.EstateRace;
+using LazyForza.Overlay;
 using LazyForza.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -20,6 +21,38 @@ namespace LazyForza.IntegrationTests;
 [TestClass]
 public sealed class EstateRaceClientModuleTests
 {
+    [TestMethod]
+    public void LeaderboardTimingUsesSessionDeltaRulesForQualifyingRaceAndOtherViews()
+    {
+        var local = Participant(Guid.NewGuid()) with
+        {
+            Position = 2,
+            BestLapSeconds = 68.432,
+            GapToLeaderSeconds = .832,
+            IntervalSeconds = 1.250,
+            CompletedLaps = 4
+        };
+        var trailing = Participant(Guid.NewGuid()) with
+        {
+            Position = 3,
+            GapToLeaderSeconds = 1.472,
+            IntervalSeconds = .640,
+            CompletedLaps = 4
+        };
+
+        Assert.AreEqual("1:08.432", EstateRaceLeaderboardFormatter.Format(local, true, false, true, null, 4));
+        Assert.AreEqual("+0.832", EstateRaceLeaderboardFormatter.Format(local, true, false, false, null, 4));
+        Assert.AreEqual("−1.250 / +0.640", EstateRaceLeaderboardFormatter.Format(local, false, true, true, trailing.IntervalSeconds, 4));
+        Assert.AreEqual("+0.832", EstateRaceLeaderboardFormatter.Format(local, false, true, false, null, 4));
+        Assert.AreEqual("LEADER", EstateRaceLeaderboardFormatter.FormatLeaderComparison(local with { Position = 1 }, 4));
+        Assert.AreEqual("+0.832", EstateRaceLeaderboardFormatter.FormatLeaderComparison(local, 4));
+        Assert.AreEqual("+1 LAP", EstateRaceLeaderboardFormatter.FormatLeaderComparison(trailing with
+        {
+            GapToLeaderSeconds = null,
+            CompletedLaps = 3
+        }, 4));
+    }
+
     [TestMethod]
     public void TimingRunsOnlyDuringActiveCompetitiveSessionsAndHonorsFinalFlyingLap()
     {
@@ -57,8 +90,18 @@ public sealed class EstateRaceClientModuleTests
             Participants = [local with { QualifyingFinalLapPending = false }]
         }, localId));
 
-        Assert.IsTrue(EstateRaceModule.ShouldCancelLapOnPause(session with { Phase = RaceSessionPhase.Qualifying }));
-        Assert.IsFalse(EstateRaceModule.ShouldCancelLapOnPause(session with { Phase = RaceSessionPhase.Race }));
+        Assert.IsTrue(EstateRaceModule.ShouldInvalidateLapOnDriverIntervention(session with { Phase = RaceSessionPhase.Qualifying }));
+        Assert.IsFalse(EstateRaceModule.ShouldInvalidateLapOnDriverIntervention(session with { Phase = RaceSessionPhase.Race }));
+        Assert.IsTrue(EstateRaceModule.ShouldInvalidateLapOnDriverIntervention(session with
+        {
+            Phase = RaceSessionPhase.Suspended,
+            SuspendedFromPhase = RaceSessionPhase.Qualifying
+        }));
+        Assert.IsFalse(EstateRaceModule.ShouldInvalidateLapOnDriverIntervention(session with
+        {
+            Phase = RaceSessionPhase.Suspended,
+            SuspendedFromPhase = RaceSessionPhase.Race
+        }));
     }
 
     [TestMethod]
@@ -135,7 +178,8 @@ public sealed class EstateRaceClientModuleTests
                     "secret-race-password",
                     "测试车手",
                     "#42D7E8",
-                    "远山车队"), CancellationToken.None);
+                    "远山车队",
+                    "team-mountain"), CancellationToken.None);
                 Assert.AreEqual(EstateRaceConnectionState.Connected, module.State.ConnectionState);
                 Assert.AreEqual(participantId, module.State.LocalParticipantId);
 
@@ -146,6 +190,7 @@ public sealed class EstateRaceClientModuleTests
                 Assert.AreEqual("secret-race-password", login.Password);
                 Assert.AreEqual("测试车手", login.DisplayName);
                 Assert.AreEqual("远山车队", login.TeamName);
+                Assert.AreEqual("team-mountain", login.TeamId);
                 Assert.IsNull(await store.GetAsync(EstateRaceModule.ModuleId, "password", CancellationToken.None));
 
                 feed.Publish(Frame(1, 10_000, 50, 2, 3));
@@ -166,7 +211,22 @@ public sealed class EstateRaceClientModuleTests
                 Assert.IsTrue(telemetry.MapX is >= 0 and <= 1);
                 Assert.IsTrue(telemetry.MapY is >= 0 and <= 1);
 
-                feed.Publish(Frame(2, 0, 10_000, 0, 10_000, DateTimeOffset.UtcNow.AddMilliseconds(250)));
+                var repeatedTimestampAt = DateTimeOffset.UtcNow.AddMilliseconds(150);
+                feed.Publish(Frame(2, 10_000, 0, 2, 50, repeatedTimestampAt));
+                RaceTelemetryUpdate repeatedTimestampTelemetry;
+                do
+                {
+                    var repeatedEnvelope = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                    if (repeatedEnvelope.Type != "telemetry") continue;
+                    repeatedTimestampTelemetry = repeatedEnvelope.Payload.Deserialize<RaceTelemetryUpdate>(EstateRaceWireProtocol.JsonOptions)!;
+                    break;
+                } while (true);
+                Assert.IsTrue(repeatedTimestampTelemetry.IsTelemetryValid,
+                    "单个重复时间戳是正常 UDP 采样现象，不能冻结赛道地图。");
+                Assert.AreNotEqual(telemetry.MapX, repeatedTimestampTelemetry.MapX);
+
+                var pausedAt = DateTimeOffset.UtcNow.AddMilliseconds(250);
+                feed.Publish(Frame(3, 0, 10_000, 0, 10_000, pausedAt, isRaceOn: false));
                 RaceTelemetryUpdate pausedTelemetry;
                 do
                 {
@@ -177,9 +237,35 @@ public sealed class EstateRaceClientModuleTests
                 } while (true);
                 Assert.IsFalse(pausedTelemetry.IsTelemetryValid);
                 Assert.IsTrue(pausedTelemetry.IsPausedOrRewinding);
-                Assert.AreEqual(telemetry.TrackProgress, pausedTelemetry.TrackProgress, 0.000001);
-                Assert.AreEqual(telemetry.MapX, pausedTelemetry.MapX, 0.000001);
-                Assert.AreEqual(telemetry.MapY, pausedTelemetry.MapY, 0.000001);
+                Assert.AreEqual(repeatedTimestampTelemetry.TrackProgress, pausedTelemetry.TrackProgress, 0.000001);
+                Assert.AreEqual(repeatedTimestampTelemetry.MapX, pausedTelemetry.MapX, 0.000001);
+                Assert.AreEqual(repeatedTimestampTelemetry.MapY, pausedTelemetry.MapY, 0.000001);
+
+                feed.Publish(Frame(4, 10_100, 10_000, 0, 10_000, pausedAt.AddMilliseconds(250)));
+                RaceTelemetryUpdate recoveringTelemetry;
+                do
+                {
+                    var recoveringEnvelope = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                    if (recoveringEnvelope.Type != "telemetry") continue;
+                    recoveringTelemetry = recoveringEnvelope.Payload.Deserialize<RaceTelemetryUpdate>(EstateRaceWireProtocol.JsonOptions)!;
+                    break;
+                } while (true);
+                Assert.IsTrue(recoveringTelemetry.IsTelemetryValid,
+                    "仪表盘恢复显示的第一帧就应恢复赛道位置，不能再额外冻结坐标。");
+                Assert.IsFalse(recoveringTelemetry.IsPausedOrRewinding);
+                Assert.AreNotEqual(repeatedTimestampTelemetry.MapX, recoveringTelemetry.MapX);
+
+                feed.Publish(Frame(5, 11_000, 51, 2, 3, pausedAt.AddSeconds(1)));
+                RaceTelemetryUpdate recoveredTelemetry;
+                do
+                {
+                    var recoveredEnvelope = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                    if (recoveredEnvelope.Type != "telemetry") continue;
+                    recoveredTelemetry = recoveredEnvelope.Payload.Deserialize<RaceTelemetryUpdate>(EstateRaceWireProtocol.JsonOptions)!;
+                    break;
+                } while (true);
+                Assert.IsTrue(recoveredTelemetry.IsTelemetryValid);
+                Assert.IsFalse(recoveredTelemetry.IsPausedOrRewinding);
                 Assert.AreEqual(string.Empty, module.ActiveProfile?.Password);
                 await module.DisconnectAsync();
                 Assert.IsNull(module.ActiveProfile);
@@ -274,7 +360,7 @@ public sealed class EstateRaceClientModuleTests
     }
 
     [TestMethod]
-    public async Task MarksTelemetryGapAndTimestampRegressionAsPausedOrRewinding()
+    public async Task OnlyDashboardInterventionSignalMarksTelemetryPausedOrRewinding()
     {
         var received = Channel.CreateUnbounded<RaceIncomingEnvelope>();
         var builder = WebApplication.CreateSlimBuilder();
@@ -324,19 +410,23 @@ public sealed class EstateRaceClientModuleTests
                 feed.Publish(Frame(1, 10_000, 50, 2, 3, firstArrival));
                 feed.Publish(Frame(2, 11_000, 51, 2, 3, firstArrival.AddSeconds(3)));
                 feed.Publish(Frame(3, 8_000, 52, 2, 3, firstArrival.AddSeconds(3.2)));
+                feed.Publish(Frame(4, 8_100, 53, 2, 3, firstArrival.AddSeconds(3.4), isRaceOn: false));
 
                 var updates = new List<RaceTelemetryUpdate>();
-                while (updates.Count < 3)
+                while (updates.Count < 4)
                 {
                     var envelope = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
                     if (envelope.Type == "telemetry")
                         updates.Add(envelope.Payload.Deserialize<RaceTelemetryUpdate>(EstateRaceWireProtocol.JsonOptions)!);
                 }
                 Assert.IsTrue(updates[0].IsTelemetryValid);
-                Assert.IsTrue(updates[1].IsPausedOrRewinding);
-                Assert.IsFalse(updates[1].IsTelemetryValid);
-                Assert.IsTrue(updates[2].IsPausedOrRewinding);
-                Assert.IsFalse(updates[2].IsTelemetryValid);
+                Assert.IsTrue(updates[1].IsTelemetryValid, "UDP 到包间隔不能被当作暂停。");
+                Assert.IsFalse(updates[1].IsPausedOrRewinding);
+                Assert.IsTrue(updates[2].IsTelemetryValid, "时间戳回退不能替代 IsRaceOn 暂停信号。");
+                Assert.IsFalse(updates[2].IsPausedOrRewinding);
+                Assert.IsFalse(updates[3].IsTelemetryValid);
+                Assert.IsTrue(updates[3].IsPausedOrRewinding,
+                    "只有与仪表盘隐藏一致的 IsRaceOn 信号才判定暂停或回转。");
             }
             finally
             {
@@ -446,11 +536,12 @@ public sealed class EstateRaceClientModuleTests
         double x,
         double y,
         double z,
-        DateTimeOffset? arrivalTime = null)
+        DateTimeOffset? arrivalTime = null,
+        bool isRaceOn = true)
     {
         var raw = new Fh6RawTelemetry
         {
-            IsRaceOn = 1,
+            IsRaceOn = isRaceOn ? 1 : 0,
             TimestampMS = timestamp,
             Position = new Vector3F((float)x, (float)y, (float)z),
             Speed = 25,

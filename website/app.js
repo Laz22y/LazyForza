@@ -1,8 +1,8 @@
 const RELEASE_FALLBACK = {
-  tag: "v1.4.2",
-  version: "1.4.2",
-  publishedAt: "2026-08-04T06:09:27Z",
-  assetName: "LazyForza-1.4.2-win-x64.zip",
+  tag: "v1.4.3",
+  version: "1.4.3",
+  publishedAt: "2026-08-09T12:30:05Z",
+  assetName: "LazyForza-1.4.3-win-x64.zip",
 };
 
 const RELEASE_SOURCES = {

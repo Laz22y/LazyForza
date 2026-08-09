@@ -66,7 +66,7 @@ public sealed class ModuleAndOverlayTests
             Assert.AreEqual(0, placement.OffsetX, 1e-9);
             Assert.AreEqual(0, placement.OffsetY, 1e-9);
         }
-        Assert.AreEqual("1.4.2", LazyForza.App.ApplicationVersionInfo.Display);
+        Assert.AreEqual("1.4.3", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]

@@ -21,3 +21,30 @@ public static class EstateRaceLapColorRules
         return SectorColorState.Yellow;
     }
 }
+
+public static class EstateRaceLapDeltaRules
+{
+    public static double? CumulativeToPhaseFastest(
+        IReadOnlyList<double?> currentSectorSeconds,
+        IReadOnlyList<double?> phaseFastestLapSectorSeconds,
+        int completedSectorCount)
+    {
+        var count = Math.Min(
+            Math.Max(0, completedSectorCount),
+            Math.Min(currentSectorSeconds.Count, phaseFastestLapSectorSeconds.Count));
+        if (count == 0) return null;
+
+        double currentTotal = 0;
+        double referenceTotal = 0;
+        for (var index = 0; index < count; index++)
+        {
+            if (currentSectorSeconds[index] is not double current || !double.IsFinite(current) || current <= 0 ||
+                phaseFastestLapSectorSeconds[index] is not double reference ||
+                !double.IsFinite(reference) || reference <= 0)
+                return null;
+            currentTotal += current;
+            referenceTotal += reference;
+        }
+        return currentTotal - referenceTotal;
+    }
+}

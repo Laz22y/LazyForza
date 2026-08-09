@@ -82,7 +82,16 @@ public sealed record EstateRaceConnectionProfile(
     string Password,
     string DisplayName,
     string ThemeColor,
-    string? TeamName);
+    string? TeamName,
+    string? TeamId = null);
+
+public sealed record EstateRaceTeam(
+    string Id,
+    string Name,
+    string ThemeColor)
+{
+    public override string ToString() => Name;
+}
 
 public sealed record EstateRaceServerDescriptor(
     string ServerName,
@@ -96,7 +105,9 @@ public sealed record EstateRaceServerDescriptor(
     string? ActiveTrackName = null,
     string? ActiveTrackPackageHash = null,
     bool AllowTeams = true,
-    int SectorCount = 0);
+    int SectorCount = 0,
+    int DriversPerTeam = 6,
+    IReadOnlyList<EstateRaceTeam>? Teams = null);
 
 public sealed record EstateCompletedLapEvent(
     Guid EventId,
@@ -104,7 +115,8 @@ public sealed record EstateCompletedLapEvent(
     double LapSeconds,
     IReadOnlyList<double> SectorSeconds,
     bool IsValid,
-    string? InvalidReason);
+    string? InvalidReason,
+    bool IsBestLapEligible = true);
 
 public sealed record EstateRaceTrackContext(
     TrackTemplate Track,
@@ -126,7 +138,8 @@ public sealed record EstateRacePenalty(
     int? GridPlaces,
     string Reason,
     bool IsServed,
-    bool IsRevoked);
+    bool IsRevoked,
+    bool IsPostRaceAdjustment = false);
 
 public sealed record EstateRaceParticipant(
     Guid Id,
@@ -157,7 +170,24 @@ public sealed record EstateRaceParticipant(
     IReadOnlyList<double?> BestSectorSeconds,
     IReadOnlyList<EstateRacePenalty> Penalties,
     DateTimeOffset LastSeenAt,
-    bool QualifyingFinalLapPending = false);
+    bool QualifyingFinalLapPending = false,
+    double? RaceTotalSeconds = null,
+    double? AdjustedRaceTotalSeconds = null,
+    double TimePenaltySeconds = 0,
+    int TrackLimitWarnings = 0,
+    string? TeamId = null,
+    string? TeamColor = null,
+    double PitLaneElapsedSeconds = 0,
+    double PendingTimePenaltySeconds = 0,
+    bool IsServingTimePenalty = false,
+    double PenaltyServiceElapsedSeconds = 0,
+    double PenaltyServiceRequiredSeconds = 0,
+    bool HasPendingDriveThrough = false,
+    bool PenaltyServiceCompleted = false,
+    int? DriveThroughLapsRemaining = null,
+    DateTimeOffset? DriveThroughReminderAt = null,
+    bool DriveThroughOverdue = false,
+    bool IsServingDriveThrough = false);
 
 public sealed record EstateRaceBanner(
     Guid Id,
@@ -206,7 +236,13 @@ public sealed record EstateRaceSession(
     DateTimeOffset? StartSequenceAt = null,
     int IlluminatedStartLights = 0,
     bool StartLightsOut = false,
-    bool QualifyingTimeExpired = false);
+    bool QualifyingTimeExpired = false,
+    double? RaceElapsedSeconds = null,
+    RaceSessionPhase? SuspendedFromPhase = null,
+    int DriversPerTeam = 6,
+    IReadOnlyList<EstateRaceTeam>? Teams = null,
+    bool ChequeredImminent = false,
+    IReadOnlyList<double?>? FastestLapSectorSeconds = null);
 
 public sealed record EstatePitServiceState(
     bool IsInPitLane,
@@ -214,7 +250,14 @@ public sealed record EstatePitServiceState(
     double RequiredSeconds,
     double ElapsedSeconds,
     bool RequirementMet,
-    int CompletedServices)
+    int CompletedServices,
+    bool IsCounting = false,
+    DateTimeOffset? CountingUpdatedAt = null,
+    double PitLaneElapsedSeconds = 0,
+    bool IsApproachingPit = false,
+    double SpeedLimitKph = 0,
+    double CurrentSpeedKph = 0,
+    bool IsSpeeding = false)
 {
     public static EstatePitServiceState Empty { get; } = new(false, false, 0, 0, false, 0);
 }
