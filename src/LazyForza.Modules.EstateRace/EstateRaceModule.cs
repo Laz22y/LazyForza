@@ -15,6 +15,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private const string DisplayNameSetting = "displayName";
     private const string ThemeColorSetting = "themeColor";
     private const string TeamNameSetting = "teamName";
+    private const string TeamIdSetting = "teamId";
     private const string ResumeTokenSetting = "resumeToken";
     private static readonly TimeSpan TelemetryInterval = TimeSpan.FromMilliseconds(100);
     private readonly Func<EstateRaceTrackContext?> trackContext;
@@ -40,14 +41,11 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private Guid? sentLapEventId;
     private long sequence;
     private DateTimeOffset lastTelemetrySentAt;
-    private uint? lastGameTimestamp;
-    private DateTimeOffset? nonAdvancingStartedAt;
-    private DateTimeOffset? lastFrameArrival;
     private RaceSessionPhase? lastSessionPhase;
     private EstateRaceProjection? lastValidProjection;
     private bool intentionalDisconnect;
     private bool raceTimingEnabled;
-    private bool raceTimingCancelsLapOnPause = true;
+    private bool raceTimingInvalidatesLapOnDriverIntervention = true;
     private int reconnectLoopActive;
 
     public EstateRaceModule(
@@ -90,13 +88,15 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         var name = await Context.Settings.GetAsync(ModuleId, DisplayNameSetting, cancellationToken).ConfigureAwait(false);
         var color = await Context.Settings.GetAsync(ModuleId, ThemeColorSetting, cancellationToken).ConfigureAwait(false);
         var team = await Context.Settings.GetAsync(ModuleId, TeamNameSetting, cancellationToken).ConfigureAwait(false);
+        var teamId = await Context.Settings.GetAsync(ModuleId, TeamIdSetting, cancellationToken).ConfigureAwait(false);
         resumeToken = await Context.Settings.GetAsync(ModuleId, ResumeTokenSetting, cancellationToken).ConfigureAwait(false);
         return new EstateRaceConnectionProfile(
             address ?? "http://127.0.0.1:24876",
             string.Empty,
             name ?? Environment.UserName,
             NormalizeColor(color),
-            NullIfWhiteSpace(team));
+            NullIfWhiteSpace(team),
+            NullIfWhiteSpace(teamId));
     }
 
     public async Task ConnectAsync(
@@ -169,7 +169,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 context?.Definition.TrackId.ToString("D"),
                 context?.Definition.MapRevision,
                 context?.TrackPackageHash,
-                context?.SectorCount), timeout.Token).ConfigureAwait(false);
+                context?.SectorCount,
+                activeProfile.TeamId), timeout.Token).ConfigureAwait(false);
 
             var loginEnvelope = await ReceiveEnvelopeAsync(socket, timeout.Token).ConfigureAwait(false);
             if (loginEnvelope.ProtocolVersion != EstateRaceWireProtocol.Version)
@@ -288,18 +289,25 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             var context = trackContext();
             if (context is null) continue;
             var valid = IsTelemetryValid(frame, out var pausedOrRewinding);
+            var positionReliable = valid;
             var completedLaps = context.CompletedLaps;
-            gripEstimator.Observe(frame, completedLaps, valid && !pausedOrRewinding);
+            gripEstimator.Observe(frame, completedLaps, positionReliable);
+            var localParticipant = session?.Participants.FirstOrDefault(candidate => candidate.Id == participantId);
+            var serviceBlocked = localParticipant is
+            {
+                PendingTimePenaltySeconds: > 0
+            } or { IsServingTimePenalty: true };
             var pitService = pitServiceTracker.Observe(
                 frame,
                 context.Definition.Pit,
-                valid && !pausedOrRewinding);
+                positionReliable,
+                serviceBlocked);
             if (frame.ArrivalTime - lastTelemetrySentAt < TelemetryInterval) continue;
             lastTelemetrySentAt = frame.ArrivalTime;
-            var projection = valid
+            var projection = positionReliable
                 ? EstateRaceGeometry.Project(context.Track, frame.Raw.Position)
                 : lastValidProjection ?? new EstateRaceProjection(0, 0, 0.5, 0.5);
-            if (valid) lastValidProjection = projection;
+            if (positionReliable) lastValidProjection = projection;
             var update = new RaceTelemetryUpdate(
                 monotonicClock.ElapsedMilliseconds,
                 projection.Progress,
@@ -312,12 +320,17 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 context.CurrentLapSeconds,
                 pitService.IsInPitLane,
                 pitService.IsInServiceZone,
-                valid,
+                positionReliable,
                 pausedOrRewinding,
                 gripEstimator.Current,
                 pitService.ElapsedSeconds,
                 pitService.RequirementMet,
-                pitService.CompletedServices);
+                pitService.CompletedServices,
+                context.Track.MatchingToleranceMeters,
+                context.Track.LengthMeters,
+                context.Definition.Pit?.SpeedLimitKph ?? 0,
+                pitService.PitLaneElapsedSeconds,
+                pitService.IsApproachingPit);
             try
             {
                 await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
@@ -330,7 +343,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                         lap.SectorSeconds,
                         lap.IsValid,
                         lap.InvalidReason,
-                        monotonicClock.ElapsedMilliseconds), cancellationToken).ConfigureAwait(false);
+                        monotonicClock.ElapsedMilliseconds,
+                        lap.IsBestLapEligible), cancellationToken).ConfigureAwait(false);
                     sentLapEventId = lap.EventId;
                 }
             }
@@ -532,45 +546,16 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         participantId = null;
         session = null;
         lastValidProjection = null;
-        lastGameTimestamp = null;
-        nonAdvancingStartedAt = null;
-        lastFrameArrival = null;
         SetRaceTimingEnabled(false);
     }
 
-    private bool IsTelemetryValid(TelemetryFrame frame, out bool pausedOrRewinding)
+    private static bool IsTelemetryValid(TelemetryFrame frame, out bool pausedOrRewinding)
     {
-        pausedOrRewinding = frame.Raw.TimestampMS == 0 ||
-                            !float.IsFinite(frame.Raw.Position.X) ||
-                            !float.IsFinite(frame.Raw.Position.Y) ||
-                            !float.IsFinite(frame.Raw.Position.Z);
-        if (lastFrameArrival is DateTimeOffset previousArrival &&
-            frame.ArrivalTime - previousArrival > TimeSpan.FromSeconds(2))
-            pausedOrRewinding = true;
-        lastFrameArrival = frame.ArrivalTime;
-        if (lastGameTimestamp is uint previous)
-        {
-            var wrapped = previous > uint.MaxValue - 10_000 && frame.Raw.TimestampMS < 10_000;
-            var regressedBeyondTolerance = frame.Raw.TimestampMS < previous &&
-                                           previous - frame.Raw.TimestampMS > 250;
-            if (!wrapped && regressedBeyondTolerance)
-            {
-                pausedOrRewinding = true;
-                nonAdvancingStartedAt = frame.ArrivalTime;
-            }
-            else if (!wrapped && frame.Raw.TimestampMS <= previous)
-            {
-                nonAdvancingStartedAt ??= frame.ArrivalTime;
-                if (frame.ArrivalTime - nonAdvancingStartedAt >= TimeSpan.FromSeconds(2))
-                    pausedOrRewinding = true;
-            }
-            else
-            {
-                nonAdvancingStartedAt = null;
-            }
-        }
-        lastGameTimestamp = frame.Raw.TimestampMS;
-        return !pausedOrRewinding;
+        pausedOrRewinding = TelemetryContextClassifier.IsDriverIntervention(frame.Raw);
+        return !pausedOrRewinding &&
+               float.IsFinite(frame.Raw.Position.X) &&
+               float.IsFinite(frame.Raw.Position.Y) &&
+               float.IsFinite(frame.Raw.Position.Z);
     }
 
     private void PublishSnapshot(EstateRaceConnectionState state, string text)
@@ -603,6 +588,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         await Context.Settings.SetAsync(ModuleId, DisplayNameSetting, profile.DisplayName, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(ModuleId, ThemeColorSetting, profile.ThemeColor, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(ModuleId, TeamNameSetting, profile.TeamName ?? string.Empty, cancellationToken).ConfigureAwait(false);
+        await Context.Settings.SetAsync(ModuleId, TeamIdSetting, profile.TeamId ?? string.Empty, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(ModuleId, ResumeTokenSetting, token, cancellationToken).ConfigureAwait(false);
     }
 
@@ -658,6 +644,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         return value with
         {
             FastestSectorSeconds = value.FastestSectorSeconds ?? [],
+            FastestLapSectorSeconds = value.FastestLapSectorSeconds ?? [],
             Participants = participants,
             YellowZones = value.YellowZones ?? []
             ,BlueFlags = value.BlueFlags ?? []
@@ -696,17 +683,18 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     {
         var context = trackContext();
         if (context is null) return;
-        var cancelLapOnPause = ShouldCancelLapOnPause(session);
+        var invalidateLapOnDriverIntervention = ShouldInvalidateLapOnDriverIntervention(session);
         if (raceTimingEnabled == enabled && context.IsTimingActive == enabled &&
-            raceTimingCancelsLapOnPause == cancelLapOnPause) return;
-        timingControl?.Invoke(context.Definition.TrackId, enabled, cancelLapOnPause);
+            raceTimingInvalidatesLapOnDriverIntervention == invalidateLapOnDriverIntervention) return;
+        timingControl?.Invoke(context.Definition.TrackId, enabled, invalidateLapOnDriverIntervention);
         raceTimingEnabled = enabled;
-        raceTimingCancelsLapOnPause = cancelLapOnPause;
+        raceTimingInvalidatesLapOnDriverIntervention = invalidateLapOnDriverIntervention;
         if (!enabled) sentLapEventId = context.LastCompletedLap?.EventId;
     }
 
-    internal static bool ShouldCancelLapOnPause(EstateRaceSession? value) =>
-        value?.Phase != RaceSessionPhase.Race;
+    internal static bool ShouldInvalidateLapOnDriverIntervention(EstateRaceSession? value) =>
+        value?.Phase != RaceSessionPhase.Race &&
+        (value?.Phase != RaceSessionPhase.Suspended || value.SuspendedFromPhase != RaceSessionPhase.Race);
 
     private static string GripExplanation(RaceGripCondition condition) => condition switch
     {

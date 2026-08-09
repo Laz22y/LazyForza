@@ -7,6 +7,7 @@ using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
 using LazyForza.Modules.EstateRace;
 using LazyForza.Modules.LapAnalysis;
+using LazyForza.Overlay;
 
 namespace LazyForza.App;
 
@@ -179,8 +180,14 @@ internal sealed partial class MainWindow
             hostingGuide.Visibility = state.IsConnected ? Visibility.Collapsed : Visibility.Visible;
             var session = state.Session;
             phaseValue.Text = session is null ? "—" : RacePhaseLabel(session.Phase);
-            flagValue.Text = session is null ? "—" : RaceFlagLabel(session.Flag);
-            flagValue.Foreground = Brush(session?.Flag switch
+            flagValue.Text = session is null
+                ? "—"
+                : session.ChequeredImminent && session.Flag == RaceControlFlag.Green
+                    ? "方格旗准备"
+                    : RaceFlagLabel(session.Flag);
+            flagValue.Foreground = Brush(session?.ChequeredImminent == true && session.Flag == RaceControlFlag.Green
+                ? "TextBrush"
+                : session?.Flag switch
             {
                 RaceControlFlag.Yellow => "WarningBrush",
                 RaceControlFlag.Red => "DangerBrush",
@@ -204,7 +211,7 @@ internal sealed partial class MainWindow
                 return;
             }
             foreach (var participant in session.Participants)
-                participantList.Children.Add(RaceParticipantRow(participant, state.LocalParticipantId, session.Phase, session.AllowTeams));
+                participantList.Children.Add(RaceParticipantRow(participant, state.LocalParticipantId, session, session.AllowTeams));
         }
 
         UpdateRacePageState();
@@ -308,14 +315,16 @@ internal sealed partial class MainWindow
     private static Border RaceParticipantRow(
         EstateRaceParticipant participant,
         Guid? localParticipantId,
-        RaceSessionPhase phase,
+        EstateRaceSession session,
         bool allowTeams)
     {
+        var phase = session.Phase;
         var grid = new Grid { MinHeight = 52 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(46) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
         var position = Label(participant.Position.ToString(), 18, FontWeights.Bold);
         position.HorizontalAlignment = HorizontalAlignment.Center;
         position.VerticalAlignment = VerticalAlignment.Center;
@@ -333,17 +342,31 @@ internal sealed partial class MainWindow
         status.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(status, 2);
         grid.Children.Add(status);
-        var result = Label(
-            phase is RaceSessionPhase.Qualifying or RaceSessionPhase.Grid
-                ? Time(participant.BestLapSeconds)
-                : participant.Position == 1
-                    ? $"{participant.CompletedLaps} 圈"
-                    : participant.GapToLeaderSeconds is double gap ? $"+{gap:0.000}" : $"{participant.CompletedLaps} 圈",
-            13, FontWeights.SemiBold,
-            participant.BestLapSeconds is not null ? "PurpleBrush" : null);
+        var racePhase = session.RaceElapsedSeconds is not null;
+        var qualifyingPhase = phase is RaceSessionPhase.Qualifying or RaceSessionPhase.Grid ||
+                              phase == RaceSessionPhase.Suspended &&
+                              session.SuspendedFromPhase == RaceSessionPhase.Qualifying;
+        var total = Label(
+            racePhase
+                ? $"总时 {RaceTotalTime(participant.AdjustedRaceTotalSeconds)}" +
+                  (participant.TimePenaltySeconds > 0 ? $"  待执行 +{participant.TimePenaltySeconds:0.#}s" : string.Empty)
+                : string.Empty,
+            12,
+            FontWeights.Normal,
+            participant.TimePenaltySeconds > 0 ? "WarningBrush" : "MutedBrush");
+        total.HorizontalAlignment = HorizontalAlignment.Right;
+        total.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(total, 3);
+        grid.Children.Add(total);
+        var leaderLaps = session.Participants.FirstOrDefault()?.CompletedLaps ?? participant.CompletedLaps;
+        var deltaText = qualifyingPhase && participant.Position != 1 && participant.BestLapSeconds is null
+            ? "—"
+            : EstateRaceLeaderboardFormatter.FormatLeaderComparison(participant, leaderLaps);
+        var result = Label(deltaText, 13, FontWeights.SemiBold,
+            participant.Position == 1 ? "PurpleBrush" : null);
         result.HorizontalAlignment = HorizontalAlignment.Right;
         result.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(result, 3);
+        Grid.SetColumn(result, 4);
         grid.Children.Add(result);
         return new Border
         {
@@ -383,15 +406,30 @@ internal sealed partial class MainWindow
         _ => "方格旗"
     };
 
+    private static string RaceTotalTime(double? seconds)
+    {
+        if (seconds is not double value || !double.IsFinite(value) || value < 0) return "—";
+        var span = TimeSpan.FromSeconds(value);
+        return span.TotalHours >= 1
+            ? $"{(int)span.TotalHours}:{span.Minutes:00}:{span.Seconds:00}.{span.Milliseconds:000}"
+            : $"{(int)span.TotalMinutes}:{span.Seconds:00}.{span.Milliseconds:000}";
+    }
+
     private static string RaceParticipantStatusLabel(EstateRaceParticipant participant)
     {
         if (!participant.IsConnected) return "已掉线";
         if (participant.IsInServiceZone)
+        {
+            if (participant.IsServingTimePenalty)
+                return $"执行罚时 {participant.PenaltyServiceElapsedSeconds:0.0}/{participant.PenaltyServiceRequiredSeconds:0.#} 秒";
+            if (participant.PenaltyServiceCompleted)
+                return "罚时已完成，可以开始换胎";
             return participant.PitServiceRequirementMet
                 ? $"维修停留完成 · {participant.CompletedPitServices} 次"
                 : participant.PitServiceElapsedSeconds > 0
                     ? $"维修停留 {participant.PitServiceElapsedSeconds:0.0} 秒"
                     : "正在维修区服务";
+        }
         if (participant.IsInPitLane) return "维修区通道";
         return participant.Status switch
         {

@@ -8,6 +8,13 @@ public static class TelemetryContextClassifier
 {
     public static bool IsDriving(Fh6RawTelemetry telemetry) => telemetry.IsRaceOn == 1;
 
+    /// <summary>
+    /// FH6 Data Out does not expose separate pause and rewind flags. The same
+    /// IsRaceOn transition that hides the live dashboard is therefore the only
+    /// authoritative driver-intervention signal used by LazyForza.
+    /// </summary>
+    public static bool IsDriverIntervention(Fh6RawTelemetry telemetry) => !IsDriving(telemetry);
+
     public static bool IsCompetition(Fh6RawTelemetry telemetry) =>
         IsDriving(telemetry) &&
         telemetry.RacePosition is > 0 and <= 64 &&

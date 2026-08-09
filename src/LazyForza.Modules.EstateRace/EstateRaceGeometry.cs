@@ -89,6 +89,80 @@ internal static class EstateRaceGeometry
                Math.Abs(position.Y - pit.ServiceCenter.Y) <= 3;
     }
 
+    public static bool CrossesForwardGate(
+        EstateTimingGate gate,
+        Vector3F previous,
+        Vector3F current)
+    {
+        if (!gate.HasDirection) return false;
+        var magnitude = Math.Sqrt(gate.ForwardX * gate.ForwardX + gate.ForwardZ * gate.ForwardZ);
+        var forwardX = gate.ForwardX / magnitude;
+        var forwardZ = gate.ForwardZ / magnitude;
+        var previousSide = (previous.X - gate.Left.X) * forwardX +
+                           (previous.Z - gate.Left.Z) * forwardZ;
+        var currentSide = (current.X - gate.Left.X) * forwardX +
+                          (current.Z - gate.Left.Z) * forwardZ;
+        if (previousSide > 0.05 || currentSide < -0.05 || currentSide <= previousSide)
+            return false;
+
+        var interpolation = -previousSide / (currentSide - previousSide);
+        if (interpolation is < 0 or > 1) return false;
+        var x = previous.X + (current.X - previous.X) * interpolation;
+        var y = previous.Y + (current.Y - previous.Y) * interpolation;
+        var z = previous.Z + (current.Z - previous.Z) * interpolation;
+        var tangentX = gate.Right.X - gate.Left.X;
+        var tangentZ = gate.Right.Z - gate.Left.Z;
+        var width = Math.Sqrt(tangentX * tangentX + tangentZ * tangentZ);
+        if (width < 0.1) return false;
+        tangentX /= width;
+        tangentZ /= width;
+        var along = (x - gate.Left.X) * tangentX + (z - gate.Left.Z) * tangentZ;
+        if (along < -gate.EndpointMarginMeters || along > width + gate.EndpointMarginMeters)
+            return false;
+        var expectedY = gate.Left.Y + (gate.Right.Y - gate.Left.Y) * Math.Clamp(along / width, 0, 1);
+        return Math.Abs(y - expectedY) <= gate.HeightToleranceMeters;
+    }
+
+    public static bool IsApproachingGate(
+        EstateTimingGate gate,
+        Vector3F position,
+        double maximumDistanceMeters = 30,
+        double lateralMarginMeters = 3)
+    {
+        if (!gate.HasDirection) return false;
+        var magnitude = Math.Sqrt(gate.ForwardX * gate.ForwardX + gate.ForwardZ * gate.ForwardZ);
+        var forwardX = gate.ForwardX / magnitude;
+        var forwardZ = gate.ForwardZ / magnitude;
+        var signedDistance = (position.X - gate.Left.X) * forwardX +
+                             (position.Z - gate.Left.Z) * forwardZ;
+        if (signedDistance is > 4 || signedDistance < -maximumDistanceMeters) return false;
+
+        var tangentX = gate.Right.X - gate.Left.X;
+        var tangentZ = gate.Right.Z - gate.Left.Z;
+        var width = Math.Sqrt(tangentX * tangentX + tangentZ * tangentZ);
+        if (width < 0.1) return false;
+        tangentX /= width;
+        tangentZ /= width;
+        var along = (position.X - gate.Left.X) * tangentX +
+                    (position.Z - gate.Left.Z) * tangentZ;
+        var margin = Math.Clamp(lateralMarginMeters, 0.5, 10);
+        return along >= -margin && along <= width + margin;
+    }
+
+    public static bool IsApproachingPitEntry(EstatePitDefinition? pit, Vector3F position)
+    {
+        if (pit is null) return false;
+        // Keep the limiter cue close to the deterministic entry line. A longer
+        // gate projection can intersect the racing line before a final corner
+        // and show the cue to drivers who are not actually entering the pits.
+        var lookAhead = Math.Clamp(pit.SpeedLimitKph * 0.20, 12, 20);
+        return IsApproachingGate(
+            pit.EntryGate,
+            position,
+            lookAhead,
+            Math.Clamp(pit.LaneHalfWidthMeters * 0.55, 1.5, 2.5));
+    }
+
     private static double DistanceToPolyline(
         IReadOnlyList<EstateGatePoint> line,
         double x,

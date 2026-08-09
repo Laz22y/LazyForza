@@ -58,7 +58,8 @@ public sealed record EstateCircuitCompletedLap(
     double LapSeconds,
     IReadOnlyList<double> SectorSeconds,
     bool IsValid,
-    string? InvalidReason);
+    string? InvalidReason,
+    bool IsBestLapEligible = true);
 
 public enum EstatePitCapturePhase
 {
@@ -140,7 +141,6 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private double? lastLapSeconds;
     private Guid timingSessionId;
     private DateTimeOffset? lastTelemetryArrival;
-    private DateTimeOffset? nonAdvancingTimestampStartedAt;
     private long minimumAcceptedFrameSequence = long.MinValue;
     private DateTimeOffset minimumAcceptedFrameArrival = DateTimeOffset.MinValue;
     private EstateCircuitCompletedLap? lastCompletedLap;
@@ -162,7 +162,9 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private DateTimeOffset liveCumulativeHistoricalDeltaUntil;
     private int liveCumulativeHistoricalDeltaSector = -1;
     private bool pitTransitActive;
-    private bool cancelCurrentLapOnTelemetryInterruption = true;
+    private bool invalidateCurrentLapOnDriverIntervention = true;
+    private DateTimeOffset? invalidProjectionStartedAt;
+    private bool trackDeviationDetected;
 
     public EstateCircuitModule(
         LazyForzaStore store,
@@ -604,7 +606,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lock (stateGate) ResetAll("已取消地产环道录入。");
     }
 
-    public void StartTiming(Guid trackId, bool cancelLapOnTelemetryInterruption = true)
+    public void StartTiming(Guid trackId, bool invalidateLapOnDriverIntervention = true)
     {
         lock (stateGate)
         {
@@ -630,7 +632,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             };
             activeSectors = loaded.Sectors;
             timingSessionId = Guid.NewGuid();
-            cancelCurrentLapOnTelemetryInterruption = cancelLapOnTelemetryInterruption;
+            invalidateCurrentLapOnDriverIntervention = invalidateLapOnDriverIntervention;
             ReloadTimingHistory();
             completedLaps = 0;
             lastLapSeconds = null;
@@ -638,9 +640,9 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             timestampUnwrapper.Reset();
             ArmAfterLatestTelemetryFrame();
             SetState(EstateCircuitPhase.WaitingForTimingStart, "地产环道计时已启用。",
-                cancelLapOnTelemetryInterruption
-                    ? "首次正向过线开始计时；暂停、倒带、传送或明显回转会取消当前圈，但计时模式仍保持启用。"
-                    : "首次正向过线开始计时；正赛暂停不会取消当前圈，倒带、传送或明显回转仍会取消当前圈。",
+                invalidateLapOnDriverIntervention
+                    ? "首次正向过线开始计时；暂停、回转、传送或偏离赛道会使当前圈无效，但计时模式仍保持启用。"
+                    : "首次正向过线开始计时；正赛中的暂停、回转和偏离赛道不会取消计圈，比赛总时间仍由服务端连续计算。",
                 timingActive: true);
         }
     }
@@ -650,10 +652,10 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lock (stateGate) ResetAll("地产环道计时已停止。");
     }
 
-    public void SetEstateRacePauseCancellation(bool cancelLapOnTelemetryInterruption)
+    public void SetEstateRaceInterventionInvalidation(bool invalidateLapOnDriverIntervention)
     {
         lock (stateGate)
-            cancelCurrentLapOnTelemetryInterruption = cancelLapOnTelemetryInterruption;
+            invalidateCurrentLapOnDriverIntervention = invalidateLapOnDriverIntervention;
     }
 
     public void PauseTimingForEstateRace()
@@ -704,27 +706,32 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             frame.ArrivalTime <= minimumAcceptedFrameArrival)
             return;
 
-        if (lastTelemetryArrival is DateTimeOffset previousArrival &&
-            (frame.ArrivalTime - previousArrival).TotalSeconds > MaximumTelemetryGapSeconds &&
-            IsLapInProgress())
-        {
-            if (cancelCurrentLapOnTelemetryInterruption)
-                AbandonCurrentLap("检测到游戏暂停或遥测中断");
-            else
-                previousPosition = null;
-        }
         lastTelemetryArrival = frame.ArrivalTime;
 
-        var rawTimestampCanBeWrap = frame.Raw.TimestampMS == 0 &&
-                                    lastUnwrappedTimestamp > 0 &&
-                                    (uint)(lastUnwrappedTimestamp & uint.MaxValue) > uint.MaxValue - 10_000;
-        if ((frame.Raw.TimestampMS == 0 && !rawTimestampCanBeWrap) ||
-            !float.IsFinite(frame.Raw.Position.X) ||
+        if (TelemetryContextClassifier.IsDriverIntervention(frame.Raw))
+        {
+            if (IsLapInProgress() && invalidateCurrentLapOnDriverIntervention)
+                AbandonCurrentLap("收到游戏暂停或回转遥测");
+            else if (IsLapInProgress())
+                ResynchronizeLapAfterDriverIntervention("收到游戏暂停或回转遥测", resetTimestamp: true);
+            else
+            {
+                timestampUnwrapper.Reset();
+                lastUnwrappedTimestamp = 0;
+                lastHudUpdateTimestamp = long.MinValue;
+            }
+            previousPosition = null;
+            return;
+        }
+
+        if (!float.IsFinite(frame.Raw.Position.X) ||
             !float.IsFinite(frame.Raw.Position.Y) ||
             !float.IsFinite(frame.Raw.Position.Z))
         {
-            if (IsLapInProgress() && cancelCurrentLapOnTelemetryInterruption)
-                AbandonCurrentLap("检测到游戏暂停或菜单画面");
+            if (IsLapInProgress() && invalidateCurrentLapOnDriverIntervention)
+                AbandonCurrentLap("收到无效位置遥测");
+            else if (IsLapInProgress())
+                ResynchronizeLapAfterDriverIntervention("收到无效位置遥测", resetTimestamp: false);
             previousPosition = null;
             return;
         }
@@ -733,32 +740,15 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         if (lastUnwrappedTimestamp > 0 && timestamp <= lastUnwrappedTimestamp)
         {
             var regressionMilliseconds = lastUnwrappedTimestamp - timestamp;
-            nonAdvancingTimestampStartedAt ??= frame.ArrivalTime;
-            var timestampStalled = frame.ArrivalTime - nonAdvancingTimestampStartedAt.Value >=
-                                   TimeSpan.FromSeconds(MaximumTelemetryGapSeconds);
-            if (IsLapInProgress() && regressionMilliseconds > MaximumTimestampReorderMilliseconds)
-            {
-                AbandonCurrentLap("检测到时间回退");
-            }
-            else if (IsLapInProgress() && timestampStalled && cancelCurrentLapOnTelemetryInterruption)
-            {
-                AbandonCurrentLap("检测到游戏暂停或遥测时间停滞");
-            }
+            // Timestamp reorder/reset is transport evidence, not an authoritative
+            // pause or rewind signal. Only IsRaceOn may classify an intervention.
+            // Ignore isolated regressions so UDP disorder cannot cancel a lap.
             if (regressionMilliseconds > MaximumTimestampReorderMilliseconds)
             {
-                previousPosition = null;
-                timestampUnwrapper.Reset();
-                lastUnwrappedTimestamp = 0;
-                lastHudUpdateTimestamp = long.MinValue;
-                nonAdvancingTimestampStartedAt = null;
-            }
-            else if (timestampStalled)
-            {
-                previousPosition = null;
+                LogIfInitialized($"Estate telemetry timestamp regressed by {regressionMilliseconds} ms; frame ignored without invalidating the lap.");
             }
             return;
         }
-        nonAdvancingTimestampStartedAt = null;
         lastUnwrappedTimestamp = timestamp;
         var position = new EstateTimedPosition(
             frame.Raw.Position.X,
@@ -771,7 +761,10 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             IsLapInProgress() &&
             IsImplausiblePositionJump(previous, position))
         {
-            AbandonCurrentLap("检测到位置跳变或倒带");
+            if (invalidateCurrentLapOnDriverIntervention)
+                AbandonCurrentLap("检测到位置跳变或使用回转");
+            else
+                ResynchronizeLapAfterDriverIntervention("位置跳变或使用回转", resetTimestamp: false);
         }
 
         switch (state.Phase)
@@ -842,7 +835,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         if (state.Phase == EstateCircuitPhase.CapturingReferenceLap)
         {
             AddRoutePoint(position);
-            var elapsed = (position.TimestampMilliseconds - lapStartTimestamp) / 1000d;
+            var elapsed = CurrentLapElapsedSeconds(position.TimestampMilliseconds, frame.ArrivalTime);
             UpdateCurrentLapState(elapsed);
             if (crossed && elapsed >= 15 && routeCapture.Count >= 40)
             {
@@ -855,7 +848,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         if (state.Phase is EstateCircuitPhase.ValidatingLap or EstateCircuitPhase.TimingLap)
         {
             if (!ObserveProjectedLap(frame, position, crossed)) return;
-            var elapsed = (position.TimestampMilliseconds - lapStartTimestamp) / 1000d;
+            var elapsed = CurrentLapElapsedSeconds(position.TimestampMilliseconds, frame.ArrivalTime);
             UpdateCurrentLapState(elapsed);
             if (crossed && elapsed >= 15)
             {
@@ -872,7 +865,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     {
         if (enrollment is null || fittedGate is null) return;
         routeCapture.Add(new TrackPoint(crossing.X, crossing.Y, crossing.Z, 0, 0, 0));
-        referenceLapSeconds = (crossing.TimestampMilliseconds - lapStartTimestamp) / 1000d;
+        referenceLapSeconds = CurrentLapElapsedSeconds(crossing.TimestampMilliseconds, frame.ArrivalTime);
         var track = TrackAlgorithms.BuildTemplate(enrollment.MapName, routeCapture, layoutKind: TrackLayoutKind.Circuit) with
         {
             Source = trackSource,
@@ -906,7 +899,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private void FinishValidationLap(TelemetryFrame frame, EstateGateCrossing crossing)
     {
         if (activeTrack is null || activeDefinition is null) return;
-        var total = (crossing.TimestampMilliseconds - lapStartTimestamp) / 1000d;
+        var total = CurrentLapElapsedSeconds(crossing.TimestampMilliseconds, frame.ArrivalTime);
         var ratio = ProjectionRatio();
         var valid = ratio >= 0.95 && nextCheckpoint == activeDefinition.Checkpoints.Count &&
                     maximumProgress >= activeTrack.LengthMeters * 0.85;
@@ -936,11 +929,14 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private void FinishTimedLap(TelemetryFrame frame, EstateGateCrossing crossing)
     {
         if (activeTrack is null || activeDefinition is null) return;
-        var total = (crossing.TimestampMilliseconds - lapStartTimestamp) / 1000d;
+        var total = CurrentLapElapsedSeconds(crossing.TimestampMilliseconds, frame.ArrivalTime);
         var ratio = ProjectionRatio();
-        var valid = ratio >= 0.95 && nextCheckpoint == activeDefinition.Checkpoints.Count &&
-                    maximumProgress >= activeTrack.LengthMeters * 0.85;
-        var invalidReason = valid ? null :
+        var geometryValid = !trackDeviationDetected && ratio >= 0.95 &&
+                            nextCheckpoint == activeDefinition.Checkpoints.Count &&
+                            maximumProgress >= activeTrack.LengthMeters * 0.85;
+        var classificationValid = !invalidateCurrentLapOnDriverIntervention || geometryValid;
+        var invalidReason = geometryValid ? null :
+            trackDeviationDetected ? "estate-track-deviation" :
             nextCheckpoint != activeDefinition.Checkpoints.Count ? "estate-checkpoints-incomplete" :
             maximumProgress < activeTrack.LengthMeters * 0.85 ? "estate-route-progress-incomplete" :
             $"estate-projection-low-confidence ({ratio:P0})";
@@ -956,7 +952,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             VehicleProfileFingerprint.FromFrame(frame),
             lapStartedAt,
             total,
-            valid,
+            geometryValid,
             invalidReason,
             BuildSegments(total, samples),
             samples);
@@ -966,13 +962,14 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             completedLaps + 1,
             lap.TotalSeconds,
             lap.Segments.OrderBy(segment => segment.Index).Select(segment => segment.TimeSeconds).ToArray(),
-            lap.IsValid,
-            lap.InvalidReason);
+            classificationValid,
+            lap.InvalidReason,
+            geometryValid);
         ReloadTimingHistory();
         heldComparisons = BuildCompletedComparisons(lap);
         heldComparisonsUntil = frame.ArrivalTime +
                                LapHudDisplayTiming.CompletedLapHoldDuration(getOverlayLayout());
-        heldCumulativeHistoricalDeltaSeconds = valid && previousHistoricalReference is not null
+        heldCumulativeHistoricalDeltaSeconds = geometryValid && previousHistoricalReference is not null
             ? total - previousHistoricalReference.TotalSeconds
             : null;
         heldCumulativeHistoricalDeltaUntil = heldCumulativeHistoricalDeltaSeconds is null
@@ -984,7 +981,11 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lastLapSeconds = total;
         BeginLap(crossing.TimestampMilliseconds, frame.ArrivalTime);
         SetState(EstateCircuitPhase.TimingLap,
-            valid ? $"完成有效圈：{total:0.000} s。" : $"本圈无效：{invalidReason}。",
+            geometryValid
+                ? $"完成有效圈：{total:0.000} s。"
+                : classificationValid
+                    ? $"已完成计圈，但本圈不计入最快圈：{invalidReason}。"
+                    : $"本圈无效：{invalidReason}。",
             "已从本次过线开始下一圈。", timingActive: true);
     }
 
@@ -1008,21 +1009,38 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                                       previousProgress >= activeTrack.LengthMeters * 0.75 &&
                                       projection.S <= activeTrack.LengthMeters * 0.25;
                 var delta = projection.S - previousProgress;
+                if (!wrappedAtFinish && delta > 0 &&
+                    previousPosition is EstateTimedPosition previousPositionValue &&
+                    IsImplausibleForwardProgressJump(delta, previousPositionValue, position))
+                {
+                    trackDeviationDetected = true;
+                    if (invalidateCurrentLapOnDriverIntervention)
+                    {
+                        AbandonCurrentLap("检测到跨越赛道大段路线的切弯");
+                        return false;
+                    }
+                    LogIfInitialized($"Estate race shortcut retained for race timing: forward jump={delta:0.0}m.");
+                }
                 if (!wrappedAtFinish && delta < -0.25)
                     accumulatedReverseProgress += -delta;
                 else if (delta > 0.5)
                     accumulatedReverseProgress = Math.Max(0, accumulatedReverseProgress - delta);
                 if (accumulatedReverseProgress >= MaximumReverseProgressMeters)
                 {
-                    AbandonCurrentLap("检测到车辆沿赛道明显回退或使用倒带");
-                    return false;
+                    if (invalidateCurrentLapOnDriverIntervention)
+                    {
+                        AbandonCurrentLap("检测到车辆沿赛道明显回退或使用回转");
+                        return false;
+                    }
+                    ResynchronizeLapAfterDriverIntervention("车辆沿赛道明显回退或使用回转", resetTimestamp: false);
                 }
             }
             previousProjectedProgress = projection.S;
             projectionIndex = projection.SegmentIndex;
             validProjectionSamples++;
+            invalidProjectionStartedAt = null;
             maximumProgress = Math.Max(maximumProgress, projection.S);
-            var elapsed = (position.TimestampMilliseconds - lapStartTimestamp) / 1000d;
+            var elapsed = CurrentLapElapsedSeconds(position.TimestampMilliseconds, frame.ArrivalTime);
             lapSamples.Add(new LapSample(
                 projection.S, elapsed, frame.Raw.Speed, frame.Raw.CurrentEngineRpm, frame.Raw.Gear,
                 frame.Normalized.AccelRatio, frame.Normalized.BrakeRatio, 0,
@@ -1032,6 +1050,12 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         else
         {
             invalidProjectionSamples++;
+            if (invalidateCurrentLapOnDriverIntervention)
+            {
+                invalidProjectionStartedAt ??= frame.ArrivalTime;
+                if (frame.ArrivalTime - invalidProjectionStartedAt.Value >= TimeSpan.FromMilliseconds(250))
+                    trackDeviationDetected = true;
+            }
         }
 
         if (nextCheckpoint < activeDefinition.Checkpoints.Count && previousPosition is EstateTimedPosition previous &&
@@ -1119,6 +1143,11 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         ResetLiveCumulativeHistoricalDelta();
     }
 
+    private double CurrentLapElapsedSeconds(long timestamp, DateTimeOffset arrivalTime) =>
+        invalidateCurrentLapOnDriverIntervention
+            ? Math.Max(0, (timestamp - lapStartTimestamp) / 1000d)
+            : Math.Max(0, (arrivalTime - lapStartedAt).TotalSeconds);
+
     private void ResetLapTracking()
     {
         lapSamples.Clear();
@@ -1129,6 +1158,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         maximumProgress = 0;
         previousProjectedProgress = null;
         accumulatedReverseProgress = 0;
+        invalidProjectionStartedAt = null;
+        trackDeviationDetected = false;
     }
 
     private bool IsLapInProgress() => state.Phase is
@@ -1140,6 +1171,20 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     {
         var interruptedPhase = state.Phase;
         if (!IsLapInProgress()) return;
+
+        if (interruptedPhase == EstateCircuitPhase.TimingLap)
+        {
+            var elapsed = CurrentLapElapsedSeconds(
+                lastUnwrappedTimestamp,
+                lastTelemetryArrival ?? DateTimeOffset.UtcNow);
+            lastCompletedLap = new EstateCircuitCompletedLap(
+                Guid.NewGuid(),
+                completedLaps + 1,
+                elapsed,
+                [],
+                false,
+                $"estate-driver-intervention: {reason}");
+        }
 
         if (interruptedPhase == EstateCircuitPhase.CapturingReferenceLap)
             routeCapture.Clear();
@@ -1175,6 +1220,21 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         LogIfInitialized($"Estate lap abandoned: phase={interruptedPhase}, reason={reason}");
     }
 
+    private void ResynchronizeLapAfterDriverIntervention(string reason, bool resetTimestamp)
+    {
+        previousPosition = null;
+        previousProjectedProgress = null;
+        accumulatedReverseProgress = 0;
+        invalidProjectionStartedAt = null;
+        if (resetTimestamp)
+        {
+            timestampUnwrapper.Reset();
+            lastUnwrappedTimestamp = 0;
+            lastHudUpdateTimestamp = long.MinValue;
+        }
+        LogIfInitialized($"Estate race lap retained after driver intervention: {reason}.");
+    }
+
     private static bool IsImplausiblePositionJump(EstateTimedPosition previous, EstateTimedPosition current)
     {
         var elapsedSeconds = (current.TimestampMilliseconds - previous.TimestampMilliseconds) / 1000d;
@@ -1187,6 +1247,18 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         var reportedSpeed = Math.Max(previous.SpeedMetersPerSecond, current.SpeedMetersPerSecond);
         var plausibleDistanceMeters = Math.Max(40, reportedSpeed * elapsedSeconds * 3 + 15);
         return distanceMeters > plausibleDistanceMeters;
+    }
+
+    private static bool IsImplausibleForwardProgressJump(
+        double forwardProgressMeters,
+        EstateTimedPosition previous,
+        EstateTimedPosition current)
+    {
+        var elapsedSeconds = (current.TimestampMilliseconds - previous.TimestampMilliseconds) / 1000d;
+        if (elapsedSeconds is <= 0 or > 2) return false;
+        var reportedSpeed = Math.Max(previous.SpeedMetersPerSecond, current.SpeedMetersPerSecond);
+        var plausibleProgressMeters = Math.Max(60, reportedSpeed * elapsedSeconds * 3 + 30);
+        return forwardProgressMeters > plausibleProgressMeters;
     }
 
     private void AddRoutePoint(EstateTimedPosition position)
@@ -1542,8 +1614,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lastCompletedLap = null;
         timingHistory.Clear();
         timingSessionId = Guid.Empty;
+        invalidateCurrentLapOnDriverIntervention = true;
         lastTelemetryArrival = null;
-        nonAdvancingTimestampStartedAt = null;
         minimumAcceptedFrameSequence = long.MinValue;
         minimumAcceptedFrameArrival = DateTimeOffset.MinValue;
         comparisonPerformanceClass = null;

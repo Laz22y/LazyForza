@@ -485,6 +485,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
             ClipToBounds = true,
             Background = Brushes.Transparent
         };
+        canvas.PreviewMouseLeftButtonDown += SelectEstateRaceWidgetAtPointer;
         root.Children.Add(canvas);
 
         dashboardHud = CreateHud(
@@ -1284,12 +1285,29 @@ internal sealed class OverlayLayoutEditorWindow : Window
         var pointer = eventArgs.GetPosition(canvas);
         var dashboardWidth = HudWidth(dashboardHud);
         var dashboardHeight = HudHeight(dashboardHud);
-        var next = widgetDragStart with
+        var bounds = DashboardWidgetLayoutSettings.DefaultBounds(selectedDashboardWidget);
+        var proposed = widgetDragStart with
         {
             OffsetX = widgetDragStart.OffsetX +
                       (pointer.X - widgetDragOrigin.X) / dashboardWidth,
             OffsetY = widgetDragStart.OffsetY +
                       (pointer.Y - widgetDragOrigin.Y) / dashboardHeight
+        };
+        var relativeLeft = (bounds.Left + proposed.OffsetX) * dashboardWidth;
+        var relativeTop = (bounds.Top + proposed.OffsetY) * dashboardHeight;
+        var snapped = OverlayLayoutSnapping.Snap(
+            relativeLeft,
+            relativeTop,
+            Math.Max(16, bounds.Width * dashboardWidth),
+            Math.Max(16, bounds.Height * dashboardHeight),
+            dashboardWidth,
+            dashboardHeight,
+            tolerance: 7,
+            margin: 0);
+        var next = proposed with
+        {
+            OffsetX = snapped.Left / dashboardWidth - bounds.Left,
+            OffsetY = snapped.Top / dashboardHeight - bounds.Top
         };
         dashboardWidgets = dashboardWidgets.Set(
             selectedDashboardWidget,
@@ -1298,10 +1316,14 @@ internal sealed class OverlayLayoutEditorWindow : Window
                 next));
         PositionDashboardWidgetFrame();
         InvalidateDashboardPreview();
-        alignmentText.Text =
-            $"{DashboardWidgetName(selectedDashboardWidget)} · 双击恢复默认位置";
-        alignmentText.Foreground = new SolidColorBrush(
-            Color.FromRgb(73, 211, 235));
+        ShowGuides(snapped with
+        {
+            VerticalGuide = snapped.VerticalGuide is double x ? dashboardHud.Left + x : null,
+            HorizontalGuide = snapped.HorizontalGuide is double y ? dashboardHud.Top + y : null,
+            AlignmentText = string.IsNullOrWhiteSpace(snapped.AlignmentText)
+                ? $"{DashboardWidgetName(selectedDashboardWidget)} · 双击恢复默认位置"
+                : $"{DashboardWidgetName(selectedDashboardWidget)} · {snapped.AlignmentText}"
+        });
         eventArgs.Handled = true;
     }
 
@@ -1408,6 +1430,42 @@ internal sealed class OverlayLayoutEditorWindow : Window
         eventArgs.Handled = true;
     }
 
+    private void SelectEstateRaceWidgetAtPointer(
+        object sender,
+        MouseButtonEventArgs eventArgs)
+    {
+        if (!estateRacePreviewVisible || eventArgs.ChangedButton != MouseButton.Left)
+            return;
+
+        var pointer = eventArgs.GetPosition(canvas);
+        var estateWidth = HudWidth(estateRaceHud);
+        var estateHeight = HudHeight(estateRaceHud);
+        var hits = Enum.GetValues<EstateRaceHudWidgetKind>()
+            .Select(kind =>
+            {
+                var placement = estateRaceWidgets.Get(kind);
+                var baseSize = EstateRaceWidgetBaseSize(kind, estateWidth, estateHeight);
+                var bounds = new Rect(
+                    estateRaceHud.Left + placement.Left * estateWidth,
+                    estateRaceHud.Top + placement.Top * estateHeight,
+                    Math.Max(16, baseSize.Width * placement.Scale),
+                    Math.Max(16, baseSize.Height * placement.Scale));
+                return (Kind: kind, Placement: placement, Bounds: bounds);
+            })
+            .Where(candidate => candidate.Placement.IsVisible && candidate.Bounds.Contains(pointer))
+            .OrderBy(candidate => candidate.Bounds.Width * candidate.Bounds.Height)
+            .ToArray();
+        if (hits.Length == 0) return;
+        var hit = hits[0];
+
+        selectedEstateRaceWidget = hit.Kind;
+        estateRaceWidgetSelection.SelectedIndex = (int)hit.Kind;
+        SelectHud(estateRaceHud);
+        RefreshEstateRaceWidgetControls();
+        PositionEstateRaceWidgetFrame();
+        BeginEstateRaceWidgetDrag(estateRaceWidgetFrame, eventArgs);
+    }
+
     private void ContinueEstateRaceWidgetDrag(
         object sender,
         MouseEventArgs eventArgs)
@@ -1428,26 +1486,40 @@ internal sealed class OverlayLayoutEditorWindow : Window
         var maxTop = Math.Max(
             0,
             1 - baseSize.Height * estateRaceWidgetDragStart.Scale / estateHeight);
+        var proposedLeft = Math.Clamp(
+            estateRaceWidgetDragStart.Left +
+            (pointer.X - widgetDragOrigin.X) / estateWidth,
+            0,
+            maxLeft);
+        var proposedTop = Math.Clamp(
+            estateRaceWidgetDragStart.Top +
+            (pointer.Y - widgetDragOrigin.Y) / estateHeight,
+            0,
+            maxTop);
+        var width = Math.Max(16, baseSize.Width * estateRaceWidgetDragStart.Scale);
+        var height = Math.Max(16, baseSize.Height * estateRaceWidgetDragStart.Scale);
+        var snapped = OverlayLayoutSnapping.Snap(
+            estateRaceHud.Left + proposedLeft * estateWidth,
+            estateRaceHud.Top + proposedTop * estateHeight,
+            width,
+            height,
+            ActualWidth,
+            ActualHeight);
         var next = estateRaceWidgetDragStart with
         {
-            Left = Math.Clamp(
-                estateRaceWidgetDragStart.Left +
-                (pointer.X - widgetDragOrigin.X) / estateWidth,
-                0,
-                maxLeft),
-            Top = Math.Clamp(
-                estateRaceWidgetDragStart.Top +
-                (pointer.Y - widgetDragOrigin.Y) / estateHeight,
-                0,
-                maxTop)
+            Left = Math.Clamp((snapped.Left - estateRaceHud.Left) / estateWidth, 0, maxLeft),
+            Top = Math.Clamp((snapped.Top - estateRaceHud.Top) / estateHeight, 0, maxTop)
         };
         estateRaceWidgets = estateRaceWidgets.Set(selectedEstateRaceWidget, next);
         PositionEstateRaceWidgetFrame();
         InvalidateEstateRacePreview();
         PositionHandles();
-        alignmentText.Text =
-            $"{EstateRaceWidgetName(selectedEstateRaceWidget)} · 双击恢复默认位置与大小";
-        alignmentText.Foreground = new SolidColorBrush(Color.FromRgb(180, 99, 255));
+        ShowGuides(snapped with
+        {
+            AlignmentText = string.IsNullOrWhiteSpace(snapped.AlignmentText)
+                ? $"{EstateRaceWidgetName(selectedEstateRaceWidget)} · 双击恢复默认位置与大小"
+                : $"{EstateRaceWidgetName(selectedEstateRaceWidget)} · {snapped.AlignmentText}"
+        });
         eventArgs.Handled = true;
     }
 
@@ -1483,7 +1555,10 @@ internal sealed class OverlayLayoutEditorWindow : Window
             EstateRaceHudWidgetKind.TrackMap => "赛道一览",
             EstateRaceHudWidgetKind.GripStatus => "抓地提示",
             EstateRaceHudWidgetKind.Banner => "赛事横幅",
-            _ => "五盏起跑灯"
+            EstateRaceHudWidgetKind.StartLights => "五盏起跑灯",
+            EstateRaceHudWidgetKind.PitStopInfo => "维修站信息",
+            EstateRaceHudWidgetKind.PitLimiter => "维修区限速",
+            _ => "罚时指示器"
         };
 
     private static Size EstateRaceWidgetBaseSize(
@@ -1501,7 +1576,10 @@ internal sealed class OverlayLayoutEditorWindow : Window
                 width * 0.19,
                 height * 0.085),
             EstateRaceHudWidgetKind.Banner => new Size(width * 0.50, height * 0.082),
-            _ => new Size(width * 0.30, height * 0.09)
+            EstateRaceHudWidgetKind.StartLights => new Size(width * 0.30, height * 0.09),
+            EstateRaceHudWidgetKind.PitStopInfo => new Size(width * 0.255, height * 0.14),
+            EstateRaceHudWidgetKind.PitLimiter => new Size(height * 0.11, height * 0.11),
+            _ => new Size(width * 0.25, height * 0.09)
         };
 
     private void BeginHudDrag(EditorHud hud, MouseButtonEventArgs eventArgs)

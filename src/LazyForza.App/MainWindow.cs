@@ -2966,7 +2966,11 @@ internal sealed partial class MainWindow : Window
             (EstateRaceHudWidgetKind.Leaderboard, "比赛排行榜"),
             (EstateRaceHudWidgetKind.TrackMap, "赛道一览"),
             (EstateRaceHudWidgetKind.GripStatus, "抓地提示"),
-            (EstateRaceHudWidgetKind.Banner, "赛事横幅")
+            (EstateRaceHudWidgetKind.Banner, "赛事横幅"),
+            (EstateRaceHudWidgetKind.StartLights, "五盏红灯"),
+            (EstateRaceHudWidgetKind.PitStopInfo, "维修站信息"),
+            (EstateRaceHudWidgetKind.PitLimiter, "维修区限速"),
+            (EstateRaceHudWidgetKind.PenaltyStatus, "罚时指示器")
         };
         var estateRaceToggles = new Dictionary<EstateRaceHudWidgetKind, ToggleButton>();
         var estateRaceComponentPanel = new WrapPanel { Margin = new Thickness(-4, -2, 0, 0) };

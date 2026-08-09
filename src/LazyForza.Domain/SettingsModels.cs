@@ -58,7 +58,10 @@ public enum EstateRaceHudWidgetKind
     TrackMap,
     GripStatus,
     Banner,
-    StartLights
+    StartLights,
+    PitStopInfo,
+    PitLimiter,
+    PenaltyStatus
 }
 
 public sealed record EstateRaceHudWidgetPlacement(
@@ -73,7 +76,10 @@ public sealed record EstateRaceHudLayout(
     EstateRaceHudWidgetPlacement? TrackMap = null,
     EstateRaceHudWidgetPlacement? GripStatus = null,
     EstateRaceHudWidgetPlacement? Banner = null,
-    EstateRaceHudWidgetPlacement? StartLights = null)
+    EstateRaceHudWidgetPlacement? StartLights = null,
+    EstateRaceHudWidgetPlacement? PitStopInfo = null,
+    EstateRaceHudWidgetPlacement? PitLimiter = null,
+    EstateRaceHudWidgetPlacement? PenaltyStatus = null)
 {
     public EstateRaceHudWidgetPlacement Get(EstateRaceHudWidgetKind kind) => kind switch
     {
@@ -81,7 +87,10 @@ public sealed record EstateRaceHudLayout(
         EstateRaceHudWidgetKind.TrackMap => TrackMap ?? EstateRaceHudLayoutSettings.Default.Get(kind),
         EstateRaceHudWidgetKind.GripStatus => GripStatus ?? EstateRaceHudLayoutSettings.Default.Get(kind),
         EstateRaceHudWidgetKind.Banner => Banner ?? EstateRaceHudLayoutSettings.Default.Get(kind),
-        _ => StartLights ?? EstateRaceHudLayoutSettings.Default.Get(kind)
+        EstateRaceHudWidgetKind.StartLights => StartLights ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        EstateRaceHudWidgetKind.PitStopInfo => PitStopInfo ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        EstateRaceHudWidgetKind.PitLimiter => PitLimiter ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        _ => PenaltyStatus ?? EstateRaceHudLayoutSettings.Default.Get(kind)
     };
 
     public EstateRaceHudLayout Set(
@@ -92,7 +101,10 @@ public sealed record EstateRaceHudLayout(
             EstateRaceHudWidgetKind.TrackMap => this with { TrackMap = placement },
             EstateRaceHudWidgetKind.GripStatus => this with { GripStatus = placement },
             EstateRaceHudWidgetKind.Banner => this with { Banner = placement },
-            _ => this with { StartLights = placement }
+            EstateRaceHudWidgetKind.StartLights => this with { StartLights = placement },
+            EstateRaceHudWidgetKind.PitStopInfo => this with { PitStopInfo = placement },
+            EstateRaceHudWidgetKind.PitLimiter => this with { PitLimiter = placement },
+            _ => this with { PenaltyStatus = placement }
         };
 }
 
@@ -103,7 +115,10 @@ public static class EstateRaceHudLayoutSettings
         new(true, 0.80, 0.17, 0.88),
         new(true, 0.80, 0.47, 0.92),
         new(true, 0.25, 0.025, 1),
-        new(true, 0.35, 0.12, 1));
+        new(true, 0.35, 0.12, 1),
+        new(true, 0.025, 0.80, 1),
+        new(true, 0.91, 0.62, 1),
+        new(true, 0.39, 0.70, 1));
 
     public static EstateRaceHudLayout Default => DefaultValue;
 
