@@ -111,12 +111,12 @@ public sealed record EstateRaceHudLayout(
 public static class EstateRaceHudLayoutSettings
 {
     private static readonly EstateRaceHudLayout DefaultValue = new(
-        new(true, 0.025, 0.14, 1),
-        new(true, 0.80, 0.17, 0.88),
-        new(true, 0.80, 0.47, 0.92),
+        new(true, 0.025, 0.12, 1),
+        new(true, 0.80, 0.17, 0.96),
+        new(true, 0.80, 0.47, 0.96),
         new(true, 0.25, 0.025, 1),
         new(true, 0.35, 0.12, 1),
-        new(true, 0.025, 0.80, 1),
+        new(true, 0.025, 0.815, 1),
         new(true, 0.91, 0.62, 1),
         new(true, 0.39, 0.70, 1));
 
@@ -127,16 +127,31 @@ public static class EstateRaceHudLayoutSettings
         var source = value ?? DefaultValue;
         var normalized = new EstateRaceHudLayout();
         foreach (var kind in Enum.GetValues<EstateRaceHudWidgetKind>())
-            normalized = normalized.Set(kind, Normalize(source.Get(kind)));
+            normalized = normalized.Set(kind, Normalize(kind, source.Get(kind)));
         return normalized;
     }
 
+    public static double MinimumScale(EstateRaceHudWidgetKind kind) => kind switch
+    {
+        EstateRaceHudWidgetKind.TrackMap or EstateRaceHudWidgetKind.PitStopInfo => 0.80,
+        EstateRaceHudWidgetKind.Leaderboard or EstateRaceHudWidgetKind.GripStatus or
+            EstateRaceHudWidgetKind.PenaltyStatus => 0.75,
+        EstateRaceHudWidgetKind.Banner => 0.70,
+        _ => 0.60
+    };
+
+    public static double NormalizeScale(EstateRaceHudWidgetKind kind, double scale) =>
+        double.IsFinite(scale)
+            ? Math.Clamp(scale, MinimumScale(kind), 1.75)
+            : 1;
+
     private static EstateRaceHudWidgetPlacement Normalize(
+        EstateRaceHudWidgetKind kind,
         EstateRaceHudWidgetPlacement value) => value with
         {
             Left = Finite(value.Left, 0),
             Top = Finite(value.Top, 0),
-            Scale = double.IsFinite(value.Scale) ? Math.Clamp(value.Scale, 0.5, 1.75) : 1,
+            Scale = NormalizeScale(kind, value.Scale),
             Opacity = double.IsFinite(value.Opacity) ? Math.Clamp(value.Opacity, 0.15, 1) : 1
         };
 

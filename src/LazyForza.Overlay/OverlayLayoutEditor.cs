@@ -445,6 +445,9 @@ internal sealed class OverlayLayoutEditorWindow : Window
     private double resizeAccumulatedY;
     private readonly double estateRaceViewportWidth;
     private readonly double estateRaceViewportHeight;
+    private readonly List<UIElement> editorChromePanels = [];
+    private Button? restoreEditorChrome;
+    private bool editorChromeVisible = true;
 
     public OverlayLayoutEditorWindow(
         Func<IReadOnlyList<IHudContribution>> getContributions,
@@ -585,7 +588,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         });
         heading.Children.Add(new TextBlock
         {
-            Text = "选择 HUD 后拖动或中心缩放；赛事四块使用独立全屏画布，不跟随主仪表盘。Esc 取消，Ctrl+S 保存。",
+            Text = "选择 HUD 后拖动或中心缩放；地产赛事部件使用独立全屏画布。编辑面板挡住内容时按 F2 收起。Esc 取消，Ctrl+S 保存。",
             Margin = new Thickness(0, 3, 0, 0),
             FontSize = 11,
             Foreground = new SolidColorBrush(Color.FromRgb(179, 192, 201))
@@ -655,6 +658,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         headerGrid.Children.Add(metricsText);
         header.Child = headerGrid;
         root.Children.Add(header);
+        editorChromePanels.Add(header);
 
         var previewVisibilityPanel = new StackPanel
         {
@@ -729,6 +733,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
             Child = previewVisibilityPanel
         };
         root.Children.Add(previewVisibilityBar);
+        editorChromePanels.Add(previewVisibilityBar);
 
         var widgetControls = new StackPanel
         {
@@ -800,6 +805,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
             Child = widgetControls
         };
         root.Children.Add(dashboardWidgetPanel);
+        editorChromePanels.Add(dashboardWidgetPanel);
 
         var estateRaceWidgetControls = new StackPanel
         {
@@ -872,6 +878,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
             Child = estateRaceWidgetControls
         };
         root.Children.Add(estateRaceWidgetPanel);
+        editorChromePanels.Add(estateRaceWidgetPanel);
 
         var footer = new Border
         {
@@ -895,6 +902,16 @@ internal sealed class OverlayLayoutEditorWindow : Window
             Foreground = new SolidColorBrush(Color.FromRgb(179, 192, 201))
         };
         footerPanel.Children.Add(alignmentText);
+        var hideChrome = new Button
+        {
+            Content = "收起编辑面板",
+            MinWidth = 104,
+            Padding = new Thickness(12, 7, 12, 7),
+            Margin = new Thickness(0, 0, 8, 0),
+            ToolTip = "暂时隐藏提示和按钮，避免遮挡 HUD；按 F2 可再次显示"
+        };
+        hideChrome.Click += (_, _) => SetEditorChromeVisible(false);
+        footerPanel.Children.Add(hideChrome);
         var cancel = new Button
         {
             Content = "取消",
@@ -915,6 +932,20 @@ internal sealed class OverlayLayoutEditorWindow : Window
         footerPanel.Children.Add(save);
         footer.Child = footerPanel;
         root.Children.Add(footer);
+        editorChromePanels.Add(footer);
+
+        restoreEditorChrome = new Button
+        {
+            Content = "显示编辑面板  F2",
+            Margin = new Thickness(18),
+            Padding = new Thickness(12, 7, 12, 7),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Visibility = Visibility.Collapsed,
+            ToolTip = "恢复 Overlay 编辑器的选项、提示和保存按钮"
+        };
+        restoreEditorChrome.Click += (_, _) => SetEditorChromeVisible(true);
+        root.Children.Add(restoreEditorChrome);
         Content = root;
 
         SourceInitialized += (_, _) =>
@@ -938,7 +969,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
     }
 
     private const string DefaultAlignmentText =
-        "HUD 可临时隐藏后重叠摆放；地产赛事四块可在整个游戏窗口内独立调整";
+        "HUD 可临时隐藏后重叠摆放；地产赛事各部件可在整个游戏窗口内独立调整";
 
     public OverlayLayout? Result { get; private set; }
 
@@ -1084,11 +1115,11 @@ internal sealed class OverlayLayoutEditorWindow : Window
         lapSelection.IsChecked = selectedHud == lapHud;
         driftSelection.IsChecked = selectedHud == driftHud;
         estateRaceSelection.IsChecked = selectedHud == estateRaceHud;
-        dashboardWidgetPanel.Visibility =
+        dashboardWidgetPanel.Visibility = editorChromeVisible &&
             selectedHud == dashboardHud && dashboardPreviewVisible
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-        estateRaceWidgetPanel.Visibility =
+        estateRaceWidgetPanel.Visibility = editorChromeVisible &&
             selectedHud == estateRaceHud && estateRacePreviewVisible
                 ? Visibility.Visible
                 : Visibility.Collapsed;
@@ -1568,18 +1599,18 @@ internal sealed class OverlayLayoutEditorWindow : Window
         {
             EstateRaceHudWidgetKind.Leaderboard => new Size(
                 width * 0.235,
-                height * 0.058 + Math.Max(36, height * 0.045) * 6),
+                height * 0.079 + Math.Max(36, height * 0.045) * 12),
             EstateRaceHudWidgetKind.TrackMap => new Size(
                 Math.Min(width * 0.19, height * 0.28),
                 Math.Min(width * 0.19, height * 0.28)),
             EstateRaceHudWidgetKind.GripStatus => new Size(
-                width * 0.19,
-                height * 0.085),
-            EstateRaceHudWidgetKind.Banner => new Size(width * 0.50, height * 0.082),
+                width * 0.20,
+                height * 0.095),
+            EstateRaceHudWidgetKind.Banner => new Size(width * 0.50, height * 0.09),
             EstateRaceHudWidgetKind.StartLights => new Size(width * 0.30, height * 0.09),
-            EstateRaceHudWidgetKind.PitStopInfo => new Size(width * 0.255, height * 0.14),
+            EstateRaceHudWidgetKind.PitStopInfo => new Size(width * 0.215, height * 0.174),
             EstateRaceHudWidgetKind.PitLimiter => new Size(height * 0.11, height * 0.11),
-            _ => new Size(width * 0.25, height * 0.09)
+            _ => new Size(width * 0.27, height * 0.105)
         };
 
     private void BeginHudDrag(EditorHud hud, MouseButtonEventArgs eventArgs)
@@ -1791,7 +1822,10 @@ internal sealed class OverlayLayoutEditorWindow : Window
             scaleChange = 0;
         }
 
-        var scale = Math.Clamp(resizeStartScale + scaleChange, 0.5, 1.75);
+        var scale = Math.Clamp(
+            resizeStartScale + scaleChange,
+            EstateRaceHudLayoutSettings.MinimumScale(selectedEstateRaceWidget),
+            1.75);
         var width = baseSize.Width * scale;
         var height = baseSize.Height * scale;
         var left = Math.Clamp(
@@ -1938,6 +1972,16 @@ internal sealed class OverlayLayoutEditorWindow : Window
         DialogResult = false;
     }
 
+    private void SetEditorChromeVisible(bool visible)
+    {
+        editorChromeVisible = visible;
+        foreach (var panel in editorChromePanels)
+            panel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (restoreEditorChrome is not null)
+            restoreEditorChrome.Visibility = visible ? Visibility.Collapsed : Visibility.Visible;
+        if (visible) UpdateSelectionVisuals();
+    }
+
     private void OnPreviewKeyDown(object sender, KeyEventArgs eventArgs)
     {
         if (eventArgs.Key == Key.Escape)
@@ -1949,6 +1993,11 @@ internal sealed class OverlayLayoutEditorWindow : Window
                  Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
             Save();
+            eventArgs.Handled = true;
+        }
+        else if (eventArgs.Key == Key.F2)
+        {
+            SetEditorChromeVisible(!editorChromeVisible);
             eventArgs.Handled = true;
         }
     }

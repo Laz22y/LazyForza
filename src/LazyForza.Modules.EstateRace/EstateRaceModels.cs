@@ -107,7 +107,14 @@ public sealed record EstateRaceServerDescriptor(
     bool AllowTeams = true,
     int SectorCount = 0,
     int DriversPerTeam = 6,
-    IReadOnlyList<EstateRaceTeam>? Teams = null);
+    IReadOnlyList<EstateRaceTeam>? Teams = null,
+    bool TrackPackageAvailable = false,
+    long? TrackPackageSizeBytes = null,
+    string? TrackPackageDownloadPath = null,
+    string? TrackPackageFileSha256 = null,
+    string? OrganizerLogoHash = null,
+    string? OrganizerLogoMimeType = null,
+    string? OrganizerLogoDownloadPath = null);
 
 public sealed record EstateCompletedLapEvent(
     Guid EventId,
@@ -127,9 +134,18 @@ public sealed record EstateRaceTrackContext(
     bool IsTimingActive,
     EstateCompletedLapEvent? LastCompletedLap,
     int SectorCount = 0,
-    string? TrackPackageHash = null);
+    string? TrackPackageHash = null,
+    IReadOnlyList<SectorDefinition>? Sectors = null);
 
 public readonly record struct EstateRaceMapPoint(double X, double Y);
+
+public readonly record struct EstateRaceMapGate(
+    EstateRaceMapPoint Left,
+    EstateRaceMapPoint Right);
+
+public sealed record EstateRaceMapSector(
+    int SectorIndex,
+    IReadOnlyList<EstateRaceMapPoint> Points);
 
 public sealed record EstateRacePenalty(
     Guid Id,
@@ -242,7 +258,15 @@ public sealed record EstateRaceSession(
     int DriversPerTeam = 6,
     IReadOnlyList<EstateRaceTeam>? Teams = null,
     bool ChequeredImminent = false,
-    IReadOnlyList<double?>? FastestLapSectorSeconds = null);
+    IReadOnlyList<double?>? FastestLapSectorSeconds = null,
+    string? OrganizerLogoHash = null,
+    string? OrganizerLogoMimeType = null,
+    string? OrganizerLogoDownloadPath = null);
+
+public sealed record EstateRaceOrganizerLogo(
+    string Sha256,
+    string MimeType,
+    byte[] Bytes);
 
 public sealed record EstatePitServiceState(
     bool IsInPitLane,
@@ -257,7 +281,8 @@ public sealed record EstatePitServiceState(
     bool IsApproachingPit = false,
     double SpeedLimitKph = 0,
     double CurrentSpeedKph = 0,
-    bool IsSpeeding = false)
+    bool IsSpeeding = false,
+    bool IsOnPitRoute = false)
 {
     public static EstatePitServiceState Empty { get; } = new(false, false, 0, 0, false, 0);
 }
@@ -271,7 +296,11 @@ public sealed record EstateRaceHudState(
     IReadOnlyList<EstateRaceMapPoint> TrackOutline,
     RaceGripCondition LocalGripCondition,
     string GripExplanation,
-    EstatePitServiceState PitService)
+    EstatePitServiceState PitService,
+    IReadOnlyList<EstateRaceMapPoint>? PitLaneOutline = null,
+    EstateRaceMapGate? StartFinishGate = null,
+    IReadOnlyList<EstateRaceMapSector>? TrackSectors = null,
+    EstateRaceOrganizerLogo? OrganizerLogo = null)
 {
     public bool IsConnected => ConnectionState == EstateRaceConnectionState.Connected;
 }

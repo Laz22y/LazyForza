@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -58,8 +61,16 @@ internal sealed partial class MainWindow
         TextBlock onlineValue = null!;
         TextBlock fastestValue = null!;
         StackPanel participantList = null!;
+        StackPanel participantRows = null!;
+        TextBlock participantTitle = null!;
         StackPanel connectedContent = null!;
         Border hostingGuide = null!;
+        var exportResult = new Button
+        {
+            Content = "导出我的成绩 PNG",
+            Padding = new Thickness(14, 7, 14, 7),
+            Visibility = Visibility.Collapsed
+        };
         var ready = new Button
         {
             Content = "标记已准备",
@@ -99,12 +110,27 @@ internal sealed partial class MainWindow
                     throw new InvalidOperationException("服务端协议版本与当前 LazyForza 不兼容。");
                 if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackId))
                 {
-                    if (!Guid.TryParse(descriptor.ActiveTrackId, out var trackId) || store.LoadTrack(trackId) is null)
-                        throw new InvalidOperationException($"本机没有服务端指定的地产环道“{descriptor.ActiveTrackName ?? descriptor.ActiveTrackId}”。请先导入房主提供的 .lfzestate 文件，再进入房间。");
+                    if (!Guid.TryParse(descriptor.ActiveTrackId, out var trackId))
+                        throw new InvalidOperationException("服务端配置的赛道标识不是有效 UUID，请房主在总控中重新填写。");
+                    var localTrack = store.LoadTrack(trackId);
+                    if (localTrack is null)
+                    {
+                        await DownloadHostedEstateTrackAsync(
+                            profile.ServerAddress, descriptor, packageService, estate,
+                            replaceExisting: false, lifetimeCancellation.Token);
+                    }
                     var identity = packageService.Identify(trackId);
                     if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackPackageHash) &&
                         !string.Equals(identity.PayloadSha256, descriptor.ActiveTrackPackageHash, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException($"本机赛道“{identity.TrackName}”与服务端的 SHA-256 不一致。请从房主处重新获取正确的 .lfzestate 文件。");
+                    {
+                        await DownloadHostedEstateTrackAsync(
+                            profile.ServerAddress, descriptor, packageService, estate,
+                            replaceExisting: true, lifetimeCancellation.Token);
+                        identity = packageService.Identify(trackId);
+                    }
+                    if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackPackageHash) &&
+                        !string.Equals(identity.PayloadSha256, descriptor.ActiveTrackPackageHash, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("下载后的赛道摘要仍与服务端不一致，已阻止连接。请房主重新上传赛道文件并核对 SHA-256。");
                     if (estate.ActiveDefinition?.TrackId != trackId || !estate.State.IsTimingActive)
                         estate.StartTiming(trackId);
                 }
@@ -139,6 +165,27 @@ internal sealed partial class MainWindow
                 MessageBox.Show(this, exception.Message, "无法更新准备状态", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         };
+        exportResult.Click += (_, _) =>
+        {
+            try
+            {
+                var state = module.State;
+                var session = state.Session ?? throw new InvalidOperationException("当前没有可导出的赛事结果。");
+                var participant = session.Participants.FirstOrDefault(item => item.Id == state.LocalParticipantId) ??
+                                  throw new InvalidOperationException("没有找到你的车手成绩。");
+                var report = BuildEstateRacePersonalResultReport(session, participant);
+                var phaseName = session.Phase == RaceSessionPhase.Grid ? "排位赛" : "正赛";
+                var path = PngReportExporter.Export(
+                    this, report,
+                    $"LazyForza-{phaseName}成绩-{participant.DisplayName}-{DateTime.Now:yyyyMMdd-HHmm}.png");
+                if (path is not null)
+                    MessageBox.Show(this, $"已导出：\n{path}", "导出完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception exception)
+            {
+                MessageBox.Show(this, exception.Message, "无法导出成绩", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        };
 
         connectedContent = new StackPanel { Visibility = Visibility.Collapsed };
         var sessionMetrics = new UniformGrid { Columns = 4, Margin = new Thickness(0, 14, 0, 4) };
@@ -153,6 +200,16 @@ internal sealed partial class MainWindow
         connectedContent.Children.Add(sessionMetrics);
 
         participantList = new StackPanel();
+        var participantHeading = new Grid();
+        participantHeading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        participantHeading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        participantTitle = Label("正赛排名", 17, FontWeights.SemiBold);
+        participantHeading.Children.Add(participantTitle);
+        Grid.SetColumn(exportResult, 1);
+        participantHeading.Children.Add(exportResult);
+        participantList.Children.Add(participantHeading);
+        participantRows = new StackPanel();
+        participantList.Children.Add(participantRows);
         connectedContent.Children.Add(Card(participantList));
         var gripNotice = Label(
             "抓地提示不是轮胎磨损值。FH6 UDP 不提供轮胎磨损、车损或换胎完成字段；HUD 只根据本圈轮胎滑移样本分为略微、中度、严重、极限四档。“正在维修区服务”只代表车辆进入已录入的换胎区；本机显示“维修停留完成”也仅表示连续低速停车达到设置时长。",
@@ -196,27 +253,128 @@ internal sealed partial class MainWindow
             });
             onlineValue.Text = session is null ? "0 / 12" : $"{session.Participants.Count(item => item.IsConnected)} / 12";
             fastestValue.Text = Time(session?.FastestLapSeconds);
-            participantList.Children.Clear();
-            participantList.Children.Add(Label(
-                session?.Phase switch
+            participantRows.Children.Clear();
+            participantTitle.Text = session?.Phase switch
                 {
                     RaceSessionPhase.Qualifying or RaceSessionPhase.Grid => "排位赛排名",
                     RaceSessionPhase.Finished => "正赛最终成绩",
                     _ => "正赛排名"
-                },
-                17, FontWeights.SemiBold));
+                };
+            exportResult.Visibility = session?.Phase is RaceSessionPhase.Grid or RaceSessionPhase.Finished
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             if (session is null || session.Participants.Count == 0)
             {
-                participantList.Children.Add(Label("尚无车手登录。", 13, FontWeights.Normal, "MutedBrush"));
+                participantRows.Children.Add(Label("尚无车手登录。", 13, FontWeights.Normal, "MutedBrush"));
                 return;
             }
             foreach (var participant in session.Participants)
-                participantList.Children.Add(RaceParticipantRow(participant, state.LocalParticipantId, session, session.AllowTeams));
+                participantRows.Children.Add(RaceParticipantRow(participant, state.LocalParticipantId, session, session.AllowTeams));
         }
 
         UpdateRacePageState();
         refreshVisiblePage = UpdateRacePageState;
         return Scroll(stack);
+    }
+
+    private async Task DownloadHostedEstateTrackAsync(
+        string serverAddress,
+        EstateRaceServerDescriptor descriptor,
+        LazyForza.Storage.EstateTrackPackageService packageService,
+        EstateCircuitModule estate,
+        bool replaceExisting,
+        CancellationToken cancellationToken)
+    {
+        if (!descriptor.TrackPackageAvailable ||
+            string.IsNullOrWhiteSpace(descriptor.TrackPackageDownloadPath))
+        {
+            throw new InvalidOperationException(
+                replaceExisting
+                    ? "本机赛道与服务端的 SHA-256 不一致，而且房主没有在服务端托管赛道文件。请从房主处重新获取正确的 .lfzestate 文件。"
+                    : $"本机没有服务端指定的地产环道“{descriptor.ActiveTrackName ?? descriptor.ActiveTrackId}”，而且房主没有在服务端托管赛道文件。请先手动导入房主提供的 .lfzestate 文件。");
+        }
+
+        var sizeText = descriptor.TrackPackageSizeBytes is > 0
+            ? $"（{descriptor.TrackPackageSizeBytes.Value / 1024d:0.#} KiB）"
+            : string.Empty;
+        var message = replaceExisting
+            ? $"本机的“{descriptor.ActiveTrackName ?? descriptor.ActiveTrackId}”与本场赛道摘要不同。\n\n是否从服务端下载并替换？{sizeText}\n\n替换会删除这条本地赛道及其已有圈速记录，其他赛道和用户数据不受影响。"
+            : $"本机没有“{descriptor.ActiveTrackName ?? descriptor.ActiveTrackId}”。\n\n是否从赛事服务端下载并导入？{sizeText}\n下载完成并校验 SHA-256 后才会进入房间。";
+        if (MessageBox.Show(this, message, "下载赛事赛道", MessageBoxButton.YesNo,
+                replaceExisting ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes)
+            throw new InvalidOperationException("你已取消下载赛事赛道，未进入房间。");
+
+        const long maximumHostedPackageBytes = 1_572_864;
+        var temporaryPath = Path.Combine(Path.GetTempPath(), $"LazyForza-{Guid.NewGuid():N}.lfzestate");
+        try
+        {
+            var downloadUri = EstateRaceHttpUri(serverAddress, descriptor.TrackPackageDownloadPath);
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            using var response = await client.GetAsync(
+                downloadUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > maximumHostedPackageBytes)
+                throw new InvalidDataException("服务端返回的赛道文件超过 1.5 MiB 托管上限。");
+            await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
+            await using (var output = new FileStream(
+                             temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                             64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var buffer = new byte[64 * 1024];
+                long total = 0;
+                while (true)
+                {
+                    var read = await input.ReadAsync(buffer, cancellationToken);
+                    if (read == 0) break;
+                    total += read;
+                    if (total > maximumHostedPackageBytes)
+                        throw new InvalidDataException("服务端返回的赛道文件超过 1.5 MiB 托管上限。");
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(descriptor.TrackPackageFileSha256))
+            {
+                await using var file = File.OpenRead(temporaryPath);
+                var fileHash = Convert.ToHexString(await SHA256.HashDataAsync(file, cancellationToken));
+                if (!string.Equals(fileHash, descriptor.TrackPackageFileSha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("下载文件的 SHA-256 与服务端描述不一致。");
+            }
+            var preview = packageService.Preview(temporaryPath, cancellationToken);
+            if (!Guid.TryParse(descriptor.ActiveTrackId, out var expectedTrackId) ||
+                preview.Manifest.TrackId != expectedTrackId ||
+                !string.Equals(preview.Manifest.PayloadSha256, descriptor.ActiveTrackPackageHash,
+                    StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("下载文件中的赛道标识或数据摘要与房间配置不一致。");
+
+            if (replaceExisting && estate.ActiveDefinition?.TrackId == expectedTrackId)
+                estate.StopTiming();
+            var imported = packageService.Import(
+                temporaryPath, "EstateRaceServer", replaceExisting, cancellationToken);
+            if (!imported.Imported && !imported.AlreadyExists)
+                throw new InvalidOperationException("赛事赛道未能导入本机数据库。");
+        }
+        finally
+        {
+            try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static Uri EstateRaceHttpUri(string serverAddress, string path)
+    {
+        var normalized = serverAddress.Trim();
+        if (!normalized.Contains("://", StringComparison.Ordinal)) normalized = "http://" + normalized;
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var server))
+            throw new InvalidOperationException("服务端地址无效。");
+        var builder = new UriBuilder(server)
+        {
+            Scheme = server.Scheme switch { "ws" => "http", "wss" => "https", _ => server.Scheme },
+            Path = path.StartsWith('/') ? path : "/" + path,
+            Query = string.Empty
+        };
+        return builder.Uri;
     }
 
     private Border BuildEstateRaceHostingGuide()

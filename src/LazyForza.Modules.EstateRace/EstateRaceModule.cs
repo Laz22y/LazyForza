@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using LazyForza.Domain;
@@ -17,6 +19,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private const string TeamNameSetting = "teamName";
     private const string TeamIdSetting = "teamId";
     private const string ResumeTokenSetting = "resumeToken";
+    private const int MaximumOrganizerLogoBytes = 262_144;
     private static readonly TimeSpan TelemetryInterval = TimeSpan.FromMilliseconds(100);
     private readonly Func<EstateRaceTrackContext?> trackContext;
     private readonly Action<Guid, bool, bool>? timingControl;
@@ -47,6 +50,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private bool raceTimingEnabled;
     private bool raceTimingInvalidatesLapOnDriverIntervention = true;
     private int reconnectLoopActive;
+    private EstateRaceOrganizerLogo? organizerLogo;
+    private string? failedOrganizerLogoHash;
+    private DateTimeOffset organizerLogoRetryAfter;
 
     public EstateRaceModule(
         Func<EstateRaceTrackContext?> trackContext,
@@ -189,6 +195,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             participantId = accepted.ParticipantId;
             resumeToken = accepted.ResumeToken;
             ApplySessionSnapshot(NormalizeSession(accepted.Snapshot), resetForConnection: !isReconnectAttempt);
+            await RefreshOrganizerLogoAsync(accepted.Snapshot, timeout.Token).ConfigureAwait(false);
             await SaveProfileAsync(activeProfile, accepted.ResumeToken, cancellationToken).ConfigureAwait(false);
             PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
             var connectedSocket = socket;
@@ -304,10 +311,12 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 serviceBlocked);
             if (frame.ArrivalTime - lastTelemetrySentAt < TelemetryInterval) continue;
             lastTelemetrySentAt = frame.ArrivalTime;
+            var pit = context.Definition.Pit;
             var projection = positionReliable
                 ? EstateRaceGeometry.Project(context.Track, frame.Raw.Position)
                 : lastValidProjection ?? new EstateRaceProjection(0, 0, 0.5, 0.5);
             if (positionReliable) lastValidProjection = projection;
+            var isOnPitRoute = positionReliable && pitService.IsOnPitRoute;
             var update = new RaceTelemetryUpdate(
                 monotonicClock.ElapsedMilliseconds,
                 projection.Progress,
@@ -328,9 +337,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 pitService.CompletedServices,
                 context.Track.MatchingToleranceMeters,
                 context.Track.LengthMeters,
-                context.Definition.Pit?.SpeedLimitKph ?? 0,
+                pit?.SpeedLimitKph ?? 0,
                 pitService.PitLaneElapsedSeconds,
-                pitService.IsApproachingPit);
+                pitService.IsApproachingPit,
+                isOnPitRoute);
             try
             {
                 await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
@@ -369,7 +379,12 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 if (envelope.Type == "snapshot")
                 {
                     var received = envelope.Payload.Deserialize<EstateRaceSession>(EstateRaceWireProtocol.JsonOptions);
-                    if (received is not null) ApplySessionSnapshot(NormalizeSession(received));
+                    if (received is not null)
+                    {
+                        received = NormalizeSession(received);
+                        ApplySessionSnapshot(received);
+                        await RefreshOrganizerLogoAsync(received, cancellationToken).ConfigureAwait(false);
+                    }
                     PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
                 }
                 else if (envelope.Type == "error")
@@ -545,6 +560,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         connectionCancellation = null;
         participantId = null;
         session = null;
+        organizerLogo = null;
+        failedOrganizerLogoHash = null;
+        organizerLogoRetryAfter = default;
         lastValidProjection = null;
         SetRaceTimingEnabled(false);
     }
@@ -564,6 +582,15 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         var outline = context is null
             ? Array.Empty<EstateRaceMapPoint>()
             : EstateRaceGeometry.NormalizeOutline(context.Track);
+        var pitOutline = context is null
+            ? Array.Empty<EstateRaceMapPoint>()
+            : EstateRaceGeometry.NormalizePitLane(context.Track, context.Definition.Pit);
+        var startFinishGate = context is null
+            ? (EstateRaceMapGate?)null
+            : EstateRaceGeometry.NormalizeGate(context.Track, context.Definition.StartFinishGate);
+        var trackSectors = context is null
+            ? Array.Empty<EstateRaceMapSector>()
+            : EstateRaceGeometry.NormalizeSectors(context.Track, context.Sectors);
         Volatile.Write(ref snapshot, new EstateRaceHudState(
             DateTimeOffset.UtcNow,
             state,
@@ -573,7 +600,81 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             outline,
             gripEstimator.Current,
             GripExplanation(gripEstimator.Current),
-            pitServiceTracker.Current));
+            pitServiceTracker.Current,
+            pitOutline,
+            startFinishGate,
+            trackSectors,
+            organizerLogo));
+    }
+
+    private async Task RefreshOrganizerLogoAsync(
+        EstateRaceSession received,
+        CancellationToken cancellationToken)
+    {
+        var expectedHash = received.OrganizerLogoHash?.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(expectedHash) ||
+            string.IsNullOrWhiteSpace(received.OrganizerLogoDownloadPath))
+        {
+            organizerLogo = null;
+            failedOrganizerLogoHash = null;
+            organizerLogoRetryAfter = default;
+            return;
+        }
+        if (organizerLogo?.Sha256.Equals(expectedHash, StringComparison.OrdinalIgnoreCase) == true) return;
+        if (string.Equals(failedOrganizerLogoHash, expectedHash, StringComparison.OrdinalIgnoreCase) &&
+            DateTimeOffset.UtcNow < organizerLogoRetryAfter) return;
+
+        try
+        {
+            var uri = ServerHttpUri(activeProfile?.ServerAddress, received.OrganizerLogoDownloadPath);
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > MaximumOrganizerLogoBytes)
+                throw new InvalidDataException("赛事 Logo 超过客户端大小限制。");
+            await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            await using var buffer = new MemoryStream();
+            var chunk = new byte[16 * 1024];
+            while (true)
+            {
+                var read = await source.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
+                if (read == 0) break;
+                if (buffer.Length + read > MaximumOrganizerLogoBytes)
+                    throw new InvalidDataException("赛事 Logo 超过客户端大小限制。");
+                await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+            var bytes = buffer.ToArray();
+            var actualHash = Convert.ToHexString(SHA256.HashData(bytes));
+            if (!actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("赛事 Logo 的 SHA-256 与服务端声明不一致。");
+            var mimeType = response.Content.Headers.ContentType?.MediaType ?? received.OrganizerLogoMimeType ?? "image/png";
+            if (mimeType is not ("image/png" or "image/jpeg"))
+                throw new InvalidDataException("赛事 Logo 类型不受支持。");
+            organizerLogo = new EstateRaceOrganizerLogo(actualHash, mimeType, bytes);
+            failedOrganizerLogoHash = null;
+            organizerLogoRetryAfter = default;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            organizerLogo = null;
+            failedOrganizerLogoHash = expectedHash;
+            organizerLogoRetryAfter = DateTimeOffset.UtcNow.AddSeconds(15);
+            LogIfInitialized($"Estate race organizer logo download failed: {exception.Message}");
+        }
+    }
+
+    private static Uri ServerHttpUri(string? serverAddress, string path)
+    {
+        var websocket = ServerWebSocketUri(serverAddress ?? throw new InvalidOperationException("赛事服务地址为空。"));
+        var builder = new UriBuilder(websocket)
+        {
+            Scheme = websocket.Scheme == "wss" ? "https" : "http",
+            Path = path.StartsWith('/') ? path : "/" + path,
+            Query = string.Empty
+        };
+        return builder.Uri;
     }
 
     private void SetConnectionState(EstateRaceConnectionState state, string text) =>

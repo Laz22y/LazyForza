@@ -8,6 +8,11 @@ internal readonly record struct EstateRaceProjection(
     double MapX,
     double MapY);
 
+internal readonly record struct EstatePitRouteProjection(
+    double DistanceMeters,
+    double ProgressMeters,
+    double TotalLengthMeters);
+
 internal static class EstateRaceGeometry
 {
     public static EstateRaceProjection Project(
@@ -70,11 +75,99 @@ internal static class EstateRaceGeometry
             .ToArray();
     }
 
+    public static IReadOnlyList<EstateRaceMapPoint> NormalizePitLane(
+        TrackTemplate track,
+        EstatePitDefinition? pit,
+        int maximumPoints = 180)
+    {
+        if (pit?.CenterLine is not { Count: >= 2 } line) return [];
+        var step = Math.Max(1, (int)Math.Ceiling(line.Count / (double)maximumPoints));
+        var width = Math.Max(1, track.MaxX - track.MinX);
+        var depth = Math.Max(1, track.MaxZ - track.MinZ);
+        return line
+            .Where((_, index) => index % step == 0 || index == line.Count - 1)
+            .Select(point => new EstateRaceMapPoint(
+                Math.Clamp((point.X - track.MinX) / width, 0, 1),
+                Math.Clamp(1 - (point.Z - track.MinZ) / depth, 0, 1)))
+            .ToArray();
+    }
+
+    public static EstateRaceMapGate NormalizeGate(
+        TrackTemplate track,
+        EstateTimingGate gate)
+    {
+        var width = Math.Max(1, track.MaxX - track.MinX);
+        var depth = Math.Max(1, track.MaxZ - track.MinZ);
+        EstateRaceMapPoint Normalize(EstateGatePoint point) => new(
+            Math.Clamp((point.X - track.MinX) / width, 0, 1),
+            Math.Clamp(1 - (point.Z - track.MinZ) / depth, 0, 1));
+        return new EstateRaceMapGate(Normalize(gate.Left), Normalize(gate.Right));
+    }
+
+    public static IReadOnlyList<EstateRaceMapSector> NormalizeSectors(
+        TrackTemplate track,
+        IReadOnlyList<SectorDefinition>? sectors,
+        int maximumPoints = 360)
+    {
+        if (track.Points.Count < 2 || sectors is not { Count: > 0 }) return [];
+        var width = Math.Max(1, track.MaxX - track.MinX);
+        var depth = Math.Max(1, track.MaxZ - track.MinZ);
+        EstateRaceMapPoint Normalize(TrackPoint point) => new(
+            Math.Clamp((point.X - track.MinX) / width, 0, 1),
+            Math.Clamp(1 - (point.Z - track.MinZ) / depth, 0, 1));
+
+        var result = new List<EstateRaceMapSector>(sectors.Count);
+        var budget = Math.Max(4, maximumPoints / sectors.Count);
+        foreach (var sector in sectors.OrderBy(item => item.Index))
+        {
+            var startIndex = 0;
+            while (startIndex + 1 < track.Points.Count &&
+                   track.Points[startIndex + 1].S <= sector.StartS)
+                startIndex++;
+            var endIndex = startIndex + 1;
+            while (endIndex + 1 < track.Points.Count &&
+                   track.Points[endIndex].S < sector.EndS)
+                endIndex++;
+            endIndex = Math.Min(track.Points.Count - 1, endIndex);
+            if (endIndex <= startIndex) continue;
+            var count = endIndex - startIndex + 1;
+            var step = Math.Max(1, (int)Math.Ceiling(count / (double)budget));
+            var points = Enumerable.Range(startIndex, count)
+                .Where((_, index) => index % step == 0 || index == count - 1)
+                .Select(index => Normalize(track.Points[index]))
+                .ToArray();
+            if (points.Length >= 2)
+                result.Add(new EstateRaceMapSector(sector.Index, points));
+        }
+        return result;
+    }
+
     public static bool IsInPitLane(EstatePitDefinition? pit, Vector3F position)
     {
         if (pit is null || pit.CenterLine.Count < 2) return false;
         var halfWidth = Math.Clamp(pit.LaneHalfWidthMeters, 1, 20);
-        return DistanceToPolyline(pit.CenterLine, position.X, position.Y, position.Z) <= halfWidth;
+        return DistanceToPitLane(pit, position) <= halfWidth;
+    }
+
+    public static double DistanceToPitLane(EstatePitDefinition? pit, Vector3F position) =>
+        ProjectPitRoute(pit, position).DistanceMeters;
+
+    public static EstatePitRouteProjection ProjectPitRoute(
+        EstatePitDefinition? pit,
+        Vector3F position) =>
+        pit?.CenterLine is { Count: >= 2 } line
+            ? ProjectPolyline(line, position.X, position.Y, position.Z)
+            : new EstatePitRouteProjection(double.PositiveInfinity, 0, 0);
+
+    public static double PitGateProgress(
+        EstatePitDefinition? pit,
+        EstateTimingGate gate)
+    {
+        var center = new Vector3F(
+            (float)((gate.Left.X + gate.Right.X) / 2),
+            (float)((gate.Left.Y + gate.Right.Y) / 2),
+            (float)((gate.Left.Z + gate.Right.Z) / 2));
+        return ProjectPitRoute(pit, center).ProgressMeters;
     }
 
     public static bool IsInServiceZone(EstatePitDefinition? pit, Vector3F position)
@@ -152,9 +245,19 @@ internal static class EstateRaceGeometry
     public static bool IsApproachingPitEntry(EstatePitDefinition? pit, Vector3F position)
     {
         if (pit is null) return false;
-        // Keep the limiter cue close to the deterministic entry line. A longer
-        // gate projection can intersect the racing line before a final corner
-        // and show the cue to drivers who are not actually entering the pits.
+        // The recorded centre line starts at the racing-line split, while the
+        // deterministic entry gate defines where enforcement begins. Following
+        // the recorded branch avoids lighting the limiter on the final corner,
+        // but still gives the driver the cue before reaching the entry line.
+        var route = ProjectPitRoute(pit, position);
+        var entryProgress = PitGateProgress(pit, pit.EntryGate);
+        var routeApproach = route.TotalLengthMeters > 0 &&
+                            route.DistanceMeters <= Math.Clamp(pit.LaneHalfWidthMeters, 1, 20) * 1.35 + 0.75 &&
+                            route.ProgressMeters <= entryProgress + 0.75;
+        if (routeApproach) return true;
+
+        // Compatibility fallback for older pit definitions whose captured
+        // centre line starts at the entry gate rather than at the split.
         var lookAhead = Math.Clamp(pit.SpeedLimitKph * 0.20, 12, 20);
         return IsApproachingGate(
             pit.EntryGate,
@@ -163,13 +266,15 @@ internal static class EstateRaceGeometry
             Math.Clamp(pit.LaneHalfWidthMeters * 0.55, 1.5, 2.5));
     }
 
-    private static double DistanceToPolyline(
+    private static EstatePitRouteProjection ProjectPolyline(
         IReadOnlyList<EstateGatePoint> line,
         double x,
         double y,
         double z)
     {
         var best = double.MaxValue;
+        var bestProgress = 0d;
+        var progress = 0d;
         for (var index = 0; index < line.Count - 1; index++)
         {
             var start = line[index];
@@ -179,14 +284,20 @@ internal static class EstateRaceGeometry
             var dz = end.Z - start.Z;
             var lengthSquared = dx * dx + dy * dy + dz * dz;
             if (lengthSquared < 0.0001) continue;
+            var length = Math.Sqrt(lengthSquared);
             var t = Math.Clamp(((x - start.X) * dx + (y - start.Y) * dy + (z - start.Z) * dz) / lengthSquared, 0, 1);
             var distance = Math.Sqrt(
                 Math.Pow(x - (start.X + dx * t), 2) +
                 Math.Pow(y - (start.Y + dy * t), 2) +
                 Math.Pow(z - (start.Z + dz * t), 2));
-            best = Math.Min(best, distance);
+            if (distance < best)
+            {
+                best = distance;
+                bestProgress = progress + length * t;
+            }
+            progress += length;
         }
-        return best;
+        return new EstatePitRouteProjection(best, bestProgress, progress);
     }
 
     private static bool PointInPolygon(

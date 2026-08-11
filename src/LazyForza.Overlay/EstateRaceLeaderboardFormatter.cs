@@ -13,10 +13,9 @@ public static class EstateRaceLeaderboardFormatter
 
     public static string Format(
         EstateRaceParticipant participant,
+        EstateRaceParticipant? localParticipant,
         bool qualifying,
         bool race,
-        bool local,
-        double? gapBehindSeconds,
         int leaderCompletedLaps)
     {
         if (participant.Status == RaceParticipantStatus.Disqualified) return "DSQ";
@@ -24,21 +23,37 @@ public static class EstateRaceLeaderboardFormatter
         if (!participant.IsConnected) return "OFFLINE";
         if (participant.IsInPitLane || participant.IsInServiceZone) return "IN PIT";
 
+        var local = participant.Id == localParticipant?.Id;
         if (qualifying)
         {
             if (participant.BestLapSeconds is not double bestLap) return "NO TIME";
-            return local ? FormatLapTime(bestLap) : FormatDelta(participant.GapToLeaderSeconds);
+            if (local) return FormatLapTime(bestLap);
+            return localParticipant?.BestLapSeconds is double localBestLap
+                ? FormatDelta(bestLap - localBestLap)
+                : "—";
         }
 
-        if (race && local)
-            return $"{FormatAheadInterval(participant.IntervalSeconds)} / {FormatBehindInterval(gapBehindSeconds)}";
+        if (local) return "REFERENCE";
+        if (localParticipant is null)
+            return FormatLeaderComparison(participant, leaderCompletedLaps);
 
-        if (participant.GapToLeaderSeconds is double gap)
-            return FormatDelta(gap);
-        return participant.Position == 1
-            ? FormatDelta(0)
-            : $"+{Math.Max(1, leaderCompletedLaps - participant.CompletedLaps)} LAP";
+        var participantGap = GapToLeader(participant);
+        var localGap = GapToLeader(localParticipant);
+        if (participantGap is double otherGap && localGap is double referenceGap)
+            return FormatDelta(otherGap - referenceGap);
+
+        var lapDelta = localParticipant.CompletedLaps - participant.CompletedLaps;
+        if (lapDelta != 0)
+            return $"{lapDelta:+0;-0} {(Math.Abs(lapDelta) == 1 ? "LAP" : "LAPS")}";
+        return "—";
     }
+
+    private static double? GapToLeader(EstateRaceParticipant participant) =>
+        participant.Position == 1
+            ? 0
+            : participant.GapToLeaderSeconds is double gap && double.IsFinite(gap)
+                ? gap
+                : null;
 
     private static string FormatLapTime(double seconds)
     {
@@ -53,13 +68,4 @@ public static class EstateRaceLeaderboardFormatter
         return $"{value:+0.000;-0.000;±0.000}";
     }
 
-    private static string FormatAheadInterval(double? seconds) =>
-        seconds is double value && double.IsFinite(value) && value >= 0
-            ? $"−{value:0.000}"
-            : "—";
-
-    private static string FormatBehindInterval(double? seconds) =>
-        seconds is double value && double.IsFinite(value) && value >= 0
-            ? $"+{value:0.000}"
-            : "—";
 }
