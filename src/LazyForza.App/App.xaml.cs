@@ -500,7 +500,8 @@ internal static class BuiltInModuleCatalog
                         completed.InvalidReason,
                         completed.IsBestLapEligible),
                 estate.ActiveSectorCount,
-                identity?.PayloadSha256);
+                identity?.PayloadSha256,
+                estate.ActiveSectors);
         }, (trackId, enabled, invalidateLapOnDriverIntervention) =>
         {
             if (enabled)

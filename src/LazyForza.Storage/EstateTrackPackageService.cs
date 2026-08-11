@@ -151,16 +151,31 @@ public sealed class EstateTrackPackageService
         string packagePath,
         string targetSource,
         CancellationToken cancellationToken = default)
+        => Import(packagePath, targetSource, replaceExisting: false, cancellationToken);
+
+    public EstateTrackImportResult Import(
+        string packagePath,
+        string targetSource,
+        bool replaceExisting,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetSource);
         var archive = ReadArchive(packagePath, cancellationToken);
         if (store.LoadTrack(archive.Payload.Track.Id) is not null)
         {
+            if (replaceExisting)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                store.DeleteTrack(archive.Payload.Track.Id);
+            }
+            else
+            {
             return new EstateTrackImportResult(
                 archive.Payload.Track.Id,
                 archive.Payload.Track.Name,
                 Imported: false,
                 AlreadyExists: true);
+            }
         }
 
         cancellationToken.ThrowIfCancellationRequested();

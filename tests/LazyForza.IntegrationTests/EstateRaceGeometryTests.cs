@@ -17,6 +17,23 @@ public sealed class EstateRaceGeometryTests
     }
 
     [TestMethod]
+    public void OverlayEstateRacePreviewUsesTwelveDriversFromTopSix2026Teams()
+    {
+        var preview = OverlayLayoutPreviewState.EstateRace(DateTimeOffset.UtcNow);
+        var participants = preview.Session?.Participants ?? [];
+
+        Assert.HasCount(12, participants);
+        Assert.IsTrue(preview.Session?.AllowTeams);
+        CollectionAssert.AreEquivalent(
+            new[] { "Mercedes", "Ferrari", "McLaren", "Red Bull Racing", "Racing Bulls", "Alpine" },
+            participants.Select(item => item.TeamName).Distinct().ToArray());
+        Assert.AreEqual("Antonelli", participants[0].DisplayName);
+        Assert.AreEqual("Colapinto", participants[^1].DisplayName);
+        Assert.IsTrue(participants.GroupBy(item => item.TeamName)
+            .All(group => group.Count() == 2 && group.Select(item => item.TeamColor).Distinct().Count() == 1));
+    }
+
+    [TestMethod]
     public void ProjectsPositionAndNormalizesTrackMapCoordinates()
     {
         var track = TrackAlgorithms.BuildTemplate("projection", Enumerable.Range(0, 51)
@@ -30,6 +47,78 @@ public sealed class EstateRaceGeometryTests
         Assert.IsTrue(outline.Count >= 2);
         Assert.AreEqual(0, outline[0].X, 0.001);
         Assert.AreEqual(1, outline[^1].X, 0.001);
+    }
+
+    [TestMethod]
+    public void NormalizesStartFinishGateAgainstSameTrackBoundsAsOutline()
+    {
+        var track = TrackAlgorithms.BuildTemplate("gate-map",
+        [
+            new TrackPoint(-20, 0, -10, 0, 0, 0),
+            new TrackPoint(80, 0, -10, 0, 0, 0),
+            new TrackPoint(80, 0, 40, 0, 0, 0),
+            new TrackPoint(-20, 0, 40, 0, 0, 0),
+            new TrackPoint(-20, 0, -10, 0, 0, 0)
+        ]);
+        var gate = new EstateTimingGate(
+            new EstateGatePoint(track.MinX, 0, track.MinZ),
+            new EstateGatePoint(track.MaxX, 0, track.MaxZ),
+            1, 0, 0, 0, 0);
+
+        var normalized = EstateRaceGeometry.NormalizeGate(track, gate);
+
+        Assert.AreEqual(0, normalized.Left.X, 0.0001);
+        Assert.AreEqual(1, normalized.Left.Y, 0.0001);
+        Assert.AreEqual(1, normalized.Right.X, 0.0001);
+        Assert.AreEqual(0, normalized.Right.Y, 0.0001);
+    }
+
+    [TestMethod]
+    public void NormalizesTrackSectorsIntoSeparateOrderedMapPolylines()
+    {
+        var track = TrackAlgorithms.BuildTemplate("sector-map",
+            Enumerable.Range(0, 101)
+                .Select(index => new TrackPoint(index, 0, Math.Sin(index / 10d) * 10, 0, 0, 0))
+                .ToArray());
+        var sectors = TrackAlgorithms.CreateSectors(track, requestedCount: 4);
+
+        var normalized = EstateRaceGeometry.NormalizeSectors(track, sectors);
+
+        Assert.HasCount(4, normalized);
+        CollectionAssert.AreEqual(new[] { 0, 1, 2, 3 }, normalized.Select(item => item.SectorIndex).ToArray());
+        Assert.IsTrue(normalized.All(item => item.Points.Count >= 2));
+        Assert.IsTrue(normalized.SelectMany(item => item.Points)
+            .All(point => point.X is >= 0 and <= 1 && point.Y is >= 0 and <= 1));
+    }
+
+    [TestMethod]
+    public void TrackAndPitLaneShareOneBackwardCompatibleMapCoordinateSpace()
+    {
+        var track = TrackAlgorithms.BuildTemplate("map-with-pit",
+        [
+            new TrackPoint(0, 3, 0, 0, 0, 0),
+            new TrackPoint(100, 3, 0, 0, 0, 0),
+            new TrackPoint(100, 3, 100, 0, 0, 0),
+            new TrackPoint(0, 3, 100, 0, 0, 0),
+            new TrackPoint(0, 3, 0, 0, 0, 0)
+        ]);
+        var pit = new EstatePitDefinition(
+            Gate(10, 0, 1, 0),
+            Gate(90, 0, 1, 0),
+            [new EstateGatePoint(10, 3, 0), new EstateGatePoint(50, 3, 20), new EstateGatePoint(90, 3, 0)],
+            new EstateGatePoint(50, 3, 20),
+            4,
+            80,
+            3);
+
+        var outline = EstateRaceGeometry.NormalizeOutline(track);
+        var pitOutline = EstateRaceGeometry.NormalizePitLane(track, pit);
+        var projected = EstateRaceGeometry.Project(track, new Vector3F(50, 3, 20));
+
+        Assert.IsTrue(outline.All(point => point.X is >= 0 and <= 1 && point.Y is >= 0 and <= 1));
+        Assert.AreEqual(0.8, pitOutline[1].Y, 0.001);
+        Assert.AreEqual(pitOutline[1].X, projected.MapX, 0.001);
+        Assert.AreEqual(pitOutline[1].Y, projected.MapY, 0.001);
     }
 
     [TestMethod]
@@ -87,6 +176,8 @@ public sealed class EstateRaceGeometryTests
         Assert.AreEqual(1, completed.CompletedServices);
 
         var stillStopped = tracker.Observe(Frame(5_000, 15, 0), pit, true);
+        Assert.AreEqual(4, stillStopped.ElapsedSeconds, 0.001,
+            "换胎计时应持续到车辆再次移动，而不是达到最低换胎时长后冻结。");
         Assert.AreEqual(1, stillStopped.CompletedServices);
         var leftZone = tracker.Observe(Frame(6_000, 24, 0), pit, true);
         Assert.IsFalse(leftZone.RequirementMet);
@@ -104,8 +195,45 @@ public sealed class EstateRaceGeometryTests
         Assert.IsTrue(completedDuringPause.RequirementMet);
         Assert.AreEqual(2, completedDuringPause.CompletedServices);
         var resumed = tracker.Observe(Frame(11_000, 15, 0), pit, true);
-        Assert.AreEqual(3, resumed.ElapsedSeconds, 0.001);
+        Assert.AreEqual(4, resumed.ElapsedSeconds, 0.001);
         Assert.AreEqual(2, resumed.CompletedServices);
+    }
+
+    [TestMethod]
+    public void RecordedPitBranchShowsLimiterBeforeEntryAndClearsItAtExitLine()
+    {
+        var pit = new EstatePitDefinition(
+            Gate(0, 0, 1, 0),
+            Gate(30, 0, 1, 0),
+            [
+                new EstateGatePoint(-35, 2, -8),
+                new EstateGatePoint(-18, 2, -5),
+                new EstateGatePoint(0, 2, 0),
+                new EstateGatePoint(18, 2, 7),
+                new EstateGatePoint(30, 2, 0),
+                new EstateGatePoint(42, 2, -3)
+            ],
+            new EstateGatePoint(18, 2, 7),
+            3,
+            80,
+            3,
+            3.5);
+        var tracker = new EstatePitServiceTracker();
+
+        var onBranch = tracker.Observe(Frame(1_000, -20, -5, 70), pit, true);
+        Assert.IsTrue(onBranch.IsApproachingPit);
+        Assert.IsTrue(onBranch.IsOnPitRoute);
+        Assert.IsTrue(EstateRaceHudVisibilityPolicy.ShouldShowPitLimiter(onBranch));
+
+        var entered = tracker.Observe(Frame(2_000, 2, 1, 70), pit, true);
+        Assert.IsTrue(entered.IsInPitLane);
+        _ = tracker.Observe(Frame(3_000, 29, 1, 70), pit, true);
+        var exited = tracker.Observe(Frame(4_000, 31, 0, 90), pit, true);
+        Assert.IsFalse(exited.IsInPitLane);
+        Assert.IsTrue(exited.IsOnPitRoute,
+            "出口线后的合流段仍是合法维修区路线，但不得继续限速执法。");
+        Assert.IsFalse(exited.IsSpeeding);
+        Assert.IsFalse(EstateRaceHudVisibilityPolicy.ShouldShowPitLimiter(exited));
     }
 
     [TestMethod]
@@ -151,6 +279,33 @@ public sealed class EstateRaceGeometryTests
         Assert.IsFalse(exited.IsInPitLane);
         var afterExit = tracker.Observe(Frame(7_000, 34, 0, 30), pit, true);
         Assert.IsFalse(afterExit.IsInPitLane, "出口后仍靠近通道末端时不得重新进入维修区状态。");
+    }
+
+    [TestMethod]
+    public void LeavingRecordedPitCorridorWithoutCrossingExitClearsLimiterState()
+    {
+        var pit = new EstatePitDefinition(
+            Gate(0, 0, 1, 0),
+            Gate(30, 0, 1, 0),
+            [new EstateGatePoint(0, 2, 0), new EstateGatePoint(30, 2, 0)],
+            new EstateGatePoint(15, 2, 0),
+            3,
+            80,
+            3,
+            3.5);
+        var tracker = new EstatePitServiceTracker();
+
+        _ = tracker.Observe(Frame(1_000, -2, 0, 30), pit, true);
+        var entered = tracker.Observe(Frame(2_000, 2, 0, 30), pit, true);
+        Assert.IsTrue(entered.IsInPitLane);
+        Assert.IsTrue(entered.IsOnPitRoute);
+
+        var leftRoute = tracker.Observe(Frame(3_000, 12, 20, 30), pit, true);
+        Assert.IsTrue(leftRoute.IsInPitLane, "单个漂移样本不应立即结束进站状态。");
+        var cleared = tracker.Observe(Frame(3_800, 16, 20, 30), pit, true);
+        Assert.IsFalse(cleared.IsInPitLane);
+        Assert.IsFalse(cleared.IsOnPitRoute);
+        Assert.IsFalse(EstateRaceHudVisibilityPolicy.ShouldShowPitLimiter(cleared));
     }
 
     [TestMethod]
@@ -262,12 +417,17 @@ public sealed class EstateRaceGeometryTests
         Assert.AreEqual(1, normalized.Get(EstateRaceHudWidgetKind.Leaderboard).Opacity);
         Assert.IsFalse(normalized.Get(EstateRaceHudWidgetKind.TrackMap).IsVisible);
         Assert.AreEqual(0.55, normalized.Get(EstateRaceHudWidgetKind.TrackMap).Opacity);
-        Assert.AreEqual(0.5, normalized.Get(EstateRaceHudWidgetKind.GripStatus).Scale);
+        Assert.AreEqual(0.75, normalized.Get(EstateRaceHudWidgetKind.GripStatus).Scale);
         Assert.AreEqual(1, normalized.Get(EstateRaceHudWidgetKind.GripStatus).Opacity);
         Assert.AreEqual(0, normalized.Get(EstateRaceHudWidgetKind.Banner).Top);
         Assert.AreEqual(0.15, normalized.Get(EstateRaceHudWidgetKind.Banner).Opacity);
         Assert.IsTrue(normalized.Get(EstateRaceHudWidgetKind.PitStopInfo).IsVisible);
         Assert.IsTrue(normalized.Get(EstateRaceHudWidgetKind.PitLimiter).IsVisible);
+        Assert.AreEqual(0.80,
+            EstateRaceHudLayoutSettings.Normalize(value.Set(
+                    EstateRaceHudWidgetKind.PitStopInfo,
+                    new EstateRaceHudWidgetPlacement(true, 0, 0, 0.1)))
+                .Get(EstateRaceHudWidgetKind.PitStopInfo).Scale);
     }
 
     private static EstateTimingGate Gate(double x, double z, double forwardX, double forwardZ) => new(

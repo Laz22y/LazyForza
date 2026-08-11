@@ -78,7 +78,8 @@ internal sealed record RaceTelemetryUpdate(
     double TrackLengthMeters = 0,
     double PitSpeedLimitKph = 0,
     double PitLaneElapsedSeconds = 0,
-    bool IsApproachingPit = false);
+    bool IsApproachingPit = false,
+    bool IsOnPitRoute = false);
 
 internal sealed record RaceLapCompleted(
     Guid EventId,

@@ -24,6 +24,13 @@ public sealed class EstateRaceClientModuleTests
     [TestMethod]
     public void LeaderboardTimingUsesSessionDeltaRulesForQualifyingRaceAndOtherViews()
     {
+        var leader = Participant(Guid.NewGuid()) with
+        {
+            Position = 1,
+            BestLapSeconds = 67.600,
+            GapToLeaderSeconds = 0,
+            CompletedLaps = 4
+        };
         var local = Participant(Guid.NewGuid()) with
         {
             Position = 2,
@@ -35,15 +42,30 @@ public sealed class EstateRaceClientModuleTests
         var trailing = Participant(Guid.NewGuid()) with
         {
             Position = 3,
+            BestLapSeconds = 69.072,
             GapToLeaderSeconds = 1.472,
             IntervalSeconds = .640,
             CompletedLaps = 4
         };
 
-        Assert.AreEqual("1:08.432", EstateRaceLeaderboardFormatter.Format(local, true, false, true, null, 4));
-        Assert.AreEqual("+0.832", EstateRaceLeaderboardFormatter.Format(local, true, false, false, null, 4));
-        Assert.AreEqual("−1.250 / +0.640", EstateRaceLeaderboardFormatter.Format(local, false, true, true, trailing.IntervalSeconds, 4));
-        Assert.AreEqual("+0.832", EstateRaceLeaderboardFormatter.Format(local, false, true, false, null, 4));
+        Assert.AreEqual("1:08.432", EstateRaceLeaderboardFormatter.Format(local, local, true, false, 4));
+        Assert.AreEqual("-0.832", EstateRaceLeaderboardFormatter.Format(leader, local, true, false, 4));
+        Assert.AreEqual("+0.640", EstateRaceLeaderboardFormatter.Format(trailing, local, true, false, 4));
+        Assert.AreEqual("REFERENCE", EstateRaceLeaderboardFormatter.Format(local, local, false, true, 4));
+        Assert.AreEqual("-0.832", EstateRaceLeaderboardFormatter.Format(leader, local, false, true, 4));
+        Assert.AreEqual("+0.640", EstateRaceLeaderboardFormatter.Format(trailing, local, false, true, 4));
+        Assert.AreEqual("REFERENCE", EstateRaceLeaderboardFormatter.Format(
+            local with { Position = 1, GapToLeaderSeconds = 0 },
+            local with { Position = 1, GapToLeaderSeconds = 0 }, false, true, 4));
+        Assert.AreEqual("1:08.432", EstateRaceLeaderboardFormatter.Format(
+            local with { Position = 1, GapToLeaderSeconds = 0 },
+            local with { Position = 1, GapToLeaderSeconds = 0 }, true, false, 4));
+        Assert.AreEqual("-1 LAP", EstateRaceLeaderboardFormatter.Format(
+            leader with { CompletedLaps = 5, GapToLeaderSeconds = null },
+            local with { GapToLeaderSeconds = null }, false, true, 5));
+        Assert.AreEqual("+1 LAP", EstateRaceLeaderboardFormatter.Format(
+            trailing with { CompletedLaps = 3, GapToLeaderSeconds = null },
+            local with { GapToLeaderSeconds = null }, false, true, 5));
         Assert.AreEqual("LEADER", EstateRaceLeaderboardFormatter.FormatLeaderComparison(local with { Position = 1 }, 4));
         Assert.AreEqual("+0.832", EstateRaceLeaderboardFormatter.FormatLeaderComparison(local, 4));
         Assert.AreEqual("+1 LAP", EstateRaceLeaderboardFormatter.FormatLeaderComparison(trailing with
@@ -51,6 +73,89 @@ public sealed class EstateRaceClientModuleTests
             GapToLeaderSeconds = null,
             CompletedLaps = 3
         }, 4));
+    }
+
+    [TestMethod]
+    public void PitHudUsesServerAnchoredTimersAndCountsEveryConnectedPitParticipant()
+    {
+        var serverNow = new DateTimeOffset(2026, 8, 11, 12, 0, 0, TimeSpan.Zero);
+        var local = Participant(Guid.NewGuid()) with
+        {
+            IsInPitLane = true,
+            PitLaneElapsedSeconds = 12.250,
+            LastSeenAt = serverNow.AddMilliseconds(-250)
+        };
+        var remote = Participant(Guid.NewGuid()) with
+        {
+            Position = 6,
+            IsInPitLane = true,
+            IsInServiceZone = true,
+            PitLaneElapsedSeconds = 8.100,
+            PitServiceElapsedSeconds = 2.100,
+            LastSeenAt = serverNow.AddMilliseconds(-250)
+        };
+        var disconnected = Participant(Guid.NewGuid()) with
+        {
+            IsConnected = false,
+            IsInPitLane = true,
+            PitLaneElapsedSeconds = 30
+        };
+
+        Assert.AreEqual(2,
+            EstateRacePitHudTiming.ActiveParticipantCount([local, remote, disconnected]),
+            "右上角人数必须统计所有在线进站车手，不能使用最多显示两张的卡片数。");
+        Assert.AreEqual(12.500,
+            EstateRacePitHudTiming.ProjectElapsedSeconds(
+                local.PitLaneElapsedSeconds, local.LastSeenAt, serverNow, true),
+            0.000001,
+            "所有客户端都应从服务端上报秒数和服务端时间平滑推算同一进站总时间。");
+        Assert.AreEqual(2.350,
+            EstateRacePitHudTiming.ProjectElapsedSeconds(
+                remote.PitServiceElapsedSeconds, remote.LastSeenAt, serverNow, true),
+            0.000001);
+        Assert.AreEqual(2.100,
+            EstateRacePitHudTiming.ProjectElapsedSeconds(
+                remote.PitServiceElapsedSeconds, remote.LastSeenAt, serverNow, false),
+            0.000001,
+            "换胎计时停止后必须保持服务端最终值，不能继续增长。");
+        Assert.AreEqual(13.250,
+            EstateRacePitHudTiming.ProjectElapsedSeconds(
+                local.PitLaneElapsedSeconds, serverNow.AddSeconds(-5), serverNow, true),
+            0.000001,
+            "网络中断时只允许短时插值，不能让客户端计时无限漂移。");
+    }
+
+    [TestMethod]
+    public void LeaderboardFlagHeaderDistinguishesYellowScopeWithoutChangingLabel()
+    {
+        var localId = Guid.NewGuid();
+        var local = Participant(localId) with { CurrentSector = 1 };
+        var session = EmptySession() with
+        {
+            Flag = RaceControlFlag.Yellow,
+            Participants = [local],
+            YellowZones = [new EstateRaceYellowZone(1, false, "事故车辆", null, null)]
+        };
+
+        Assert.AreEqual(RaceHeaderSignal.Yellow,
+            HudSurface.SelectRaceHeaderSignal(session, localId));
+        Assert.AreEqual("YELLOW FLAG", HudSurface.RaceHeaderSignalText(RaceHeaderSignal.Yellow));
+
+        session = session with
+        {
+            YellowZones = [new EstateRaceYellowZone(null, false, "全场黄旗", null, null)]
+        };
+        Assert.AreEqual(RaceHeaderSignal.DoubleYellow,
+            HudSurface.SelectRaceHeaderSignal(session, localId));
+        Assert.AreEqual("YELLOW FLAG", HudSurface.RaceHeaderSignalText(RaceHeaderSignal.DoubleYellow));
+
+        session = session with
+        {
+            YellowZones = [new EstateRaceYellowZone(2, false, "其他分段", null, null)]
+        };
+        Assert.AreEqual(RaceHeaderSignal.None,
+            HudSurface.SelectRaceHeaderSignal(session, localId),
+            "区间黄旗只应在本机正行驶的分段进入排行榜顶栏；赛道图仍显示所有黄旗分段。");
     }
 
     [TestMethod]

@@ -12,6 +12,8 @@ internal sealed class EstatePitServiceTracker
     private int completedServices;
     private bool pitLaneActive;
     private Vector3F? previousPosition;
+    private double? previousRouteProgress;
+    private DateTimeOffset? outsidePitCorridorSince;
 
     public EstatePitServiceState Current { get; private set; } = EstatePitServiceState.Empty;
 
@@ -36,7 +38,7 @@ internal sealed class EstatePitServiceTracker
         if (!telemetryValid)
         {
             if (pitLaneActive) pitLaneElapsedSeconds += deltaSeconds;
-            AccumulateUntil(frame.ArrivalTime, required);
+            AccumulateUntil(frame.ArrivalTime);
             CreditCompletedService(required);
             previousArrival = frame.ArrivalTime;
             Current = Current with
@@ -52,12 +54,30 @@ internal sealed class EstatePitServiceTracker
             return Current;
         }
         var position = frame.Raw.Position;
+        var route = EstateRaceGeometry.ProjectPitRoute(pit, position);
+        var entryProgress = EstateRaceGeometry.PitGateProgress(pit, pit.EntryGate);
+        var exitProgress = EstateRaceGeometry.PitGateProgress(pit, pit.ExitGate);
+        var halfWidth = Math.Clamp(pit.LaneHalfWidthMeters, 1, 20);
+        var corridorMatch = route.DistanceMeters <= halfWidth;
+        var routeProgressEntered = previousRouteProgress is double previousProgress &&
+                                   previousProgress < entryProgress - 0.25 &&
+                                   route.ProgressMeters >= entryProgress - 0.25 &&
+                                   corridorMatch;
         var entered = previousPosition is Vector3F previousPoint &&
-                      EstateRaceGeometry.CrossesForwardGate(pit.EntryGate, previousPoint, position);
+                      EstateRaceGeometry.CrossesForwardGate(pit.EntryGate, previousPoint, position) ||
+                      routeProgressEntered;
+        var routeProgressExited = previousRouteProgress is double previousExitProgress &&
+                                  previousExitProgress < exitProgress - 0.25 &&
+                                  route.ProgressMeters >= exitProgress - 0.25 &&
+                                  corridorMatch;
         var exited = previousPosition is Vector3F previousExitPoint &&
-                     EstateRaceGeometry.CrossesForwardGate(pit.ExitGate, previousExitPoint, position);
-        var corridorMatch = EstateRaceGeometry.IsInPitLane(pit, position);
-        if (entered || !pitLaneActive && previousPosition is null && corridorMatch)
+                     EstateRaceGeometry.CrossesForwardGate(pit.ExitGate, previousExitPoint, position) ||
+                     routeProgressExited ||
+                     pitLaneActive && corridorMatch && route.ProgressMeters > exitProgress + 0.75;
+        var betweenEnforcementGates = corridorMatch &&
+                                      route.ProgressMeters >= entryProgress - 0.75 &&
+                                      route.ProgressMeters <= exitProgress + 0.75;
+        if (entered || !pitLaneActive && previousPosition is null && betweenEnforcementGates)
         {
             pitLaneActive = true;
             pitLaneElapsedSeconds = entered ? 0 : pitLaneElapsedSeconds;
@@ -71,7 +91,21 @@ internal sealed class EstatePitServiceTracker
         if (pitLaneActive) pitLaneElapsedSeconds += deltaSeconds;
         var inZone = EstateRaceGeometry.IsInServiceZone(pit, frame.Raw.Position);
         if (inZone) pitLaneActive = true;
-        var eligible = inZone && frame.Normalized.SpeedKph <= 5 && !serviceBlocked;
+        var clearlyOutsideCorridor = route.DistanceMeters > halfWidth * 1.75 + 2;
+        if (pitLaneActive && !inZone && !corridorMatch && clearlyOutsideCorridor)
+        {
+            outsidePitCorridorSince ??= frame.ArrivalTime;
+            if (frame.ArrivalTime - outsidePitCorridorSince.Value >= TimeSpan.FromMilliseconds(750))
+            {
+                pitLaneActive = false;
+                wasEligible = false;
+            }
+        }
+        else
+        {
+            outsidePitCorridorSince = null;
+        }
+        var eligible = inZone && frame.Normalized.SpeedKph <= 1.5 && !serviceBlocked;
         if (!inZone)
         {
             elapsedSeconds = 0;
@@ -87,13 +121,14 @@ internal sealed class EstatePitServiceTracker
             elapsedSeconds = 0;
         }
         else if (wasEligible)
-            AccumulateUntil(frame.ArrivalTime, required);
+            AccumulateUntil(frame.ArrivalTime);
 
         if (eligible) CreditCompletedService(required);
 
         if (exited)
         {
             pitLaneActive = false;
+            outsidePitCorridorSince = null;
             inZone = false;
             eligible = false;
             wasEligible = false;
@@ -101,7 +136,9 @@ internal sealed class EstatePitServiceTracker
 
         previousArrival = frame.ArrivalTime;
         previousPosition = position;
+        previousRouteProgress = route.ProgressMeters;
         wasEligible = eligible;
+        var approaching = !pitLaneActive && EstateRaceGeometry.IsApproachingPitEntry(pit, position);
         Current = new EstatePitServiceState(
             pitLaneActive,
             inZone,
@@ -112,10 +149,11 @@ internal sealed class EstatePitServiceTracker
             eligible,
             frame.ArrivalTime,
             pitLaneElapsedSeconds,
-            !pitLaneActive && EstateRaceGeometry.IsApproachingPitEntry(pit, position),
+            approaching,
             pit.SpeedLimitKph,
             frame.Normalized.SpeedKph,
-            pitLaneActive && frame.Normalized.SpeedKph > pit.SpeedLimitKph + 1);
+            pitLaneActive && frame.Normalized.SpeedKph > pit.SpeedLimitKph + 1,
+            corridorMatch);
         return Current;
     }
 
@@ -129,13 +167,15 @@ internal sealed class EstatePitServiceTracker
         completedServices = 0;
         pitLaneActive = false;
         previousPosition = null;
+        previousRouteProgress = null;
+        outsidePitCorridorSince = null;
         Current = EstatePitServiceState.Empty;
     }
 
-    private void AccumulateUntil(DateTimeOffset now, double required)
+    private void AccumulateUntil(DateTimeOffset now)
     {
         if (!wasEligible || previousArrival is not DateTimeOffset previous || now <= previous) return;
-        elapsedSeconds = Math.Min(required, elapsedSeconds + (now - previous).TotalSeconds);
+        elapsedSeconds = Math.Min(86_400, elapsedSeconds + (now - previous).TotalSeconds);
     }
 
     private void CreditCompletedService(double required)

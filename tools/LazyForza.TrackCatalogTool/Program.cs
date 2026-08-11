@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using LazyForza.Domain;
 using LazyForza.Storage;
 
@@ -16,7 +17,7 @@ return args[0].ToLowerInvariant() switch
     "setting" when args.Length >= 3 => Setting(args[1], args[2]),
     "rank-prefix" when args.Length >= 3 && Guid.TryParse(args[2], out var targetId) =>
         RankPrefix(args[1], targetId),
-    "export" when args.Length >= 3 => Export(args[1], args[2]),
+    "export" when args.Length >= 4 => Export(args[1], args[2], args[3]),
     "verify" => Verify(args[1]),
     _ => InvalidUsage()
 };
@@ -106,15 +107,20 @@ static double Distance(TrackPoint left, TrackPoint right)
     return Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
 }
 
-static int Export(string databasePath, string outputPath)
+static int Export(string databasePath, string outputPath, string catalogVersion)
 {
+    if (!Regex.IsMatch(catalogVersion, @"^\d{4}\.\d{2}\.\d{2}\.\d+$"))
+        throw new ArgumentException(
+            $"Catalog version must use YYYY.MM.DD.revision format: {catalogVersion}",
+            nameof(catalogVersion));
+
     using var store = new LazyForzaStore(databasePath);
     var entries = store.ListTracks("fh6_udp_live")
         .Select(summary => store.LoadTrack(summary.Id)
             ?? throw new InvalidOperationException($"Track {summary.Id} could not be loaded."))
         .Select(loaded =>
         {
-            var (category, displayName) = SplitOfficialName(loaded.Track.Name);
+            var (category, displayName) = ResolveOfficialIdentity(loaded.Track);
             return new PlaygroundTrackCatalogEntry(
                 loaded.Track with
                 {
@@ -134,7 +140,7 @@ static int Export(string databasePath, string outputPath)
         throw new InvalidOperationException("The official catalog contains duplicate track IDs.");
 
     var document = new PlaygroundTrackCatalogDocument(
-        "2026.07.23.1",
+        catalogVersion,
         DateTimeOffset.UtcNow,
         "Player-recorded FH6 Playground official events (excluding Showcase and Wristband events)",
         entries);
@@ -150,6 +156,18 @@ static int Export(string databasePath, string outputPath)
         $"Exported {entries.Length} tracks, {entries.Sum(entry => entry.Track.Points.Count):N0} points and " +
         $"{entries.Sum(entry => entry.Sectors.Count):N0} sectors to {fullOutputPath}");
     return Verify(fullOutputPath);
+}
+
+static (string Category, string DisplayName) ResolveOfficialIdentity(TrackTemplate track)
+{
+    if (track.CatalogKind == TrackCatalogKind.PlaygroundOfficial &&
+        !string.IsNullOrWhiteSpace(track.Category) &&
+        !track.Name.Contains('|'))
+    {
+        return (track.Category.Trim(), track.Name.Trim());
+    }
+
+    return SplitOfficialName(track.Name);
 }
 
 static int Verify(string inputPath)
@@ -208,6 +226,6 @@ static void Usage()
     Console.Error.WriteLine("  LazyForza.TrackCatalogTool install <lazyforza.db>");
     Console.Error.WriteLine("  LazyForza.TrackCatalogTool setting <lazyforza.db> <key>");
     Console.Error.WriteLine("  LazyForza.TrackCatalogTool rank-prefix <lazyforza.db> <track-id>");
-    Console.Error.WriteLine("  LazyForza.TrackCatalogTool export <lazyforza.db> <catalog.json.gz>");
+    Console.Error.WriteLine("  LazyForza.TrackCatalogTool export <lazyforza.db> <catalog.json.gz> <YYYY.MM.DD.revision>");
     Console.Error.WriteLine("  LazyForza.TrackCatalogTool verify <catalog.json.gz>");
 }

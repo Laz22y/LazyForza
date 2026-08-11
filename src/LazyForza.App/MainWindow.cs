@@ -2992,7 +2992,7 @@ internal sealed partial class MainWindow : Window
         }
         controls.Children.Add(SettingGroup(
             "地产赛事 HUD 部件",
-            "四个部件可独立开关；进入 Overlay 布局编辑器后可直接选择、拖动、缩放或恢复赛事默认布局。",
+            "八个部件可独立开关；进入 Overlay 布局编辑器后可直接选择、拖动、缩放或恢复赛事默认布局。",
             estateRaceComponentPanel));
         var estateRaceOpacitySliders = new Dictionary<EstateRaceHudWidgetKind, Slider>();
         var estateRaceOpacityPanel = new UniformGrid { Columns = 2 };
@@ -3012,7 +3012,7 @@ internal sealed partial class MainWindow : Window
         }
         controls.Children.Add(SettingGroup(
             "地产赛事 HUD 透明度",
-            "排行榜、赛道一览、抓地提示和赛事横幅分别保存透明度。",
+            "八个赛事部件分别保存透明度，互不影响。",
             estateRaceOpacityPanel));
 
         var timingItems = new UniformGrid { Columns = 2 };

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.4.3',
+    [string]$Version = '1.4.4',
     [ValidateSet('win-x64')]
     [string]$Runtime = 'win-x64'
 )
@@ -50,7 +50,7 @@ New-Item -ItemType Directory -Force -Path $publishPath, $stagePath | Out-Null
 
 $catalogPath = Join-Path $repositoryRoot 'src\LazyForza.Storage\Assets\PlaygroundOfficialTracks.json.gz'
 $catalogHash = (Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash
-$expectedCatalogHash = '1854595AD2D20E83CA3E4913F950A786DB157373FBEAA70B75C020C8949C08DD'
+$expectedCatalogHash = '9EFD7EC2A8799E733E8CDB60819245534E45B6F0A6BF0FA2B334831A7E0330B6'
 if ($catalogHash -ne $expectedCatalogHash) {
     throw "Embedded official track catalog hash mismatch. Expected $expectedCatalogHash, found $catalogHash."
 }
@@ -97,9 +97,9 @@ $buildInfo = @(
     "LazyForza $Version"
     "Runtime: $Runtime self-contained"
     "BuiltUtc: $([DateTimeOffset]::UtcNow.ToString('O'))"
-    "OfficialTrackCatalog: 2026.07.23.1"
+    "OfficialTrackCatalog: 2026.08.11.1"
     "OfficialTrackCatalogSha256: $catalogHash"
-    "OfficialTracks: 85"
+    "OfficialTracks: 86"
 )
 Set-Content -LiteralPath (Join-Path $stagePath 'BUILDINFO.txt') -Value $buildInfo -Encoding UTF8
 

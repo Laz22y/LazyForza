@@ -4,13 +4,15 @@ LazyForza 将玩家通过 FH6 官方 UDP Data Out 实际录入的官方赛事轨
 
 ## 当前目录
 
-- 目录版本：`2026.07.23.1`
-- 官方赛事：85 条
-- 轨迹点：121,055 个
-- 分段：1,122 个
-- 类型：公路 22、街头 15、泥地 21、越野 19、山道 5、直线 3
+- 目录版本：`2026.08.11.1`
+- 官方赛事：86 条
+- 轨迹点：121,262 个
+- 分段：1,126 个
+- 类型：公路 23、街头 15、泥地 21、越野 19、山道 5、直线 3
 - 内置资源：`src/LazyForza.Storage/Assets/PlaygroundOfficialTracks.json.gz`
-- 资源 SHA-256：`1854595AD2D20E83CA3E4913F950A786DB157373FBEAA70B75C020C8949C08DD`
+- 资源 SHA-256：`9EFD7EC2A8799E733E8CDB60819245534E45B6F0A6BF0FA2B334831A7E0330B6`
+
+`2026.08.11.1` 新增 Playground 官方公路赛事“毛豆环道赛”。
 
 原始名称按 `类型 | 赛道名` 解析。类型存入 `Category`，界面只显示整理后的赛道名，避免重复前缀。
 
@@ -27,7 +29,7 @@ LazyForza 将玩家通过 FH6 官方 UDP Data Out 实际录入的官方赛事轨
 目录由 `tools/LazyForza.TrackCatalogTool` 从离线数据库备份中筛选 `fh6_udp_live` 数据生成：
 
 ```powershell
-dotnet run --project tools\LazyForza.TrackCatalogTool -- export <lazyforza.db> src\LazyForza.Storage\Assets\PlaygroundOfficialTracks.json.gz
+dotnet run --project tools\LazyForza.TrackCatalogTool -- export <lazyforza.db> src\LazyForza.Storage\Assets\PlaygroundOfficialTracks.json.gz <YYYY.MM.DD.revision>
 ```
 
 生成后应执行 `verify`，并在数据库副本上执行 `install`，确认导入前后的赛道数和圈速数保持一致。

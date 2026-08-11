@@ -616,10 +616,10 @@ public sealed class StorageTests
         {
             using var store = new LazyForzaStore(path);
             var firstImport = PlaygroundOfficialTrackCatalog.EnsureImported(store);
-            Assert.AreEqual("2026.07.23.1", firstImport.Version);
-            Assert.AreEqual(85, firstImport.TotalTracks);
-            Assert.AreEqual(85, firstImport.ImportedTracks);
-            Assert.AreEqual(85, store.CountTracks(TrackCatalogKind.PlaygroundOfficial));
+            Assert.AreEqual("2026.08.11.1", firstImport.Version);
+            Assert.AreEqual(86, firstImport.TotalTracks);
+            Assert.AreEqual(86, firstImport.ImportedTracks);
+            Assert.AreEqual(86, store.CountTracks(TrackCatalogKind.PlaygroundOfficial));
 
             var official = store.ListTracks()
                 .First(track => track.CatalogKind == TrackCatalogKind.PlaygroundOfficial);
@@ -632,13 +632,22 @@ public sealed class StorageTests
             Assert.IsTrue(loaded.Value.Track.Points.Count >= 4);
             Assert.IsTrue(loaded.Value.Sectors.Count > 0);
 
+            var maodou = store.LoadTrack(Guid.Parse("6edac8eb-8236-4247-8c35-ef634d066342"));
+            Assert.IsNotNull(maodou, "The 2026-08-11 catalog must include the newly released Maodou Circuit.");
+            Assert.AreEqual("毛豆环道赛", maodou.Value.Track.Name);
+            Assert.AreEqual("公路", maodou.Value.Track.Category);
+            Assert.AreEqual(TrackLayoutKind.Circuit, maodou.Value.Track.LayoutKind);
+            Assert.AreEqual(TrackCatalogKind.PlaygroundOfficial, maodou.Value.Track.CatalogKind);
+            Assert.AreEqual(207, maodou.Value.Track.Points.Count);
+            Assert.AreEqual(4, maodou.Value.Sectors.Count);
+
             Assert.ThrowsExactly<InvalidOperationException>(() => store.RenameTrack(official.Id, "不可修改"));
             Assert.ThrowsExactly<InvalidOperationException>(() => store.DeleteTrack(official.Id));
             Assert.IsNotNull(store.LoadTrack(official.Id));
 
             var secondImport = PlaygroundOfficialTrackCatalog.EnsureImported(store);
             Assert.AreEqual(0, secondImport.ImportedTracks);
-            Assert.AreEqual(85, store.CountTracks(TrackCatalogKind.PlaygroundOfficial));
+            Assert.AreEqual(86, store.CountTracks(TrackCatalogKind.PlaygroundOfficial));
         }
         finally
         {
@@ -775,6 +784,18 @@ public sealed class StorageTests
             Assert.IsFalse(duplicate.Imported);
             Assert.IsTrue(duplicate.AlreadyExists);
             Assert.AreEqual(1, target.CountTracks());
+
+            target.SaveLap(new LapRecord(
+                Guid.NewGuid(), track.Id, track.Direction, TrackAlgorithms.SectorSchemaVersion, Guid.NewGuid(),
+                new VehicleProfileFingerprint(1, 5, 850, 2, 6, 8_000, "g", "c"),
+                DateTimeOffset.UnixEpoch, 71, true, null,
+                sectors.Select(sector => new LapSegment(sector.Index, 71d / sectors.Count, true)).ToArray(),
+                []));
+            var replaced = importer.Import(packagePath, "EstateRaceServer", replaceExisting: true);
+            Assert.IsTrue(replaced.Imported);
+            Assert.IsFalse(replaced.AlreadyExists);
+            Assert.AreEqual(0, target.CountLaps(track.Id), "明确替换赛事赛道时必须移除旧几何对应的圈速记录。");
+            Assert.AreEqual("EstateRaceServer", target.LoadTrack(track.Id)?.Track.Source);
         }
         finally
         {

@@ -355,6 +355,28 @@ public sealed class EstateCircuitModuleTests
                 var lap = store.LoadLapSummaries(track.Id, 2).Single();
                 Assert.IsTrue(lap.IsValid, lap.InvalidReason);
                 Assert.AreEqual(1, module.LastCompletedLap?.LapNumber);
+
+                // Crossing the alternate pit finish gate starts the next lap
+                // while the car is still inside the lane. The pit-transit state
+                // must survive that lap reset until the deterministic exit line.
+                PublishPosition(feed, 90_200, 118, 2, 18, 15);
+                PublishPosition(feed, 90_300, 118, 2, 22, 15);
+                for (var index = 14; index <= 350; index += 2)
+                {
+                    var angle = index * Math.PI * 2 / 360;
+                    PublishPosition(feed, (uint)(90_300 + index * 180),
+                        100 * Math.Cos(angle), 2, 100 * Math.Sin(angle), 20);
+                }
+                PublishPosition(feed, 154_000, 100, 2, -2, 20);
+                PublishPosition(feed, 154_100, 100, 2, 2, 20);
+
+                await WaitUntilAsync(
+                    () => module.State.CompletedLaps == 2,
+                    TimeSpan.FromSeconds(5),
+                    () => module.State.ToString());
+                Assert.AreEqual(2, store.CountLaps(track.Id));
+                Assert.IsTrue(store.LoadLapSummaries(track.Id, 1).Single().IsValid,
+                    "维修区内冲线后，出站并完成的下一圈不应继承虚假的赛道边界事件。");
             }
             finally
             {
