@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using LazyForza.Analysis;
 using LazyForza.Domain;
 using LazyForza.Storage;
@@ -9,6 +10,63 @@ namespace LazyForza.Storage.Tests;
 public sealed class StorageTests
 {
     [TestMethod]
+    public void EstateStrategySamplesAreCompactRoundTrippedAndAutomaticallyRotated()
+    {
+        var path = TempDatabasePath();
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var track = new EstateStrategyTrackIdentity("estate-track", "7", "TRACK-HASH");
+            var vehicle = new VehicleProfileFingerprint(
+                2038, 4, 800, 2, 8, 8_500,
+                "g2_250-g3_180",
+                "p70_t55_r7200");
+            for (var index = 0; index < LazyForzaStore.MaxEstateStrategySamplesPerTrack + 18; index++)
+            {
+                store.SaveEstateStrategySample(new EstateStrategySample(
+                    Guid.NewGuid(),
+                    track,
+                    EstateStrategySampleKind.Stint,
+                    EstateStrategySampleSource.Race,
+                    DateTimeOffset.UtcNow.AddMinutes(index),
+                    vehicle,
+                    6,
+                    90,
+                    91,
+                    0.25,
+                    0.4,
+                    null));
+            }
+
+            var loaded = store.LoadEstateStrategySamples(track, 200);
+            Assert.HasCount(LazyForzaStore.MaxEstateStrategySamplesPerTrack, loaded);
+            Assert.IsTrue(loaded.All(sample => sample.Vehicle == vehicle));
+            Assert.IsTrue(loaded.All(sample => sample.Track.Key == track.Key));
+            Assert.AreEqual(LazyForzaStore.MaxEstateStrategySamplesPerTrack, store.CountEstateStrategySamples());
+
+            for (var trackIndex = 0; trackIndex < 5; trackIndex++)
+            {
+                var anotherTrack = new EstateStrategyTrackIdentity(
+                    $"estate-track-{trackIndex}", "1", $"HASH-{trackIndex}");
+                for (var index = 0; index < LazyForzaStore.MaxEstateStrategySamplesPerTrack; index++)
+                {
+                    store.SaveEstateStrategySample(new EstateStrategySample(
+                        Guid.NewGuid(), anotherTrack, EstateStrategySampleKind.PitStop,
+                        EstateStrategySampleSource.PracticePitSimulation,
+                        DateTimeOffset.UtcNow.AddDays(trackIndex).AddMinutes(index),
+                        vehicle, 0, null, null, null, null, 28 + index * 0.01));
+                }
+            }
+            Assert.IsTrue(store.CountEstateStrategySamples() <= LazyForzaStore.MaxEstateStrategySamples,
+                "全局硬上限必须自动清理最旧样本。 ");
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
     public async Task MigrationSettingsAndDatabasesAreIsolated()
     {
         var firstPath = TempDatabasePath();
@@ -17,8 +75,8 @@ public sealed class StorageTests
         {
             using var first = new LazyForzaStore(firstPath);
             using var second = new LazyForzaStore(secondPath);
-            Assert.AreEqual(10, first.SchemaVersion);
-            Assert.AreEqual(10, second.SchemaVersion);
+            Assert.AreEqual(11, first.SchemaVersion);
+            Assert.AreEqual(11, second.SchemaVersion);
             await first.SetAsync("dashboard", "enabled", "True", CancellationToken.None);
             Assert.AreEqual("True", await first.GetAsync("dashboard", "enabled", CancellationToken.None));
             Assert.IsNull(await second.GetAsync("dashboard", "enabled", CancellationToken.None));
@@ -178,7 +236,7 @@ public sealed class StorageTests
         try
         {
             using (var initialized = new LazyForzaStore(path))
-                Assert.AreEqual(10, initialized.SchemaVersion);
+                Assert.AreEqual(11, initialized.SchemaVersion);
 
             using (var raw = new WinSqliteDatabase(path))
             {
@@ -197,7 +255,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(10, migrated.SchemaVersion);
+            Assert.AreEqual(11, migrated.SchemaVersion);
             var profile = migrated.ListVehicleProfiles().Single();
             Assert.AreEqual("2014 Alfa Romeo 4C", profile.CustomName);
             Assert.IsFalse(profile.ShiftRecommendationsEnabled);
@@ -287,7 +345,7 @@ public sealed class StorageTests
 
             using (var store = new LazyForzaStore(path))
             {
-                Assert.AreEqual(10, store.SchemaVersion);
+                Assert.AreEqual(11, store.SchemaVersion);
                 var databaseField = typeof(LazyForzaStore).GetField(
                     "database",
                     System.Reflection.BindingFlags.Instance |
@@ -453,7 +511,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(10, migrated.SchemaVersion);
+            Assert.AreEqual(11, migrated.SchemaVersion);
             var migratedField = typeof(LazyForzaStore).GetField(
                 "database",
                 System.Reflection.BindingFlags.Instance |
@@ -759,13 +817,36 @@ public sealed class StorageTests
             var manifest = exporter.Export(track.Id, packagePath);
             var identity = exporter.Identify(track.Id);
             Assert.AreEqual(EstateTrackPackageService.PackageFormat, manifest.Format);
+            Assert.AreEqual(manifest.TrackFingerprintSha256, identity.TrackFingerprintSha256);
             Assert.AreEqual(manifest.PayloadSha256, identity.PayloadSha256);
             Assert.AreEqual(track.Id, identity.TrackId);
             Assert.AreEqual(track.Id, manifest.TrackId);
 
+            // Packages exported before the stable fingerprint field was added
+            // remain valid; the client derives the fingerprint from track.json.
+            using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Update))
+            {
+                var entry = archive.GetEntry("manifest.json") ?? throw new AssertFailedException("Missing manifest.json.");
+                entry.Delete();
+                var replacement = archive.CreateEntry("manifest.json");
+                using var output = replacement.Open();
+                JsonSerializer.Serialize(output, new
+                {
+                    manifest.Format,
+                    manifest.FormatVersion,
+                    manifest.ApplicationVersion,
+                    manifest.ExportedAt,
+                    manifest.TrackId,
+                    manifest.TrackName,
+                    manifest.MapRevision,
+                    manifest.PayloadSha256
+                }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            }
+
             using var target = new LazyForzaStore(targetPath);
             var importer = new EstateTrackPackageService(target, "target-version");
             var preview = importer.Preview(packagePath);
+            Assert.AreEqual(identity.TrackFingerprintSha256, preview.Manifest.TrackFingerprintSha256);
             Assert.AreEqual(track.Id, preview.Track.Id);
             Assert.AreEqual(definition.MapRevision, preview.Definition.MapRevision);
             Assert.HasCount(sectors.Count, preview.Sectors);
@@ -779,11 +860,25 @@ public sealed class StorageTests
             Assert.AreEqual(TrackTimingKind.EstateGeometry, imported.Value.Track.TimingKind);
             Assert.AreEqual(definition.StartFinishGate, target.LoadEstateTrackDefinition(track.Id)?.StartFinishGate);
             Assert.AreEqual(0, target.CountLaps(track.Id), "地产环道文件不能夹带圈速记录。");
+            var importedIdentity = importer.Identify(track.Id);
+            Assert.AreEqual(manifest.TrackFingerprintSha256, importedIdentity.TrackFingerprintSha256,
+                "赛道特征值不能因导入后的本地数据来源变化。 ");
+            Assert.AreNotEqual(manifest.PayloadSha256, importedIdentity.PayloadSha256,
+                "该用例应覆盖原始数据摘要会被本地 Source 改变的历史问题。 ");
 
             var duplicate = importer.Import(packagePath, "fh6_udp_replay");
             Assert.IsFalse(duplicate.Imported);
             Assert.IsTrue(duplicate.AlreadyExists);
+            Assert.IsTrue(duplicate.ExistingTrackMatches);
+            Assert.IsFalse(duplicate.SourceUpdated);
             Assert.AreEqual(1, target.CountTracks());
+
+            var repairedSource = importer.Import(packagePath, "fh6_udp_live");
+            Assert.IsTrue(repairedSource.AlreadyExists);
+            Assert.IsTrue(repairedSource.ExistingTrackMatches);
+            Assert.IsTrue(repairedSource.SourceUpdated);
+            Assert.AreEqual("fh6_udp_live", target.LoadTrack(track.Id)?.Track.Source,
+                "内容相同的隐藏服务端赛道应只修复数据分区，不删除并重建。 ");
 
             target.SaveLap(new LapRecord(
                 Guid.NewGuid(), track.Id, track.Direction, TrackAlgorithms.SectorSchemaVersion, Guid.NewGuid(),

@@ -14,6 +14,33 @@ namespace LazyForza.IntegrationTests;
 public sealed class ModuleAndOverlayTests
 {
     [TestMethod]
+    public void EstateRaceDefaultLayoutMatchesTheLatestVerifiedDevelopmentLayout()
+    {
+        var layout = EstateRaceHudLayoutSettings.Default;
+        AssertPlacement(EstateRaceHudWidgetKind.Leaderboard, .011370009059528202, .010416666666666666, .939803114386994);
+        AssertPlacement(EstateRaceHudWidgetKind.TrackMap, .024218749999999956, .6561111111111111, .96);
+        AssertPlacement(EstateRaceHudWidgetKind.GripStatus, .808, .5859722222222222, .96);
+        AssertPlacement(EstateRaceHudWidgetKind.Banner, .25, .010416666666666666, 1);
+        AssertPlacement(EstateRaceHudWidgetKind.StartLights, .35, .12, 1);
+        AssertPlacement(EstateRaceHudWidgetKind.PitStopInfo, .785, .39980555555555547, 1);
+        AssertPlacement(EstateRaceHudWidgetKind.PitLimiter, .46906250000000005, .3713888888888889, 1);
+        AssertPlacement(EstateRaceHudWidgetKind.PenaltyStatus, .365, .5055555555555555, 1);
+        AssertPlacement(EstateRaceHudWidgetKind.PracticeProgram, .34, .1026388888888889, 1);
+        AssertPlacement(EstateRaceHudWidgetKind.PitWindowSuggestion, .790, .160, 1);
+        return;
+
+        void AssertPlacement(EstateRaceHudWidgetKind kind, double left, double top, double scale)
+        {
+            var placement = layout.Get(kind);
+            Assert.IsTrue(placement.IsVisible);
+            Assert.AreEqual(left, placement.Left, 1e-12, kind.ToString());
+            Assert.AreEqual(top, placement.Top, 1e-12, kind.ToString());
+            Assert.AreEqual(scale, placement.Scale, 1e-12, kind.ToString());
+            Assert.AreEqual(1, placement.Opacity, 1e-12, kind.ToString());
+        }
+    }
+
+    [TestMethod]
     public void DashboardConvertsEmpiricallyVerifiedTireTemperatureAndNormalizesOutputGauges()
     {
         var temperatures = DashboardDisplayValues.TireTemperatureCelsius(
@@ -40,8 +67,8 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual("127.0.0.1", LazyForzaDefaults.TelemetryListenAddress);
         Assert.AreEqual(2299, LazyForzaDefaults.TelemetryPort);
         Assert.AreEqual(2299, new TelemetryOptions().Port);
-        Assert.AreEqual(579, layout.Left);
-        Assert.AreEqual(669, layout.Top);
+        Assert.AreEqual(622.5, layout.Left);
+        Assert.AreEqual(688, layout.Top);
         Assert.AreEqual(1338.3333333333335, layout.Width);
         Assert.AreEqual(753.3333333333334, layout.Height);
         Assert.AreEqual(0.6, layout.Scale);
@@ -57,6 +84,17 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(8, layout.LapNoMatchConfirmationSeconds);
         Assert.AreEqual(0.5, layout.LapNoMatchFadeSeconds);
         Assert.AreEqual(0.8, layout.LiveHudStaleSeconds);
+        Assert.AreEqual(622.5, layout.LapHudLeft);
+        Assert.AreEqual(688, layout.LapHudTop);
+        Assert.AreEqual(0.6, layout.LapHudScale);
+        Assert.IsTrue(layout.LapHudAttachedToDashboard);
+        Assert.AreEqual(1245, layout.DriftHudLeft);
+        Assert.AreEqual(669, layout.DriftHudTop);
+        Assert.AreEqual(0.6, layout.DriftHudScale);
+        Assert.AreEqual(0, layout.EstateRaceHudLeft);
+        Assert.AreEqual(0, layout.EstateRaceHudTop);
+        Assert.AreEqual(2048, layout.EstateRaceHudWidth);
+        Assert.AreEqual(1152, layout.EstateRaceHudHeight);
         var widgets = DashboardWidgetLayoutSettings.Normalize(
             layout.DashboardWidgets);
         foreach (var kind in Enum.GetValues<DashboardWidgetKind>())
@@ -66,7 +104,7 @@ public sealed class ModuleAndOverlayTests
             Assert.AreEqual(0, placement.OffsetX, 1e-9);
             Assert.AreEqual(0, placement.OffsetY, 1e-9);
         }
-        Assert.AreEqual("1.4.4", LazyForza.App.ApplicationVersionInfo.Display);
+        Assert.AreEqual("1.4.5", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]

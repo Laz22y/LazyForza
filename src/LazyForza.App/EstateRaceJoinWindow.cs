@@ -27,11 +27,13 @@ internal sealed class EstateRaceJoinWindow : Window
 
     private readonly TextBox serverAddress;
     private readonly TextBox displayName;
+    private readonly ComboBox roleSelector;
     private readonly ComboBox teamSelector;
     private readonly PasswordBox password;
     private readonly TextBlock error;
     private readonly TextBlock roomInfo;
     private readonly StackPanel teamField;
+    private readonly StackPanel colorPanel;
     private readonly Func<string, CancellationToken, Task<EstateRaceServerDescriptor>> descriptorReader;
     private readonly Dictionary<string, Button> swatches = new(StringComparer.OrdinalIgnoreCase);
     private readonly Border colorBase;
@@ -74,6 +76,16 @@ internal sealed class EstateRaceJoinWindow : Window
         serverAddress = Input(saved.ServerAddress);
         serverAddress.TextChanged += (_, _) => ScheduleDescriptorRefresh(TimeSpan.FromSeconds(1));
         displayName = Input(saved.DisplayName);
+        roleSelector = new ComboBox
+        {
+            MinHeight = 42,
+            Padding = new Thickness(8, 5, 8, 5),
+            Background = ResourceBrush("InputBrush", Color.FromRgb(10, 14, 20)),
+            Foreground = Foreground,
+            BorderBrush = ResourceBrush("BorderBrush", Color.FromRgb(47, 58, 72)),
+            ItemsSource = new[] { "参赛车手", "OB（转播）" },
+            SelectedIndex = saved.IsObserver ? 1 : 0
+        };
         teamSelector = new ComboBox
         {
             MinHeight = 42,
@@ -99,19 +111,23 @@ internal sealed class EstateRaceJoinWindow : Window
         var root = new StackPanel { Margin = new Thickness(30, 24, 30, 26) };
         root.Children.Add(Text("进入房间", 28, FontWeights.SemiBold));
         root.Children.Add(Text(
-            "先在“赛道”页面选中本场使用的地产环道并开始计时，再填写房间信息。比赛密码不会保存到本地。",
+            "参赛车手需要使用本场地产环道；OB 只接收赛事数据并显示 HUD，不上传遥测，也不计入参赛名额。比赛密码不会保存到本地。",
             13, FontWeights.Normal,
             ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185)),
             new Thickness(0, 6, 0, 20)));
 
         root.Children.Add(Field("服务端域名或 IP", "公网房间建议使用 https:// 域名；可信局域网可以填写主机 IP 和端口。进入房间前会读取服务端的赛道与车队设置。", serverAddress));
         root.Children.Add(roomInfo);
+        root.Children.Add(Field(
+            "连接身份",
+            "参赛车手参与计时、排名和判罚；OB 仅用于观赛或转播，排行榜以榜首为比较基准。",
+            roleSelector));
 
         var identity = new Grid { Margin = new Thickness(0, 14, 0, 0) };
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var nameField = Field("比赛显示名", "2–20 个字符，本场不能与其他车手重名。", displayName);
+        var nameField = Field("比赛显示名", "2–20 个字符，本场不能与其他车手或 OB 重名。", displayName);
         teamField = Field("参赛车队", "车队名单和每队人数由赛事总控设置。", teamSelector);
         teamField.Visibility = Visibility.Collapsed;
         Grid.SetColumn(teamField, 2);
@@ -119,7 +135,7 @@ internal sealed class EstateRaceJoinWindow : Window
         identity.Children.Add(teamField);
         root.Children.Add(identity);
 
-        var colorPanel = new StackPanel { Margin = new Thickness(0, 16, 0, 0) };
+        colorPanel = new StackPanel { Margin = new Thickness(0, 16, 0, 0) };
         colorPanel.Children.Add(Text("代表色", 13, FontWeights.SemiBold));
         colorPanel.Children.Add(Text(
             "选择一个常用颜色，或点击末尾的彩虹色块自定义。代表色用于排行榜、赛道一览和车手标记。",
@@ -380,6 +396,8 @@ internal sealed class EstateRaceJoinWindow : Window
             if (teamSelector.SelectedItem is EstateRaceTeam team)
                 SelectColor(team.ThemeColor);
         };
+        roleSelector.SelectionChanged += (_, _) => UpdateRoleFields();
+        UpdateRoleFields();
         Loaded += (_, _) => ScheduleDescriptorRefresh(TimeSpan.Zero);
         Closed += (_, _) =>
         {
@@ -423,11 +441,20 @@ internal sealed class EstateRaceJoinWindow : Window
                     showError: true,
                     refreshCancellation))
                 return;
-            var selectedTeam = descriptor?.AllowTeams == true ? teamSelector.SelectedItem as EstateRaceTeam : null;
-            var legacyTeamName = descriptor?.AllowTeams == true && descriptor.Teams is not { Count: > 0 }
+            var isObserver = IsObserverSelected;
+            if (isObserver && descriptor?.SupportsObservers != true)
+            {
+                error.Text = "该服务端版本不支持 OB 身份，请让房主更新服务端。";
+                roleSelector.Focus();
+                return;
+            }
+            var selectedTeam = !isObserver && descriptor?.AllowTeams == true
+                ? teamSelector.SelectedItem as EstateRaceTeam
+                : null;
+            var legacyTeamName = !isObserver && descriptor?.AllowTeams == true && descriptor.Teams is not { Count: > 0 }
                 ? teamSelector.Text.Trim()
                 : null;
-            if (descriptor?.AllowTeams == true && descriptor.Teams is { Count: > 0 } && selectedTeam is null)
+            if (!isObserver && descriptor?.AllowTeams == true && descriptor.Teams is { Count: > 0 } && selectedTeam is null)
             {
                 error.Text = "请选择本场参赛的车队。";
                 teamSelector.Focus();
@@ -440,7 +467,8 @@ internal sealed class EstateRaceJoinWindow : Window
                 displayName.Text.Trim(),
                 selectedColor,
                 selectedTeam?.Name ?? (string.IsNullOrWhiteSpace(legacyTeamName) ? null : legacyTeamName),
-                selectedTeam?.Id);
+                selectedTeam?.Id,
+                isObserver ? EstateRaceConnectionRole.Observer : EstateRaceConnectionRole.Driver);
             DialogResult = true;
         }
         finally
@@ -453,7 +481,7 @@ internal sealed class EstateRaceJoinWindow : Window
     {
         CancelDescriptorRefresh();
         descriptor = null;
-        teamField.Visibility = Visibility.Collapsed;
+        UpdateRoleFields();
         error.Text = string.Empty;
         var address = serverAddress.Text.Trim();
         if (address.Length == 0)
@@ -514,7 +542,7 @@ internal sealed class EstateRaceJoinWindow : Window
             cancellationToken.ThrowIfCancellationRequested();
             if (!string.Equals(address, serverAddress.Text.Trim(), StringComparison.Ordinal)) return false;
             descriptor = received;
-            teamField.Visibility = descriptor.AllowTeams ? Visibility.Visible : Visibility.Collapsed;
+            UpdateRoleFields();
             var choices = descriptor.Teams?.Where(team =>
                     !string.IsNullOrWhiteSpace(team.Id) && !string.IsNullOrWhiteSpace(team.Name))
                 .ToArray() ?? [];
@@ -542,18 +570,35 @@ internal sealed class EstateRaceJoinWindow : Window
             if (cancellationToken.IsCancellationRequested) throw new OperationCanceledException(cancellationToken);
             if (!string.Equals(address, serverAddress.Text.Trim(), StringComparison.Ordinal)) return false;
             descriptor = null;
-            teamField.Visibility = Visibility.Collapsed;
+            UpdateRoleFields();
             roomInfo.Text = "暂时无法读取房间设置。";
             if (showError) error.Text = $"无法读取房间设置：{exception.Message}";
             return false;
         }
     }
 
-    private static string RoomModeText(EstateRaceServerDescriptor value) => value.AllowTeams
-        ? value.Teams is { Count: > 0 }
-            ? $"{value.Teams.Count} 支车队 · 每队最多 {value.DriversPerTeam} 人"
-            : "允许车队（旧版服务端自由填写）"
-        : "个人参赛";
+    private static string RoomModeText(EstateRaceServerDescriptor value)
+    {
+        var raceMode = value.AllowTeams
+            ? value.Teams is { Count: > 0 }
+                ? $"{value.Teams.Count} 支车队 · 每队最多 {value.DriversPerTeam} 人"
+                : "允许车队（旧版服务端自由填写）"
+            : "个人参赛";
+        return value.SupportsObservers
+            ? $"{raceMode} · 支持 OB 转播"
+            : raceMode;
+    }
+
+    private bool IsObserverSelected => roleSelector.SelectedIndex == 1;
+
+    private void UpdateRoleFields()
+    {
+        var observer = IsObserverSelected;
+        teamField.Visibility = !observer && descriptor?.AllowTeams == true
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        colorPanel.Visibility = observer ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     private void SelectFromSurface(FrameworkElement surface, Point point)
     {

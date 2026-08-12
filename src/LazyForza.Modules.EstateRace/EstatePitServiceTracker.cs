@@ -4,6 +4,7 @@ namespace LazyForza.Modules.EstateRace;
 
 internal sealed class EstatePitServiceTracker
 {
+    private const double GateProgressToleranceMeters = 0.35;
     private DateTimeOffset? previousArrival;
     private bool wasEligible;
     private bool creditedThisVisit;
@@ -59,24 +60,37 @@ internal sealed class EstatePitServiceTracker
         var exitProgress = EstateRaceGeometry.PitGateProgress(pit, pit.ExitGate);
         var halfWidth = Math.Clamp(pit.LaneHalfWidthMeters, 1, 20);
         var corridorMatch = route.DistanceMeters <= halfWidth;
-        var routeProgressEntered = previousRouteProgress is double previousProgress &&
-                                   previousProgress < entryProgress - 0.25 &&
-                                   route.ProgressMeters >= entryProgress - 0.25 &&
-                                   corridorMatch;
-        var entered = previousPosition is Vector3F previousPoint &&
-                      EstateRaceGeometry.CrossesForwardGate(pit.EntryGate, previousPoint, position) ||
-                      routeProgressEntered;
-        var routeProgressExited = previousRouteProgress is double previousExitProgress &&
-                                  previousExitProgress < exitProgress - 0.25 &&
-                                  route.ProgressMeters >= exitProgress - 0.25 &&
-                                  corridorMatch;
-        var exited = previousPosition is Vector3F previousExitPoint &&
-                     EstateRaceGeometry.CrossesForwardGate(pit.ExitGate, previousExitPoint, position) ||
-                     routeProgressExited ||
-                     pitLaneActive && corridorMatch && route.ProgressMeters > exitProgress + 0.75;
+        var reverseProgressTolerance = Math.Clamp(halfWidth * 0.25, 0.5, 1.5);
+        var routeDirectionCompatible = previousRouteProgress is double previousDirectionProgress &&
+                                       route.ProgressMeters >= previousDirectionProgress - reverseProgressTolerance;
         var betweenEnforcementGates = corridorMatch &&
-                                      route.ProgressMeters >= entryProgress - 0.75 &&
-                                      route.ProgressMeters <= exitProgress + 0.75;
+                                      route.ProgressMeters >= entryProgress - GateProgressToleranceMeters &&
+                                      route.ProgressMeters <= exitProgress + GateProgressToleranceMeters;
+        var routeProgressEntered = previousRouteProgress is double previousProgress &&
+                                   previousProgress < entryProgress - GateProgressToleranceMeters &&
+                                   route.ProgressMeters >= entryProgress - GateProgressToleranceMeters &&
+                                   corridorMatch;
+        // A curved or oblique pit entry can make the recorded gate normal less
+        // representative than the centre line. Once two usable samples follow
+        // the recorded lane beyond the entry, accept small reverse projection
+        // jitter instead of requiring another perfect directed gate crossing.
+        var recoveredPastEntry = !pitLaneActive &&
+                                 previousPosition is not null &&
+                                 routeDirectionCompatible &&
+                                 betweenEnforcementGates;
+        var entered = previousPosition is Vector3F previousPoint &&
+                          EstateRaceGeometry.CrossesForwardGate(pit.EntryGate, previousPoint, position) ||
+                      routeProgressEntered || recoveredPastEntry;
+        var routeProgressExited = previousRouteProgress is double previousExitProgress &&
+                                  previousExitProgress < exitProgress + GateProgressToleranceMeters &&
+                                  route.ProgressMeters >= exitProgress - GateProgressToleranceMeters &&
+                                  routeDirectionCompatible &&
+                                  corridorMatch;
+        var reachedExit = pitLaneActive && corridorMatch && routeDirectionCompatible &&
+                          route.ProgressMeters >= exitProgress - GateProgressToleranceMeters;
+        var exited = previousPosition is Vector3F previousExitPoint &&
+                         EstateRaceGeometry.CrossesForwardGate(pit.ExitGate, previousExitPoint, position) ||
+                     routeProgressExited || reachedExit;
         if (entered || !pitLaneActive && previousPosition is null && betweenEnforcementGates)
         {
             pitLaneActive = true;

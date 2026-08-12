@@ -31,8 +31,10 @@ public sealed record VehicleProfileSummary(
 
 public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisposable
 {
-    public const int CurrentSchemaVersion = 10;
+    public const int CurrentSchemaVersion = 11;
     public const int MaxLapsPerTrack = 50;
+    public const int MaxEstateStrategySamplesPerTrack = 96;
+    public const int MaxEstateStrategySamples = 512;
     private readonly WinSqliteDatabase database;
     private bool disposed;
 
@@ -77,6 +79,67 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
         "ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value, UpdatedAt=excluded.UpdatedAt;");
 
     public string? GetAppSetting(string key) => database.QueryText($"SELECT Value FROM AppSettings WHERE Key={Quote(key)} LIMIT 1;");
+
+    public void SaveEstateStrategySample(EstateStrategySample sample)
+    {
+        ArgumentNullException.ThrowIfNull(sample);
+        var vehicle = sample.Vehicle;
+        var trackKey = sample.Track.Key;
+        database.Execute(
+            "BEGIN IMMEDIATE;\n" +
+            "INSERT INTO EstateStrategySamples(" +
+            "Id,TrackKey,TrackId,TrackRevision,TrackFingerprint,Kind,Source,CapturedAt," +
+            "CarOrdinal,CarClass,PI,Drivetrain,Cylinders,MaxRpm,GearSignature,CurveSignature," +
+            "LapCount,FreshLapSeconds,RepresentativeLapSeconds,DegradationPerLapSeconds,PaceSpreadSeconds,PitLaneElapsedSeconds) VALUES(" +
+            $"{Quote(sample.Id.ToString("D"))},{Quote(trackKey)},{Quote(sample.Track.TrackId)},{Quote(sample.Track.TrackRevision)},{Quote(sample.Track.TrackFingerprint.ToUpperInvariant())}," +
+            $"{Quote(sample.Kind.ToString())},{Quote(sample.Source.ToString())},{Quote(sample.CapturedAt.ToString("O", CultureInfo.InvariantCulture))}," +
+            $"{vehicle.CarOrdinal},{vehicle.CarClass},{vehicle.PerformanceIndex},{vehicle.DrivetrainType},{vehicle.NumCylinders},{vehicle.RoundedMaxRpm}," +
+            $"{Quote(vehicle.GearSlopeSignature)},{Quote(vehicle.CurveSignature)},{Math.Max(0, sample.LapCount)}," +
+            $"{NullableNumber(sample.FreshLapSeconds)},{NullableNumber(sample.RepresentativeLapSeconds)}," +
+            $"{NullableNumber(sample.DegradationPerLapSeconds)},{NullableNumber(sample.PaceSpreadSeconds)}," +
+            $"{NullableNumber(sample.PitLaneElapsedSeconds)}) " +
+            "ON CONFLICT(Id) DO UPDATE SET " +
+            "TrackKey=excluded.TrackKey,TrackId=excluded.TrackId,TrackRevision=excluded.TrackRevision," +
+            "TrackFingerprint=excluded.TrackFingerprint,Kind=excluded.Kind,Source=excluded.Source," +
+            "CapturedAt=excluded.CapturedAt,CarOrdinal=excluded.CarOrdinal,CarClass=excluded.CarClass," +
+            "PI=excluded.PI,Drivetrain=excluded.Drivetrain,Cylinders=excluded.Cylinders,MaxRpm=excluded.MaxRpm," +
+            "GearSignature=excluded.GearSignature,CurveSignature=excluded.CurveSignature,LapCount=excluded.LapCount," +
+            "FreshLapSeconds=excluded.FreshLapSeconds,RepresentativeLapSeconds=excluded.RepresentativeLapSeconds," +
+            "DegradationPerLapSeconds=excluded.DegradationPerLapSeconds,PaceSpreadSeconds=excluded.PaceSpreadSeconds," +
+            "PitLaneElapsedSeconds=excluded.PitLaneElapsedSeconds;\n" +
+            $"DELETE FROM EstateStrategySamples WHERE CapturedAt<{Quote(DateTimeOffset.UtcNow.AddDays(-270).ToString("O", CultureInfo.InvariantCulture))};\n" +
+            "DELETE FROM EstateStrategySamples WHERE Id IN (SELECT Id FROM EstateStrategySamples " +
+            $"WHERE TrackKey={Quote(trackKey)} ORDER BY CapturedAt DESC LIMIT -1 OFFSET {MaxEstateStrategySamplesPerTrack});\n" +
+            "DELETE FROM EstateStrategySamples WHERE Id IN (SELECT Id FROM EstateStrategySamples " +
+            $"ORDER BY CapturedAt DESC LIMIT -1 OFFSET {MaxEstateStrategySamples});\n" +
+            "COMMIT;");
+    }
+
+    public IReadOnlyList<EstateStrategySample> LoadEstateStrategySamples(
+        EstateStrategyTrackIdentity track,
+        int maximum = 192)
+    {
+        var rows = database.QueryRows(
+            "SELECT Id,TrackId,TrackRevision,TrackFingerprint,Kind,Source,CapturedAt," +
+            "CarOrdinal,CarClass,PI,Drivetrain,Cylinders,MaxRpm,GearSignature,CurveSignature," +
+            "LapCount,FreshLapSeconds,RepresentativeLapSeconds,DegradationPerLapSeconds,PaceSpreadSeconds,PitLaneElapsedSeconds " +
+            "FROM EstateStrategySamples " +
+            $"WHERE TrackKey={Quote(track.Key)} ORDER BY CapturedAt DESC LIMIT {Math.Clamp(maximum, 1, MaxEstateStrategySamples)};");
+        return rows.Select(ParseEstateStrategySample).Where(sample => sample is not null).Cast<EstateStrategySample>().ToArray();
+    }
+
+    public int CountEstateStrategySamples() => ParseInt(
+        database.QueryText("SELECT COUNT(*) FROM EstateStrategySamples;"));
+
+    public void PruneEstateStrategySamples()
+    {
+        database.Execute(
+            "BEGIN IMMEDIATE;\n" +
+            $"DELETE FROM EstateStrategySamples WHERE CapturedAt<{Quote(DateTimeOffset.UtcNow.AddDays(-270).ToString("O", CultureInfo.InvariantCulture))};\n" +
+            "DELETE FROM EstateStrategySamples WHERE Id IN (SELECT Id FROM EstateStrategySamples " +
+            $"ORDER BY CapturedAt DESC LIMIT -1 OFFSET {MaxEstateStrategySamples});\n" +
+            "COMMIT;\nPRAGMA optimize;");
+    }
 
     public void AttachRawRecording(
         Guid sessionId,
@@ -598,6 +661,14 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
         database.Execute($"UPDATE TrackTemplates SET Name={Quote(name.Trim())},UpdatedAt={Quote(DateTimeOffset.UtcNow.ToString("O"))} WHERE Id={Quote(trackId.ToString())};");
     }
 
+    public void UpdateTrackSource(Guid trackId, string source)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
+        EnsureTrackIsMutable(trackId);
+        database.Execute(
+            $"UPDATE TrackTemplates SET Source={Quote(source.Trim())} WHERE Id={Quote(trackId.ToString())};");
+    }
+
     public void DeleteTrack(Guid trackId)
     {
         EnsureTrackIsMutable(trackId);
@@ -764,6 +835,24 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
             version = 10;
         }
 
+        if (version < 11)
+        {
+            database.Execute(
+                "BEGIN IMMEDIATE;\n" +
+                "CREATE TABLE IF NOT EXISTS EstateStrategySamples(" +
+                "Id TEXT PRIMARY KEY,TrackKey TEXT NOT NULL,TrackId TEXT NOT NULL,TrackRevision TEXT NOT NULL," +
+                "TrackFingerprint TEXT NOT NULL,Kind TEXT NOT NULL,Source TEXT NOT NULL,CapturedAt TEXT NOT NULL," +
+                "CarOrdinal INTEGER NOT NULL,CarClass INTEGER NOT NULL,PI INTEGER NOT NULL,Drivetrain INTEGER NOT NULL," +
+                "Cylinders INTEGER NOT NULL,MaxRpm INTEGER NOT NULL,GearSignature TEXT NOT NULL,CurveSignature TEXT NOT NULL," +
+                "LapCount INTEGER NOT NULL,FreshLapSeconds REAL,RepresentativeLapSeconds REAL," +
+                "DegradationPerLapSeconds REAL,PaceSpreadSeconds REAL,PitLaneElapsedSeconds REAL);\n" +
+                "CREATE INDEX IF NOT EXISTS IX_EstateStrategySamples_Track ON EstateStrategySamples(TrackKey,CapturedAt DESC);\n" +
+                "CREATE INDEX IF NOT EXISTS IX_EstateStrategySamples_Kind ON EstateStrategySamples(TrackKey,Kind,CarOrdinal,PI,CarClass);\n" +
+                "UPDATE SchemaVersion SET Version=11;\n" +
+                "COMMIT;");
+            version = 11;
+        }
+
         if (SchemaVersion != CurrentSchemaVersion) throw new InvalidOperationException("Database schema version is newer than this LazyForza build.");
     }
 
@@ -882,10 +971,52 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
 
     private static string Quote(string? value) => value is null ? "NULL" : "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
     private static string N(double value) => value.ToString("R", CultureInfo.InvariantCulture);
+    private static string NullableNumber(double? value) =>
+        value is double number && double.IsFinite(number)
+            ? N(number)
+            : "NULL";
     private static int ParseInt(string? value) =>
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
     private static double ParseDouble(string? value) =>
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
+    private static double? ParseNullableDouble(string? value) =>
+        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) &&
+        double.IsFinite(parsed)
+            ? parsed
+            : null;
+
+    private static EstateStrategySample? ParseEstateStrategySample(IReadOnlyList<string?> row)
+    {
+        if (row.Count < 21 ||
+            !Guid.TryParse(row[0], out var id) ||
+            !Enum.TryParse<EstateStrategySampleKind>(row[4], true, out var kind) ||
+            !Enum.TryParse<EstateStrategySampleSource>(row[5], true, out var source) ||
+            !DateTimeOffset.TryParse(row[6], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var capturedAt))
+            return null;
+        var performanceIndex = ParseInt(row[9]);
+        var vehicle = new VehicleProfileFingerprint(
+            ParseInt(row[7]),
+            PerformanceClassCatalog.Resolve(ParseInt(row[8]), performanceIndex),
+            performanceIndex,
+            ParseInt(row[10]),
+            ParseInt(row[11]),
+            ParseInt(row[12]),
+            row[13] ?? VehicleProfileIdentity.PendingSignature,
+            row[14] ?? VehicleProfileIdentity.PendingSignature);
+        return new EstateStrategySample(
+            id,
+            new EstateStrategyTrackIdentity(row[1] ?? string.Empty, row[2] ?? string.Empty, row[3] ?? string.Empty),
+            kind,
+            source,
+            capturedAt,
+            vehicle,
+            Math.Max(0, ParseInt(row[15])),
+            ParseNullableDouble(row[16]),
+            ParseNullableDouble(row[17]),
+            ParseNullableDouble(row[18]),
+            ParseNullableDouble(row[19]),
+            ParseNullableDouble(row[20]));
+    }
     private static TrackLayoutKind ParseLayoutKind(string? value) =>
         Enum.TryParse<TrackLayoutKind>(value, true, out var parsed) ? parsed : TrackLayoutKind.Circuit;
     private static TrackCatalogKind ParseCatalogKind(string? value) =>

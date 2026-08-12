@@ -282,6 +282,36 @@ public sealed class EstateRaceGeometryTests
     }
 
     [TestMethod]
+    public void PitEntryRecoversFromCentreLineWhenRecordedGateDirectionIsTooStrict()
+    {
+        var pit = new EstatePitDefinition(
+            Gate(0, 0, -1, 0),
+            Gate(30, 0, 1, 0),
+            [new EstateGatePoint(-10, 2, 0), new EstateGatePoint(10, 2, 0), new EstateGatePoint(30, 2, 0)],
+            new EstateGatePoint(15, 2, 0),
+            3,
+            80,
+            3,
+            3.5);
+        var tracker = new EstatePitServiceTracker();
+
+        _ = tracker.Observe(Frame(1_000, 15, 20, 90), pit, true);
+        var firstLaneSample = tracker.Observe(Frame(1_100, 2, 0, 90), pit, true);
+        Assert.IsFalse(firstLaneSample.IsInPitLane,
+            "单个通道投影样本不足以绕过入口方向判断。");
+
+        var recovered = tracker.Observe(Frame(1_200, 3, 0, 90), pit, true);
+        Assert.IsTrue(recovered.IsInPitLane,
+            "连续沿已录入通道行驶时，应允许中心线进度修正过严的门线方向判断。");
+        Assert.IsTrue(recovered.IsSpeeding,
+            "恢复进站状态的同一帧就应进入限速执法，不能漏掉入口后的超速。");
+
+        var continued = tracker.Observe(Frame(1_300, 4, 0, 90), pit, true);
+        Assert.AreEqual(.2, continued.PitLaneElapsedSeconds, .001,
+            "方向恢复只应建立一次进站状态，后续通道样本不能反复重置维修区计时。");
+    }
+
+    [TestMethod]
     public void LeavingRecordedPitCorridorWithoutCrossingExitClearsLimiterState()
     {
         var pit = new EstatePitDefinition(
@@ -392,6 +422,17 @@ public sealed class EstateRaceGeometryTests
                 DriveThroughReminderAt = now
             },
             now.AddSeconds(5.1)));
+        Assert.IsFalse(EstateRaceHudVisibilityPolicy.ShouldShowPenaltyStatus(
+            session with { Phase = RaceSessionPhase.Finished },
+            participant with
+            {
+                Status = RaceParticipantStatus.Finished,
+                IsInPitLane = true,
+                PendingTimePenaltySeconds = 5,
+                DriveThroughReminderAt = now
+            },
+            now),
+            "方格旗后不能再显示要求车手进站执行处罚的指示器。");
     }
 
     [DataTestMethod]

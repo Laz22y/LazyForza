@@ -100,6 +100,42 @@ public static class ForzaHorizonWindow
         return SetForegroundWindow(window.Handle);
     }
 
+    public static ForzaHorizonWindowInfo CreatePreviewTarget(Window owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        var ownerHandle = new WindowInteropHelper(owner).EnsureHandle();
+        var dpi = Math.Max(96, GetDpiForWindow(ownerHandle));
+        var monitor = MonitorFromWindow(ownerHandle, MonitorDefaultToNearest);
+        var info = new MonitorInfo
+        {
+            Size = Marshal.SizeOf<MonitorInfo>()
+        };
+        if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
+        {
+            return new ForzaHorizonWindowInfo(
+                IntPtr.Zero,
+                "Overlay preview",
+                "LazyForza",
+                info.Monitor.Left,
+                info.Monitor.Top,
+                Math.Max(800, info.Monitor.Right - info.Monitor.Left),
+                Math.Max(450, info.Monitor.Bottom - info.Monitor.Top),
+                dpi / 96d,
+                info.DeviceName.TrimEnd('\0'));
+        }
+
+        return new ForzaHorizonWindowInfo(
+            IntPtr.Zero,
+            "Overlay preview",
+            "LazyForza",
+            checked((int)Math.Round(SystemParameters.VirtualScreenLeft * dpi / 96d)),
+            checked((int)Math.Round(SystemParameters.VirtualScreenTop * dpi / 96d)),
+            Math.Max(800, checked((int)Math.Round(SystemParameters.PrimaryScreenWidth * dpi / 96d))),
+            Math.Max(450, checked((int)Math.Round(SystemParameters.PrimaryScreenHeight * dpi / 96d))),
+            dpi / 96d,
+            "primary");
+    }
+
     private static string WindowTitle(IntPtr handle)
     {
         var length = GetWindowTextLength(handle);
@@ -452,7 +488,8 @@ internal sealed class OverlayLayoutEditorWindow : Window
     public OverlayLayoutEditorWindow(
         Func<IReadOnlyList<IHudContribution>> getContributions,
         OverlayLayout layout,
-        ForzaHorizonWindowInfo target)
+        ForzaHorizonWindowInfo target,
+        string? setupNotice = null)
     {
         this.target = target;
         original = OverlayLayoutGeometry.Normalize(
@@ -673,6 +710,19 @@ internal sealed class OverlayLayoutEditorWindow : Window
             FontSize = 11,
             Foreground = new SolidColorBrush(Color.FromRgb(179, 192, 201))
         });
+        if (!string.IsNullOrWhiteSpace(setupNotice))
+        {
+            heading.Children.Add(new TextBlock
+            {
+                Text = setupNotice.Trim(),
+                Margin = new Thickness(0, 4, 0, 0),
+                MaxWidth = Math.Clamp(Width * 0.46, 440, 760),
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(255, 205, 86))
+            });
+        }
         dashboardPreviewVisibility = new ToggleButton
         {
             Content = "仪表盘：显示",
@@ -822,7 +872,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         });
         estateRaceWidgetSelection = new ComboBox
         {
-            Width = 126,
+            Width = 148,
             Padding = new Thickness(7, 4, 7, 4),
             ItemsSource = Enum.GetValues<EstateRaceHudWidgetKind>()
                 .Select(EstateRaceWidgetName)
@@ -1589,7 +1639,9 @@ internal sealed class OverlayLayoutEditorWindow : Window
             EstateRaceHudWidgetKind.StartLights => "五盏起跑灯",
             EstateRaceHudWidgetKind.PitStopInfo => "维修站信息",
             EstateRaceHudWidgetKind.PitLimiter => "维修区限速",
-            _ => "罚时指示器"
+            EstateRaceHudWidgetKind.PenaltyStatus => "罚时指示器",
+            EstateRaceHudWidgetKind.PracticeProgram => "练习项目提示",
+            _ => "进站窗口建议"
         };
 
     private static Size EstateRaceWidgetBaseSize(
@@ -1599,7 +1651,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         {
             EstateRaceHudWidgetKind.Leaderboard => new Size(
                 width * 0.235,
-                height * 0.079 + Math.Max(36, height * 0.045) * 12),
+                height * 0.092 + Math.Max(36, height * 0.045) * 12),
             EstateRaceHudWidgetKind.TrackMap => new Size(
                 Math.Min(width * 0.19, height * 0.28),
                 Math.Min(width * 0.19, height * 0.28)),
@@ -1610,6 +1662,8 @@ internal sealed class OverlayLayoutEditorWindow : Window
             EstateRaceHudWidgetKind.StartLights => new Size(width * 0.30, height * 0.09),
             EstateRaceHudWidgetKind.PitStopInfo => new Size(width * 0.215, height * 0.174),
             EstateRaceHudWidgetKind.PitLimiter => new Size(height * 0.11, height * 0.11),
+            EstateRaceHudWidgetKind.PracticeProgram => new Size(width * 0.32, height * 0.12),
+            EstateRaceHudWidgetKind.PitWindowSuggestion => new Size(width * 0.19, height * 0.14),
             _ => new Size(width * 0.27, height * 0.105)
         };
 

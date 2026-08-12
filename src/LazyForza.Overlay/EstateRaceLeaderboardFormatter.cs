@@ -27,6 +27,10 @@ public static class EstateRaceLeaderboardFormatter
         if (qualifying)
         {
             if (participant.BestLapSeconds is not double bestLap) return "NO TIME";
+            if (localParticipant is null)
+                return participant.Position == 1
+                    ? FormatLapTime(bestLap)
+                    : FormatDelta(participant.GapToLeaderSeconds);
             if (local) return FormatLapTime(bestLap);
             return localParticipant?.BestLapSeconds is double localBestLap
                 ? FormatDelta(bestLap - localBestLap)

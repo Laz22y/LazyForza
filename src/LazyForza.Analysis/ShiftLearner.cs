@@ -22,6 +22,7 @@ public sealed record ShiftLearnerOptions(
 
 public sealed class ShiftLearner
 {
+    private readonly object sync = new();
     private readonly ShiftLearnerOptions options;
     private readonly Dictionary<int, List<Sample>> bins = [];
     private readonly Dictionary<int, List<double>> gearSlopes = [];
@@ -40,10 +41,18 @@ public sealed class ShiftLearner
 
     public ShiftLearner(ShiftLearnerOptions? options = null) => this.options = options ?? new ShiftLearnerOptions();
 
-    public ShiftLearningSnapshot Snapshot => BuildSnapshot();
+    public ShiftLearningSnapshot Snapshot
+    {
+        get
+        {
+            lock (sync) return BuildSnapshot();
+        }
+    }
 
     public void Observe(TelemetryFrame frame)
     {
+        lock (sync)
+        {
         if (frame.Raw.IsRaceOn != 1)
         {
             Reject("not-driving");
@@ -131,10 +140,13 @@ public sealed class ShiftLearner
                 BuildGears().Count >= 2
             ? LearningState.Ready
             : LearningState.Collecting;
+        }
     }
 
     public void Reset()
     {
+        lock (sync)
+        {
         bins.Clear();
         gearSlopes.Clear();
         rejected.Clear();
@@ -147,6 +159,7 @@ public sealed class ShiftLearner
         lastAcceptedAt = null;
         ClearTuneEvidence();
         configurationRevision++;
+        }
     }
 
     private bool Accept(TelemetryFrame frame, out string reason)

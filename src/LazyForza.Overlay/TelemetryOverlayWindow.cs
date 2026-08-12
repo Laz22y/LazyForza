@@ -116,12 +116,15 @@ internal sealed class TelemetryOverlayWindow : Window
         double targetWidth,
         double targetHeight,
         bool previewDrift = false,
-        bool previewEstateRace = false)
+        bool previewEstateRace = false,
+        bool previewEstateRaceFinished = false)
     {
         var previousDriftPreview = driftSurface.LayoutPreview;
         var previousEstateRacePreview = estateRaceSurface.LayoutPreview;
+        var previousEstateRaceFinishedPreview = estateRaceSurface.EstateRaceFinishedPreview;
         driftSurface.LayoutPreview = previewDrift;
         estateRaceSurface.LayoutPreview = previewEstateRace;
+        estateRaceSurface.EstateRaceFinishedPreview = previewEstateRaceFinished;
         driftSurface.InvalidateVisual();
         estateRaceSurface.InvalidateVisual();
         var pixelWidth = Math.Max(1, (int)Math.Round(targetWidth));
@@ -144,6 +147,7 @@ internal sealed class TelemetryOverlayWindow : Window
         {
             driftSurface.LayoutPreview = previousDriftPreview;
             estateRaceSurface.LayoutPreview = previousEstateRacePreview;
+            estateRaceSurface.EstateRaceFinishedPreview = previousEstateRaceFinishedPreview;
             driftSurface.InvalidateVisual();
             estateRaceSurface.InvalidateVisual();
         }
@@ -236,11 +240,13 @@ internal sealed class HudSurface : FrameworkElement
     private readonly Func<OverlayLayout> getLayout;
     private readonly HudSurfaceKind kind;
     private bool layoutPreview;
+    private bool estateRaceFinishedPreview;
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly FrameRateLimiter limiter;
     private readonly DashboardHudDynamics dashboardDynamics = new();
     private readonly LapHudDynamics lapDynamics = new();
     private readonly Dictionary<Guid, PitHudRuntime> pitHudRuntime = [];
+    private readonly EstatePitWindowHudRuntime pitWindowHudRuntime = new();
     private double renderedBrake;
     private double previousPedalRenderSeconds;
     private bool pedalAnimationInitialized;
@@ -270,6 +276,12 @@ internal sealed class HudSurface : FrameworkElement
     {
         get => layoutPreview;
         set => layoutPreview = value;
+    }
+
+    internal bool EstateRaceFinishedPreview
+    {
+        get => estateRaceFinishedPreview;
+        set => estateRaceFinishedPreview = value;
     }
 
     private void OnRendering(object? sender, EventArgs e)
@@ -421,7 +433,7 @@ internal sealed class HudSurface : FrameworkElement
         if (layoutPreview)
         {
             pitHudRuntime.Clear();
-            state = OverlayLayoutPreviewState.EstateRace(now);
+            state = OverlayLayoutPreviewState.EstateRace(now, estateRaceFinishedPreview);
         }
         if (state?.Session is not { } session ||
             !state.IsConnected ||
@@ -477,6 +489,19 @@ internal sealed class HudSurface : FrameworkElement
             estimatedServerNow);
         DrawRaceWidget(dc, widgets.Get(EstateRaceHudWidgetKind.PenaltyStatus),
             () => DrawRacePenaltyStatus(dc, localParticipant!), penaltyVisible);
+        var activePractice = state.PracticeTests?.Items.FirstOrDefault(item => item.IsVisibleOnHud(now));
+        DrawRaceWidget(dc, widgets.Get(EstateRaceHudWidgetKind.PracticeProgram),
+            () => DrawRacePracticeProgram(dc, activePractice!),
+            activePractice is not null && EstateRaceHudVisibilityPolicy.ShouldShowPracticeProgram(state, now));
+        var pitWindow = pitWindowHudRuntime.Update(
+            session,
+            state.LocalParticipantId,
+            state.PitStrategy,
+            now,
+            layoutPreview && !estateRaceFinishedPreview);
+        DrawRaceWidget(dc, widgets.Get(EstateRaceHudWidgetKind.PitWindowSuggestion),
+            () => DrawRacePitWindowSuggestion(dc, pitWindow),
+            pitWindow.IsVisible);
     }
 
     private void DrawRaceWidget(
@@ -503,21 +528,27 @@ internal sealed class HudSurface : FrameworkElement
         EstateRaceSession session)
     {
         var width = ActualWidth * 0.235;
-        var topHeaderHeight = ActualHeight * 0.053;
-        var stageHeaderHeight = ActualHeight * 0.026;
-        var headerHeight = topHeaderHeight + stageHeaderHeight;
-        var rowHeight = Math.Max(36, ActualHeight * 0.045);
         var participants = session.Participants.Take(12).ToArray();
         var localParticipant = participants.FirstOrDefault(item => item.Id == state.LocalParticipantId);
-        var height = headerHeight + participants.Length * rowHeight;
         var qualifying = session.Phase is RaceSessionPhase.Qualifying or RaceSessionPhase.Grid ||
                          session.Phase == RaceSessionPhase.Suspended &&
                          session.SuspendedFromPhase == RaceSessionPhase.Qualifying;
+        var practice = session.Phase == RaceSessionPhase.Practice ||
+                       session.Phase == RaceSessionPhase.Suspended &&
+                       session.SuspendedFromPhase == RaceSessionPhase.Practice;
+        var timedLap = qualifying || practice;
         var race = session.Phase == RaceSessionPhase.Race ||
                    session.Phase == RaceSessionPhase.Suspended &&
                    session.SuspendedFromPhase == RaceSessionPhase.Race;
         var finished = session.Phase == RaceSessionPhase.Finished;
-        var targetSignal = SelectRaceHeaderSignal(session, state.LocalParticipantId);
+        var topHeaderHeight = ActualHeight * (finished ? 0.062 : 0.053);
+        var stageHeaderHeight = ActualHeight * (finished ? 0.030 : 0.026);
+        var headerHeight = topHeaderHeight + stageHeaderHeight;
+        var rowHeight = Math.Max(36, ActualHeight * 0.045);
+        var height = headerHeight + participants.Length * rowHeight;
+        var targetSignal = finished
+            ? RaceHeaderSignal.None
+            : SelectRaceHeaderSignal(session, state.LocalParticipantId);
         UpdateRaceHeaderSignal(targetSignal);
         var transitionProgress = getLayout().ReduceMotion
             ? 1
@@ -525,7 +556,7 @@ internal sealed class HudSurface : FrameworkElement
         transitionProgress = 1 - Math.Pow(1 - transitionProgress, 3);
         var accent = targetSignal == RaceHeaderSignal.Chequered
             ? BrushOf(0xF6, 0xD3, 0x6C)
-            : finished ? BrushOf(0xFF, 0xD1, 0x66) : qualifying
+            : finished ? BrushOf(0x20, 0xD9, 0xEF) : qualifying
             ? BrushOf(0xB4, 0x63, 0xFF)
             : BrushOf(0x38, 0xD5, 0xE8);
         dc.DrawRoundedRectangle(
@@ -543,9 +574,25 @@ internal sealed class HudSurface : FrameworkElement
         DrawRaceOrganizerLogo(dc, state.OrganizerLogo,
             new Rect(width * 0.035, topHeaderHeight * 0.13, width * 0.115, topHeaderHeight * 0.74));
 
-        var phase = finished ? "FINAL" : qualifying ? "QUALIFYING" :
+        var phase = finished ? "FINAL" : practice
+            ? session.PracticeSessionCount > 1 && session.PracticeSessionNumber > 0
+                ? $"PRACTICE · FP{session.PracticeSessionNumber}"
+                : "PRACTICE"
+            : qualifying
+            ? session.QualifyingSessionCount > 1 && session.QualifyingSessionNumber > 0
+                ? $"QUALIFYING · Q{session.QualifyingSessionNumber}"
+                : "QUALIFYING"
+            :
             session.Phase == RaceSessionPhase.Race ? "RACE" : RacePhaseText(session.Phase).ToUpperInvariant();
-        if (targetSignal == RaceHeaderSignal.None)
+        if (finished)
+        {
+            dc.DrawRectangle(BrushWithOpacity(accent, 0.88), null,
+                new Rect(width * 0.172, topHeaderHeight * 0.16, Math.Max(2, width * 0.005), topHeaderHeight * 0.68));
+            RaceBoundedText(dc, "RACE COMPLETE",
+                new Rect(width * 0.205, topHeaderHeight * 0.09, width * 0.745, topHeaderHeight * 0.82),
+                Math.Max(15, topHeaderHeight * 0.34), White, true);
+        }
+        else if (targetSignal == RaceHeaderSignal.None)
             RaceTitleText(dc, phase, width * 0.935, topHeaderHeight * 0.52,
                 Math.Max(14, topHeaderHeight * 0.42), White, TextAlignment.Right);
         else if (targetSignal == RaceHeaderSignal.Chequered)
@@ -574,13 +621,30 @@ internal sealed class HudSurface : FrameworkElement
         {
             RaceSessionPhase.Finished =>
                 $"RACE TIME {FormatRaceTime(participants.FirstOrDefault()?.AdjustedRaceTotalSeconds)} · {participants.Count(item => item.Status == RaceParticipantStatus.Finished)} CLASSIFIED",
+            RaceSessionPhase.Practice when session.PracticeEndsAt is DateTimeOffset practiceEnding =>
+                $"{(session.PracticeSessionCount > 1 ? $"FP{session.PracticeSessionNumber} · " : string.Empty)}REMAINING {FormatRemaining(practiceEnding - (session.ServerTime + (DateTimeOffset.UtcNow - state.UpdatedAt)))}",
+            RaceSessionPhase.Practice when session.PracticeTimeExpired &&
+                                                   session.PracticeSessionCount > 1 &&
+                                                   session.PracticeSessionNumber < session.PracticeSessionCount =>
+                $"FP{session.PracticeSessionNumber} COMPLETE · WAITING FOR FP{session.PracticeSessionNumber + 1}",
+            RaceSessionPhase.Practice when session.PracticeTimeExpired =>
+                $"{(session.PracticeSessionCount > 1 ? $"FP{session.PracticeSessionNumber}" : "PRACTICE")} COMPLETE",
             RaceSessionPhase.Qualifying when session.QualifyingEndsAt is DateTimeOffset ending =>
-                $"REMAINING {FormatRemaining(ending - (session.ServerTime + (DateTimeOffset.UtcNow - state.UpdatedAt)))}",
+                $"{(session.QualifyingSessionCount > 1 ? $"Q{session.QualifyingSessionNumber} · " : string.Empty)}REMAINING {FormatRemaining(ending - (session.ServerTime + (DateTimeOffset.UtcNow - state.UpdatedAt)))}",
+            RaceSessionPhase.Qualifying when session.QualifyingTimeExpired &&
+                                                     session.QualifyingSessionCount > 1 &&
+                                                     session.QualifyingSessionNumber < session.QualifyingSessionCount =>
+                $"Q{session.QualifyingSessionNumber} COMPLETE · WAITING FOR Q{session.QualifyingSessionNumber + 1}",
+            RaceSessionPhase.Qualifying when session.QualifyingTimeExpired =>
+                $"{(session.QualifyingSessionCount > 1 ? $"Q{session.QualifyingSessionNumber}" : "QUALIFYING")} COMPLETE",
             RaceSessionPhase.Race when session.TotalRaceLaps > 0 =>
                 $"TIME {FormatRaceTime(session.RaceElapsedSeconds)} · LAP {Math.Max(1, participants.FirstOrDefault()?.CompletedLaps + 1 ?? 1)}/{session.TotalRaceLaps}",
             RaceSessionPhase.Suspended when session.SuspendedFromPhase == RaceSessionPhase.Qualifying &&
                                            session.QualifyingEndsAt is DateTimeOffset ending =>
                 $"SESSION SUSPENDED · REMAINING {FormatRemaining(ending - session.ServerTime)}",
+            RaceSessionPhase.Suspended when session.SuspendedFromPhase == RaceSessionPhase.Practice &&
+                                           session.PracticeEndsAt is DateTimeOffset practiceEnding =>
+                $"SESSION SUSPENDED · REMAINING {FormatRemaining(practiceEnding - session.ServerTime)}",
             RaceSessionPhase.Suspended when session.SuspendedFromPhase == RaceSessionPhase.Race &&
                                            session.TotalRaceLaps > 0 =>
                 $"SESSION SUSPENDED · LAP {Math.Max(1, participants.FirstOrDefault()?.CompletedLaps + 1 ?? 1)}/{session.TotalRaceLaps}",
@@ -590,9 +654,23 @@ internal sealed class HudSurface : FrameworkElement
             RaceSessionPhase.Grid => "GRID SET · WAITING FOR RACE CONTROL",
             _ => "WAITING FOR RACE CONTROL"
         };
-        RaceBoundedText(dc, stageDetail,
-            new Rect(width * 0.055, topHeaderHeight, width * 0.89, stageHeaderHeight),
-            Math.Max(10, stageHeaderHeight * 0.38), RaceSecondary, true);
+        if (finished)
+        {
+            RaceText(dc, "FINAL CLASSIFICATION", width * 0.055,
+                topHeaderHeight + stageHeaderHeight * 0.52,
+                Math.Max(10, stageHeaderHeight * 0.35), White, TextAlignment.Left, true);
+            var classified = participants.Count(item => item.Status == RaceParticipantStatus.Finished);
+            var laps = Math.Max(0, session.TotalRaceLaps);
+            RaceText(dc, $"{laps} LAPS · {classified} CLASSIFIED", width * 0.945,
+                topHeaderHeight + stageHeaderHeight * 0.52,
+                Math.Max(9, stageHeaderHeight * 0.31), RaceSecondary, TextAlignment.Right, true);
+        }
+        else
+        {
+            RaceBoundedText(dc, stageDetail,
+                new Rect(width * 0.055, topHeaderHeight, width * 0.89, stageHeaderHeight),
+                Math.Max(10, stageHeaderHeight * 0.38), RaceSecondary, true);
+        }
 
         for (var index = 0; index < participants.Length; index++)
         {
@@ -657,18 +735,21 @@ internal sealed class HudSurface : FrameworkElement
                     string.IsNullOrWhiteSpace(participant.TeamColor)
                         ? Muted
                         : RaceThemeBrush(participant.TeamColor!));
-            var status = EstateRaceLeaderboardFormatter.Format(
+            var status = participant.QualifyingEliminatedInSession is int eliminatedIn && qualifying
+                ? $"OUT Q{eliminatedIn}"
+                : EstateRaceLeaderboardFormatter.Format(
                 participant,
                 localParticipant,
-                qualifying,
+                timedLap,
                 race,
                 participants.FirstOrDefault()?.CompletedLaps ?? 0);
+            var underInvestigation = HasPendingInvestigation(session, participant.Id);
             var penaltyBadge = PendingPenaltyBadge(participant);
             var valueBrush = participant.IsInServiceZone || participant.IsInPitLane
                 ? BrushOf(0xFF, 0xC4, 0x4D)
                 : participant.Status == RaceParticipantStatus.Disqualified
                     ? BrushOf(0xFF, 0x45, 0x5F)
-                    : participant.Id == session.FastestParticipantId && qualifying
+                    : participant.Id == session.FastestParticipantId && timedLap
                         ? BrushOf(0xC0, 0x63, 0xFF)
                         : White;
             dc.DrawRoundedRectangle(
@@ -687,6 +768,8 @@ internal sealed class HudSurface : FrameworkElement
                 Math.Max(12, rowHeight * 0.27), valueBrush, TextAlignment.Right, true);
             if (penaltyBadge is not null)
                 DrawLeaderboardPenaltyBadge(dc, penaltyBadge, width, top, rowHeight);
+            if (underInvestigation)
+                DrawLeaderboardInvestigationBadge(dc, width, top, rowHeight);
         }
     }
 
@@ -728,6 +811,10 @@ internal sealed class HudSurface : FrameworkElement
         RaceHeaderSignal.Chequered => "CHEQUERED FLAG",
         _ => string.Empty
     };
+
+    internal static bool HasPendingInvestigation(EstateRaceSession session, Guid participantId) =>
+        session.Investigations?.Any(item => item.ParticipantId == participantId &&
+            item.Status == RaceInvestigationStatus.Pending) == true;
 
     private static Brush RaceHeaderSignalColor(RaceHeaderSignal signal) => signal switch
     {
@@ -1445,6 +1532,24 @@ internal sealed class HudSurface : FrameworkElement
             Math.Max(11, rowHeight * 0.27), White, TextAlignment.Center, true);
     }
 
+    private void DrawLeaderboardInvestigationBadge(
+        DrawingContext dc,
+        double width,
+        double top,
+        double rowHeight)
+    {
+        var center = new Point(width * 0.585, top + rowHeight * 0.5);
+        var radius = Math.Max(7, rowHeight * 0.19);
+        dc.DrawEllipse(
+            BrushOf(0xFF, 0xCF, 0x28, 0.14),
+            new Pen(BrushOf(0xFF, 0xCF, 0x28, 0.92), 1),
+            center,
+            radius,
+            radius);
+        RaceText(dc, "!", center.X, center.Y - rowHeight * 0.01,
+            Math.Max(11, rowHeight * 0.27), BrushOf(0xFF, 0xD8, 0x47), TextAlignment.Center, true);
+    }
+
     private void DrawRacePenaltyStatus(DrawingContext dc, EstateRaceParticipant participant)
     {
         var width = ActualWidth * 0.27;
@@ -1660,11 +1765,189 @@ internal sealed class HudSurface : FrameworkElement
         }
     }
 
+    private void DrawRacePitWindowSuggestion(
+        DrawingContext dc,
+        PitWindowHudSnapshot snapshot)
+    {
+        var width = ActualWidth * 0.19;
+        var height = ActualHeight * 0.14;
+        var cyan = BrushOf(0x20, 0xD9, 0xEF);
+        var amber = BrushOf(0xFF, 0xB5, 0x21);
+        var accent = snapshot.WindowOpen ? amber : cyan;
+        dc.DrawRoundedRectangle(
+            BrushOf(0x07, 0x0C, 0x13, 0.97),
+            new Pen(BrushOf(0x8B, 0x9A, 0xAA, 0.46), 1),
+            new Rect(0, 0, width, height),
+            9,
+            9);
+        dc.DrawRoundedRectangle(accent, null,
+            new Rect(0, height * 0.08, Math.Max(5, width * 0.013), height * 0.84), 3, 3);
+        RaceTitleText(dc, snapshot.WindowOpen ? "WINDOW OPEN" : "PIT WINDOW",
+            width * 0.055, height * 0.17,
+            Math.Max(14, height * 0.15), snapshot.WindowOpen ? amber : White,
+            TextAlignment.Left);
+        dc.DrawLine(new Pen(BrushOf(0x9A, 0xA8, 0xB7, 0.38), 1),
+            new Point(width * 0.055, height * 0.29),
+            new Point(width * 0.95, height * 0.29));
+
+        if (snapshot.WindowOpen)
+        {
+            RaceTitleText(dc, "PIT THIS LAP", width * 0.055, height * 0.48,
+                Math.Max(18, height * 0.19), White, TextAlignment.Left);
+            RaceTitleText(dc, snapshot.EndLap > snapshot.StartLap ? "OR NEXT" : "NOW",
+                width * 0.055, height * 0.65,
+                Math.Max(15, height * 0.16), White, TextAlignment.Left);
+            var center = new Point(width * 0.80, height * 0.52);
+            var radius = height * 0.17;
+            dc.DrawEllipse(BrushWithOpacity(amber, 0.08), new Pen(amber, Math.Max(2, height * 0.018)),
+                center, radius, radius);
+            RaceTitleText(dc, "!", center.X, center.Y, Math.Max(25, height * 0.29), amber,
+                TextAlignment.Center);
+        }
+        else
+        {
+            RaceText(dc, "LAPS", width * 0.055, height * 0.42,
+                Math.Max(11, height * 0.095), RaceSecondary, TextAlignment.Left, true);
+            var windowText = snapshot.StartLap == snapshot.EndLap
+                ? snapshot.StartLap.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : $"{snapshot.StartLap}–{snapshot.EndLap}";
+            RaceTitleText(dc, windowText, width * 0.055, height * 0.62,
+                Math.Max(28, height * 0.25), cyan, TextAlignment.Left);
+            dc.DrawLine(new Pen(BrushOf(0x9A, 0xA8, 0xB7, 0.34), 1),
+                new Point(width * 0.55, height * 0.36),
+                new Point(width * 0.55, height * 0.72));
+            var center = new Point(width * 0.77, height * 0.51);
+            var radius = height * 0.17;
+            dc.DrawEllipse(BrushOf(0x11, 0x1B, 0x27, 0.92),
+                new Pen(BrushOf(0x4B, 0x5A, 0x69, 0.72), Math.Max(2, height * 0.022)),
+                center, radius, radius);
+            var progress = Math.Clamp((3 - snapshot.LapsUntilWindow) / 3d, 0.15, 1);
+            DrawPitWindowProgressArc(dc, center, radius, progress, cyan, height);
+            RaceTitleText(dc, snapshot.LapsUntilWindow.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                center.X, center.Y, Math.Max(24, height * 0.27), White, TextAlignment.Center);
+            RaceText(dc, "LAPS TO WINDOW", center.X, height * 0.72,
+                Math.Max(9, height * 0.082), White, TextAlignment.Center, true);
+        }
+
+        dc.DrawLine(new Pen(BrushOf(0x9A, 0xA8, 0xB7, 0.38), 1),
+            new Point(width * 0.055, height * 0.79),
+            new Point(width * 0.95, height * 0.79));
+        RaceText(dc, "RECENT DEGRADATION", width * 0.055, height * 0.90,
+            Math.Max(9, height * 0.078), RaceSecondary, TextAlignment.Left, true);
+        var degradationText = snapshot.DegradationPerLapSeconds is double degradation
+            ? $"+{degradation:0.00} s/lap"
+            : "— s/lap";
+        RaceText(dc, degradationText, width * 0.945, height * 0.90,
+            Math.Max(11, height * 0.10), White, TextAlignment.Right, true);
+    }
+
+    private static void DrawPitWindowProgressArc(
+        DrawingContext dc,
+        Point center,
+        double radius,
+        double progress,
+        Brush brush,
+        double height)
+    {
+        progress = Math.Clamp(progress, 0, 0.999);
+        var startAngle = -90d;
+        var endAngle = startAngle + 360 * progress;
+        static Point ArcPoint(Point origin, double arcRadius, double angle)
+        {
+            var radians = angle * Math.PI / 180;
+            return new Point(
+                origin.X + Math.Cos(radians) * arcRadius,
+                origin.Y + Math.Sin(radians) * arcRadius);
+        }
+        var geometry = new StreamGeometry();
+        using (var context = geometry.Open())
+        {
+            context.BeginFigure(ArcPoint(center, radius, startAngle), false, false);
+            context.ArcTo(
+                ArcPoint(center, radius, endAngle),
+                new Size(radius, radius),
+                0,
+                progress > 0.5,
+                SweepDirection.Clockwise,
+                true,
+                false);
+        }
+        geometry.Freeze();
+        dc.DrawGeometry(null, new Pen(brush, Math.Max(2, height * 0.023)), geometry);
+    }
+
+    private void DrawRacePracticeProgram(
+        DrawingContext dc,
+        EstatePracticeTestItemState item)
+    {
+        var width = ActualWidth * 0.32;
+        var height = ActualHeight * 0.12;
+        var accent = item.Status switch
+        {
+            EstatePracticeTestStatus.Completed => BrushOf(0x35, 0xD0, 0x7F),
+            EstatePracticeTestStatus.Failed => BrushOf(0xF2, 0x50, 0x57),
+            _ => BrushOf(0x20, 0xD9, 0xEF)
+        };
+        dc.DrawRoundedRectangle(
+            BrushOf(0x08, 0x0B, 0x11, 0.96),
+            new Pen(BrushOf(0x8B, 0x9A, 0xAA, 0.38), 1),
+            new Rect(0, 0, width, height),
+            9,
+            9);
+        dc.DrawRoundedRectangle(accent, null,
+            new Rect(0, height * 0.14, Math.Max(5, width * 0.011), height * 0.72), 2, 2);
+        dc.DrawRectangle(BrushWithOpacity(accent, 0.85), null,
+            new Rect(width * 0.045, height * 0.18, width * 0.14, 2));
+        RaceText(dc, "PRACTICE PROGRAM", width * 0.045, height * 0.32,
+            Math.Max(10, height * 0.115), RaceSecondary, TextAlignment.Left, true);
+        RaceText(dc, PracticeProgramStatusText(item), width * 0.955, height * 0.32,
+            Math.Max(10, height * 0.115), accent, TextAlignment.Right, true);
+        RaceBoundedText(dc, item.Title,
+            new Rect(width * 0.045, height * 0.37, width * 0.33, height * 0.25),
+            Math.Max(15, height * 0.19), White, true);
+        RaceBoundedText(dc, item.Guidance,
+            new Rect(width * 0.39, height * 0.39, width * 0.565, height * 0.36),
+            Math.Max(11, height * 0.125), RaceSecondary, true);
+
+        var target = Math.Max(1, item.TargetSteps);
+        var progress = Math.Clamp(item.CompletedSteps / (double)target, 0, 1);
+        var progressTop = height * 0.82;
+        dc.DrawRoundedRectangle(BrushOf(0x6D, 0x78, 0x84, 0.28), null,
+            new Rect(width * 0.045, progressTop, width * 0.74, height * 0.055), 3, 3);
+        if (progress > 0)
+            dc.DrawRoundedRectangle(accent, null,
+                new Rect(width * 0.045, progressTop, width * 0.74 * progress, height * 0.055), 3, 3);
+        var progressText = item.Status switch
+        {
+            EstatePracticeTestStatus.Completed => "RETURN TO PIT",
+            EstatePracticeTestStatus.Failed => "RETURN TO PIT",
+            _ => $"{item.CompletedSteps} / {target}"
+        };
+        RaceText(dc, progressText, width * 0.955, progressTop + height * 0.026,
+            Math.Max(11, height * 0.13), White, TextAlignment.Right, true);
+    }
+
+    private static string PracticeProgramKindText(EstatePracticeTestKind kind) => kind switch
+    {
+        EstatePracticeTestKind.LongRun => "LONG RUN",
+        EstatePracticeTestKind.PitStopSimulation => "PIT STOP TEST",
+        _ => "QUALIFYING RUN"
+    };
+
+    private static string PracticeProgramStatusText(EstatePracticeTestItemState item) => item.Status switch
+    {
+        EstatePracticeTestStatus.Completed => "PROJECT SUCCESS",
+        EstatePracticeTestStatus.Failed => "PROJECT FAILED",
+        _ => PracticeProgramKindText(item.Kind)
+    };
+
     private void DrawRaceBanner(DrawingContext dc, EstateRaceBanner banner)
     {
         var width = ActualWidth * 0.50;
         var height = ActualHeight * 0.09;
-        var fill = banner.Kind switch
+        var fill = banner.IsInvestigation
+            ? BrushOf(0xFF, 0xCF, 0x28)
+            : banner.Kind switch
         {
             RaceBannerKind.FastestLap => BrushOf(0x9C, 0x43, 0xD7),
             RaceBannerKind.Penalty or RaceBannerKind.RedFlag => BrushOf(0xF2, 0x35, 0x4F),
@@ -1673,7 +1956,8 @@ internal sealed class HudSurface : FrameworkElement
             RaceBannerKind.ChequeredFlag or RaceBannerKind.Winner => BrushOf(0xE8, 0xEB, 0xEF),
             _ => BrushOf(0x42, 0xD7, 0xE8)
         };
-        var darkText = banner.Kind is RaceBannerKind.YellowFlag or RaceBannerKind.ChequeredFlag or RaceBannerKind.Winner or RaceBannerKind.Information;
+        var darkText = banner.IsInvestigation || banner.Kind is RaceBannerKind.YellowFlag or
+            RaceBannerKind.ChequeredFlag or RaceBannerKind.Winner or RaceBannerKind.Information;
         dc.DrawRoundedRectangle(
             BrushOf(0x08, 0x0B, 0x11, 0.95),
             new Pen(BrushOf(0x8B, 0x9A, 0xAA, 0.34), 1),
@@ -1683,7 +1967,8 @@ internal sealed class HudSurface : FrameworkElement
         dc.DrawRectangle(fill, null, new Rect(0, 0, width * 0.018, height));
         dc.DrawRectangle(fill, null, new Rect(width * 0.035, height * 0.16, width * 0.16, 2));
         var foreground = darkText ? fill : White;
-        RaceText(dc, BannerKindText(banner.Kind), width * 0.035, height * 0.36,
+        RaceText(dc, banner.IsInvestigation ? "UNDER INVESTIGATION" : BannerKindText(banner.Kind),
+            width * 0.035, height * 0.36,
             Math.Max(11, height * 0.15), foreground, TextAlignment.Left, true);
         RaceText(dc, banner.Title, width * 0.035, height * 0.70,
             Math.Max(16, height * 0.27), White, TextAlignment.Left, true);
@@ -1745,7 +2030,17 @@ internal sealed class HudSurface : FrameworkElement
     {
         if (race is null || !race.IsConnected || race.Session is not { } session) return true;
         if (session.Phase == RaceSessionPhase.Race) return true;
+        if (session.Phase == RaceSessionPhase.Practice)
+        {
+            if (!session.PracticeTimeExpired) return true;
+            return race.LocalParticipantId is Guid practiceParticipantId &&
+                   session.Participants.FirstOrDefault(participant => participant.Id == practiceParticipantId)
+                       ?.PracticeFinalLapPending == true;
+        }
         if (session.Phase != RaceSessionPhase.Qualifying) return false;
+        if (race.LocalParticipantId is Guid participantId &&
+            session.Participants.FirstOrDefault(participant => participant.Id == participantId)?.QualifyingEligible == false)
+            return false;
         if (!session.QualifyingTimeExpired) return true;
         return race.LocalParticipantId is Guid localId &&
                session.Participants.FirstOrDefault(participant => participant.Id == localId)?.QualifyingFinalLapPending == true;
@@ -1754,6 +2049,7 @@ internal sealed class HudSurface : FrameworkElement
     private static string RacePhaseText(RaceSessionPhase phase) => phase switch
     {
         RaceSessionPhase.Lobby => "LOBBY",
+        RaceSessionPhase.Practice => "PRACTICE",
         RaceSessionPhase.Grid => "GRID",
         RaceSessionPhase.OutLap => "OUT LAP",
         RaceSessionPhase.FormationLap => "FORMATION LAP",
@@ -3141,7 +3437,7 @@ public static class OverlayLayoutPreviewState
         };
     }
 
-    public static EstateRaceHudState EstateRace(DateTimeOffset now)
+    public static EstateRaceHudState EstateRace(DateTimeOffset now, bool finished = false)
     {
         var participants = new[]
         {
@@ -3193,6 +3489,39 @@ public static class OverlayLayoutPreviewState
             4,
             true,
             "英国塔俱乐部环道");
+        if (finished)
+        {
+            var winnerTime = 5322.317;
+            participants = participants
+                .Select((participant, index) => participant with
+                {
+                    Status = RaceParticipantStatus.Finished,
+                    CompletedLaps = 10,
+                    IsInPitLane = false,
+                    IsInServiceZone = false,
+                    PitServiceElapsedSeconds = 0,
+                    PitLaneElapsedSeconds = 0,
+                    GapToLeaderSeconds = index == 0 ? 0 : index * 5.284,
+                    IntervalSeconds = index == 0 ? 0 : 5.284,
+                    RaceTotalSeconds = winnerTime + index * 5.284,
+                    AdjustedRaceTotalSeconds = winnerTime + index * 5.284,
+                    HasPendingDriveThrough = false,
+                    IsServingDriveThrough = false,
+                    DriveThroughLapsRemaining = null
+                })
+                .ToArray();
+            session = session with
+            {
+                Phase = RaceSessionPhase.Finished,
+                Flag = RaceControlFlag.Chequered,
+                FlagMessage = "比赛结束",
+                Participants = participants,
+                Banner = null,
+                YellowZones = [],
+                RaceElapsedSeconds = winnerTime,
+                ChequeredImminent = false
+            };
+        }
         var outline = Enumerable.Range(0, 121)
             .Select(index =>
             {
@@ -3225,14 +3554,28 @@ public static class OverlayLayoutPreviewState
             outline,
             RaceGripCondition.ModeratelyReduced,
             "相比前三圈基准中度下降",
-            new EstatePitServiceState(
-                true, false, 3, 0, false, 0, false, now,
-                8.6, true, 80, 72, false),
+            finished
+                ? EstatePitServiceState.Empty
+                : new EstatePitServiceState(
+                    true, false, 3, 0, false, 0, false, now,
+                    8.6, true, 80, 72, false),
             pitOutline,
             new EstateRaceMapGate(
                 new EstateRaceMapPoint(0.68, 0.17),
                 new EstateRaceMapPoint(0.78, 0.22)),
-            trackSectors);
+            trackSectors,
+            PracticeTests: new EstatePracticeTestPanelState(
+                true,
+                EstatePracticeTestKind.LongRun,
+                [new EstatePracticeTestItemState(
+                    EstatePracticeTestKind.LongRun,
+                    "长距离轮胎管理",
+                    "连续完成系统指定的干净圈。",
+                    EstatePracticeTestStatus.Active,
+                    "长距离进行中：保持正常比赛节奏，不要进站、暂停、回转或越过赛道边界。",
+                    2,
+                    6)],
+                12));
     }
 
     private static EstateRaceParticipant PreviewParticipant(

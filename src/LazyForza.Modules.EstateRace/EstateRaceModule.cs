@@ -19,14 +19,25 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private const string TeamNameSetting = "teamName";
     private const string TeamIdSetting = "teamId";
     private const string ResumeTokenSetting = "resumeToken";
+    private const string ObserverResumeTokenSetting = "observerResumeToken";
+    private const string ConnectionRoleSetting = "connectionRole";
     private const int MaximumOrganizerLogoBytes = 262_144;
     private static readonly TimeSpan TelemetryInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan FingerprintRefreshInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan BackgroundFailureLogInterval = TimeSpan.FromSeconds(10);
     private readonly Func<EstateRaceTrackContext?> trackContext;
     private readonly Action<Guid, bool, bool>? timingControl;
+    private readonly Func<VehicleProfileFingerprint?>? vehicleFingerprint;
+    private readonly Func<EstateStrategyTrackIdentity, IReadOnlyList<EstateStrategySample>>? strategySampleLoader;
+    private readonly Action<EstateStrategySample>? strategySampleSaver;
+    private readonly object strategySync = new();
+    private readonly object telemetryStateSync = new();
     private readonly SemaphoreSlim connectionLock = new(1, 1);
     private readonly SemaphoreSlim sendLock = new(1, 1);
     private readonly EstateRaceGripEstimator gripEstimator = new();
     private readonly EstatePitServiceTracker pitServiceTracker = new();
+    private readonly EstatePitStrategyPredictor pitStrategyPredictor = new();
+    private readonly EstatePracticeTestManager practiceTestManager = new();
     private readonly Stopwatch monotonicClock = Stopwatch.StartNew();
     private ITelemetrySubscription? subscription;
     private CancellationTokenSource? runCancellation;
@@ -40,11 +51,17 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private EstateRaceHudState snapshot = EmptySnapshot();
     private Guid? participantId;
     private string? resumeToken;
+    private string? driverResumeToken;
+    private string? observerResumeToken;
+    private bool connectionIsObserver;
+    private bool connectionAuthenticated;
     private EstateRaceSession? session;
     private Guid? sentLapEventId;
     private long sequence;
     private DateTimeOffset lastTelemetrySentAt;
     private RaceSessionPhase? lastSessionPhase;
+    private int lastQualifyingSessionNumber;
+    private int lastPracticeSessionNumber;
     private EstateRaceProjection? lastValidProjection;
     private bool intentionalDisconnect;
     private bool raceTimingEnabled;
@@ -53,10 +70,24 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private EstateRaceOrganizerLogo? organizerLogo;
     private string? failedOrganizerLogoHash;
     private DateTimeOffset organizerLogoRetryAfter;
+    private string? requestedTrackPackageHash;
+    private string? loadedStrategyTrackKey;
+    private VehicleProfileFingerprint? observedVehicleFingerprint;
+    private VehicleProfileFingerprint? learnedVehicleFingerprint;
+    private DateTimeOffset nextFingerprintRefreshAt;
+    private DateTimeOffset lastStrategyFailureAt;
+    private string? lastStrategyFailure;
+    private DateTimeOffset lastTelemetryFailureAt;
+    private string? lastTelemetryFailure;
+    private DateTimeOffset lastSnapshotFailureAt;
+    private string? lastSnapshotFailure;
 
     public EstateRaceModule(
         Func<EstateRaceTrackContext?> trackContext,
-        Action<Guid, bool, bool>? timingControl = null)
+        Action<Guid, bool, bool>? timingControl = null,
+        Func<VehicleProfileFingerprint?>? vehicleFingerprint = null,
+        Func<EstateStrategyTrackIdentity, IReadOnlyList<EstateStrategySample>>? strategySampleLoader = null,
+        Action<EstateStrategySample>? strategySampleSaver = null)
         : base(new ModuleDescriptor(
             ModuleId,
             "地产赛事",
@@ -69,6 +100,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     {
         this.trackContext = trackContext;
         this.timingControl = timingControl;
+        this.vehicleFingerprint = vehicleFingerprint;
+        this.strategySampleLoader = strategySampleLoader;
+        this.strategySampleSaver = strategySampleSaver;
     }
 
     public static int ProtocolVersion => EstateRaceWireProtocol.Version;
@@ -87,6 +121,35 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         }
     }
 
+    public void StartPracticeTest(EstatePracticeTestKind kind)
+    {
+        lock (strategySync)
+        {
+            var currentSession = session ?? throw new InvalidOperationException("尚未进入赛事房间。 ");
+            var context = trackContext() ?? throw new InvalidOperationException("尚未载入服务端指定的地产环道。 ");
+            if (connectionIsObserver)
+                throw new InvalidOperationException("OB 不参与练习测试。 ");
+            var local = participantId is Guid localId
+                ? currentSession.Participants.FirstOrDefault(participant => participant.Id == localId)
+                : null;
+            if (local is null) throw new InvalidOperationException("没有找到本机参赛车手。 ");
+            practiceTestManager.Start(
+                kind,
+                currentSession,
+                local,
+                context,
+                CurrentVehicleFingerprint(),
+                pitServiceTracker.Current);
+        }
+        PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
+    }
+
+    public void StopPracticeTest()
+    {
+        lock (strategySync) practiceTestManager.Stop();
+        PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
+    }
+
     public async Task<EstateRaceConnectionProfile> LoadSavedProfileAsync(
         CancellationToken cancellationToken)
     {
@@ -95,23 +158,37 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         var color = await Context.Settings.GetAsync(ModuleId, ThemeColorSetting, cancellationToken).ConfigureAwait(false);
         var team = await Context.Settings.GetAsync(ModuleId, TeamNameSetting, cancellationToken).ConfigureAwait(false);
         var teamId = await Context.Settings.GetAsync(ModuleId, TeamIdSetting, cancellationToken).ConfigureAwait(false);
-        resumeToken = await Context.Settings.GetAsync(ModuleId, ResumeTokenSetting, cancellationToken).ConfigureAwait(false);
+        driverResumeToken = await Context.Settings.GetAsync(ModuleId, ResumeTokenSetting, cancellationToken).ConfigureAwait(false);
+        observerResumeToken = await Context.Settings.GetAsync(ModuleId, ObserverResumeTokenSetting, cancellationToken).ConfigureAwait(false);
+        var role = await Context.Settings.GetAsync(ModuleId, ConnectionRoleSetting, cancellationToken).ConfigureAwait(false);
+        var savedRole = string.Equals(role, "observer", StringComparison.OrdinalIgnoreCase)
+            ? EstateRaceConnectionRole.Observer
+            : EstateRaceConnectionRole.Driver;
+        resumeToken = savedRole == EstateRaceConnectionRole.Observer ? observerResumeToken : driverResumeToken;
         return new EstateRaceConnectionProfile(
             address ?? "http://127.0.0.1:24876",
             string.Empty,
-            name ?? Environment.UserName,
+            name ?? string.Empty,
             NormalizeColor(color),
             NullIfWhiteSpace(team),
-            NullIfWhiteSpace(teamId));
+            NullIfWhiteSpace(teamId),
+            savedRole);
     }
 
     public async Task ConnectAsync(
         EstateRaceConnectionProfile profile,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? expectedTrackPackageHash = null)
     {
         await CancelReconnectAsync().ConfigureAwait(false);
+        requestedTrackPackageHash = string.IsNullOrWhiteSpace(expectedTrackPackageHash)
+            ? null
+            : expectedTrackPackageHash.Trim().ToUpperInvariant();
         if (!await ConnectOnceAsync(profile, cancellationToken, isReconnectAttempt: false).ConfigureAwait(false))
+        {
             activeProfile = null;
+            requestedTrackPackageHash = null;
+        }
     }
 
     public static async Task<EstateRaceServerDescriptor> ReadServerDescriptorAsync(
@@ -147,6 +224,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             ValidateProfile(profile);
             await DisconnectCoreAsync().ConfigureAwait(false);
             intentionalDisconnect = false;
+            connectionAuthenticated = false;
             activeProfile = profile with
             {
                 ServerAddress = profile.ServerAddress.Trim(),
@@ -154,6 +232,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 ThemeColor = NormalizeColor(profile.ThemeColor),
                 TeamName = NullIfWhiteSpace(profile.TeamName)
             };
+            resumeToken = activeProfile.IsObserver ? observerResumeToken : driverResumeToken;
             SetConnectionState(EstateRaceConnectionState.Connecting, "正在连接赛事服务…");
             connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 runCancellation?.Token ?? CancellationToken.None,
@@ -174,9 +253,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 resumeToken,
                 context?.Definition.TrackId.ToString("D"),
                 context?.Definition.MapRevision,
-                context?.TrackPackageHash,
+                requestedTrackPackageHash ?? context?.TrackPackageHash,
                 context?.SectorCount,
-                activeProfile.TeamId), timeout.Token).ConfigureAwait(false);
+                activeProfile.TeamId,
+                activeProfile.IsObserver), timeout.Token).ConfigureAwait(false);
 
             var loginEnvelope = await ReceiveEnvelopeAsync(socket, timeout.Token).ConfigureAwait(false);
             if (loginEnvelope.ProtocolVersion != EstateRaceWireProtocol.Version)
@@ -192,8 +272,16 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 throw new InvalidOperationException("赛事服务未返回有效的登录确认。");
             var accepted = loginEnvelope.Payload.Deserialize<RaceLoginAccepted>(EstateRaceWireProtocol.JsonOptions) ??
                            throw new InvalidOperationException("赛事服务返回的登录数据无效。");
+            if (activeProfile.IsObserver != accepted.IsObserver)
+                throw new InvalidOperationException(activeProfile.IsObserver
+                    ? "该服务端不支持 OB 身份，请更新服务端后重试。"
+                    : "服务端返回了与请求不一致的连接身份。");
             participantId = accepted.ParticipantId;
             resumeToken = accepted.ResumeToken;
+            connectionIsObserver = accepted.IsObserver;
+            if (connectionIsObserver) observerResumeToken = accepted.ResumeToken;
+            else driverResumeToken = accepted.ResumeToken;
+            connectionAuthenticated = true;
             ApplySessionSnapshot(NormalizeSession(accepted.Snapshot), resetForConnection: !isReconnectAttempt);
             await RefreshOrganizerLogoAsync(accepted.Snapshot, timeout.Token).ConfigureAwait(false);
             await SaveProfileAsync(activeProfile, accepted.ResumeToken, cancellationToken).ConfigureAwait(false);
@@ -232,7 +320,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             intentionalDisconnect = true;
             await DisconnectCoreAsync().ConfigureAwait(false);
             activeProfile = null;
+            requestedTrackPackageHash = null;
             lastSessionPhase = null;
+            lastQualifyingSessionNumber = 0;
+            lastPracticeSessionNumber = 0;
             sentLapEventId = null;
             SetRaceTimingEnabled(false);
             SetConnectionState(EstateRaceConnectionState.Disconnected, "未连接赛事服务");
@@ -244,7 +335,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     }
 
     public Task SetReadyAsync(bool isReady, CancellationToken cancellationToken) =>
-        SendAsync("ready", new RaceReadyUpdate(isReady), cancellationToken);
+        connectionIsObserver
+            ? Task.FromException(new InvalidOperationException("OB 不参与准备与比赛流程。"))
+            : SendAsync("ready", new RaceReadyUpdate(isReady), cancellationToken);
 
     protected override async ValueTask OnStartAsync(CancellationToken cancellationToken)
     {
@@ -274,12 +367,26 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         telemetryTask = null;
         runCancellation?.Dispose();
         runCancellation = null;
-        gripEstimator.Reset();
-        pitServiceTracker.Reset();
+        lock (telemetryStateSync)
+        {
+            gripEstimator.Reset();
+            pitServiceTracker.Reset();
+        }
+        pitStrategyPredictor.Reset();
+        practiceTestManager.Reset();
         participantId = null;
+        connectionIsObserver = false;
+        connectionAuthenticated = false;
         session = null;
         activeProfile = null;
+        requestedTrackPackageHash = null;
+        loadedStrategyTrackKey = null;
+        observedVehicleFingerprint = null;
+        learnedVehicleFingerprint = null;
+        nextFingerprintRefreshAt = default;
         lastSessionPhase = null;
+        lastQualifyingSessionNumber = 0;
+        lastPracticeSessionNumber = 0;
         lastValidProjection = null;
         sentLapEventId = null;
         SetRaceTimingEnabled(false);
@@ -292,78 +399,100 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     {
         await foreach (var frame in frames.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
-            if (socket?.State != WebSocketState.Open) continue;
-            var context = trackContext();
-            if (context is null) continue;
-            var valid = IsTelemetryValid(frame, out var pausedOrRewinding);
-            var positionReliable = valid;
-            var completedLaps = context.CompletedLaps;
-            gripEstimator.Observe(frame, completedLaps, positionReliable);
-            var localParticipant = session?.Participants.FirstOrDefault(candidate => candidate.Id == participantId);
-            var serviceBlocked = localParticipant is
-            {
-                PendingTimePenaltySeconds: > 0
-            } or { IsServingTimePenalty: true };
-            var pitService = pitServiceTracker.Observe(
-                frame,
-                context.Definition.Pit,
-                positionReliable,
-                serviceBlocked);
-            if (frame.ArrivalTime - lastTelemetrySentAt < TelemetryInterval) continue;
-            lastTelemetrySentAt = frame.ArrivalTime;
-            var pit = context.Definition.Pit;
-            var projection = positionReliable
-                ? EstateRaceGeometry.Project(context.Track, frame.Raw.Position)
-                : lastValidProjection ?? new EstateRaceProjection(0, 0, 0.5, 0.5);
-            if (positionReliable) lastValidProjection = projection;
-            var isOnPitRoute = positionReliable && pitService.IsOnPitRoute;
-            var update = new RaceTelemetryUpdate(
-                monotonicClock.ElapsedMilliseconds,
-                projection.Progress,
-                projection.LateralOffsetMeters,
-                projection.MapX,
-                projection.MapY,
-                frame.Normalized.SpeedKph,
-                context.CompletedLaps,
-                context.CurrentSector,
-                context.CurrentLapSeconds,
-                pitService.IsInPitLane,
-                pitService.IsInServiceZone,
-                positionReliable,
-                pausedOrRewinding,
-                gripEstimator.Current,
-                pitService.ElapsedSeconds,
-                pitService.RequirementMet,
-                pitService.CompletedServices,
-                context.Track.MatchingToleranceMeters,
-                context.Track.LengthMeters,
-                pit?.SpeedLimitKph ?? 0,
-                pitService.PitLaneElapsedSeconds,
-                pitService.IsApproachingPit,
-                isOnPitRoute);
             try
             {
-                await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
-                if (context.LastCompletedLap is { } lap && lap.EventId != sentLapEventId)
-                {
-                    await SendAsync("lapCompleted", new RaceLapCompleted(
-                        lap.EventId,
-                        lap.LapNumber,
-                        lap.LapSeconds,
-                        lap.SectorSeconds,
-                        lap.IsValid,
-                        lap.InvalidReason,
-                        monotonicClock.ElapsedMilliseconds,
-                        lap.IsBestLapEligible), cancellationToken).ConfigureAwait(false);
-                    sentLapEventId = lap.EventId;
-                }
+                await ProcessTelemetryFrameAsync(frame, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception)
             {
-                LogIfInitialized($"Estate race telemetry send failed: {exception.Message}");
+                LogBackgroundFailure(
+                    "telemetry",
+                    exception,
+                    ref lastTelemetryFailureAt,
+                    ref lastTelemetryFailure);
             }
         }
+    }
+
+    private async Task ProcessTelemetryFrameAsync(
+        TelemetryFrame frame,
+        CancellationToken cancellationToken)
+    {
+        if (socket?.State != WebSocketState.Open) return;
+        if (!connectionAuthenticated || connectionIsObserver) return;
+        var context = trackContext();
+        if (context is null) return;
+        var valid = IsTelemetryValid(frame, out var pausedOrRewinding);
+        observedVehicleFingerprint = VehicleProfileFingerprint.FromFrame(frame);
+        var positionReliable = valid;
+        var localParticipant = session?.Participants.FirstOrDefault(candidate => candidate.Id == participantId);
+        var serviceBlocked = localParticipant is
+        {
+            PendingTimePenaltySeconds: > 0
+        } or { IsServingTimePenalty: true };
+        EstatePitServiceState pitService;
+        EstateRaceProjection projection;
+        RaceGripCondition gripCondition;
+        lock (telemetryStateSync)
+        {
+            gripEstimator.Observe(frame, context.CompletedLaps, positionReliable);
+            pitService = pitServiceTracker.Observe(
+                frame,
+                context.Definition.Pit,
+                positionReliable,
+                serviceBlocked);
+            projection = positionReliable
+                ? EstateRaceGeometry.Project(context.Track, frame.Raw.Position)
+                : lastValidProjection ?? new EstateRaceProjection(0, 0, 0.5, 0.5);
+            if (positionReliable) lastValidProjection = projection;
+            gripCondition = gripEstimator.Current;
+        }
+        if (frame.ArrivalTime - lastTelemetrySentAt < TelemetryInterval) return;
+        lastTelemetrySentAt = frame.ArrivalTime;
+        var pit = context.Definition.Pit;
+        var isOnPitRoute = positionReliable && pitService.IsOnPitRoute;
+        var update = new RaceTelemetryUpdate(
+            monotonicClock.ElapsedMilliseconds,
+            projection.Progress,
+            projection.LateralOffsetMeters,
+            projection.MapX,
+            projection.MapY,
+            frame.Normalized.SpeedKph,
+            context.CompletedLaps,
+            context.CurrentSector,
+            context.CurrentLapSeconds,
+            pitService.IsInPitLane,
+            pitService.IsInServiceZone,
+            positionReliable,
+            pausedOrRewinding,
+            gripCondition,
+            pitService.ElapsedSeconds,
+            pitService.RequirementMet,
+            pitService.CompletedServices,
+            context.Track.MatchingToleranceMeters,
+            context.Track.LengthMeters,
+            pit?.SpeedLimitKph ?? 0,
+            pitService.PitLaneElapsedSeconds,
+            pitService.IsApproachingPit,
+            isOnPitRoute);
+        await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
+        if (context.LastCompletedLap is { } lap && lap.EventId != sentLapEventId)
+        {
+            await SendAsync("lapCompleted", new RaceLapCompleted(
+                lap.EventId,
+                lap.LapNumber,
+                lap.LapSeconds,
+                lap.SectorSeconds,
+                lap.IsValid,
+                lap.InvalidReason,
+                monotonicClock.ElapsedMilliseconds,
+                lap.IsBestLapEligible), cancellationToken).ConfigureAwait(false);
+            sentLapEventId = lap.EventId;
+        }
+        // Practice strategy processing is optional. Run it after the time-sensitive
+        // telemetry and lap messages so it can never delay the current upload.
+        ObserveTelemetryStrategySafely(context, pausedOrRewinding, pitService);
     }
 
     private async Task ReceiveLoopAsync(
@@ -374,40 +503,50 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         {
             while (activeSocket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
             {
-                var envelope = await ReceiveEnvelopeAsync(activeSocket, cancellationToken).ConfigureAwait(false);
-                if (envelope.ProtocolVersion != EstateRaceWireProtocol.Version) continue;
-                if (envelope.Type == "snapshot")
+                try
                 {
-                    var received = envelope.Payload.Deserialize<EstateRaceSession>(EstateRaceWireProtocol.JsonOptions);
-                    if (received is not null)
+                    var envelope = await ReceiveEnvelopeAsync(activeSocket, cancellationToken).ConfigureAwait(false);
+                    if (envelope.ProtocolVersion != EstateRaceWireProtocol.Version) continue;
+                    if (envelope.Type == "snapshot")
                     {
-                        received = NormalizeSession(received);
-                        ApplySessionSnapshot(received);
-                        await RefreshOrganizerLogoAsync(received, cancellationToken).ConfigureAwait(false);
+                        var received = envelope.Payload.Deserialize<EstateRaceSession>(EstateRaceWireProtocol.JsonOptions);
+                        if (received is not null)
+                        {
+                            received = NormalizeSession(received);
+                            ApplySessionSnapshot(received);
+                            await RefreshOrganizerLogoAsync(received, cancellationToken).ConfigureAwait(false);
+                        }
+                        PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
                     }
-                    PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
+                    else if (envelope.Type == "error")
+                    {
+                        var error = envelope.Payload.Deserialize<RaceProtocolError>(EstateRaceWireProtocol.JsonOptions);
+                        if (error is not null) PublishSnapshot(EstateRaceConnectionState.Connected, error.Message);
+                    }
                 }
-                else if (envelope.Type == "error")
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (WebSocketException) { throw; }
+                catch (Exception exception)
                 {
-                    var error = envelope.Payload.Deserialize<RaceProtocolError>(EstateRaceWireProtocol.JsonOptions);
-                    if (error is not null) PublishSnapshot(EstateRaceConnectionState.Connected, error.Message);
+                    LogBackgroundFailure(
+                        "snapshot",
+                        exception,
+                        ref lastSnapshotFailureAt,
+                        ref lastSnapshotFailure);
+                    PublishSnapshot(
+                        EstateRaceConnectionState.Connected,
+                        "已跳过一次异常赛事快照，连接仍在继续");
                 }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (WebSocketException exception)
         {
-            if (!intentionalDisconnect)
-            {
-                SetConnectionState(EstateRaceConnectionState.Reconnecting, "连接中断，正在尝试恢复赛事连接…");
-                LogIfInitialized($"Estate race WebSocket disconnected: {exception.Message}");
-                ScheduleReconnect();
-            }
+            HandleConnectionInterrupted(exception);
         }
-        catch (JsonException exception)
+        catch (Exception exception)
         {
-            SetConnectionState(EstateRaceConnectionState.Faulted, "服务端返回了无法解析的数据");
-            LogIfInitialized($"Estate race WebSocket message invalid: {exception.Message}");
+            HandleConnectionInterrupted(exception);
         }
     }
 
@@ -488,15 +627,36 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         if (activeSocket?.State != WebSocketState.Open)
             throw new InvalidOperationException("赛事服务尚未连接。");
         var bytes = EstateRaceWireProtocol.Serialize(type, Interlocked.Increment(ref sequence), payload);
-        await sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await activeSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+            await sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await activeSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                sendLock.Release();
+            }
         }
-        finally
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            sendLock.Release();
+            throw;
         }
+        catch (Exception exception) when (
+            exception is WebSocketException or ObjectDisposedException or InvalidOperationException)
+        {
+            HandleConnectionInterrupted(exception);
+            throw;
+        }
+    }
+
+    private void HandleConnectionInterrupted(Exception exception)
+    {
+        if (intentionalDisconnect) return;
+        SetConnectionState(EstateRaceConnectionState.Reconnecting, "连接中断，正在尝试恢复赛事连接…");
+        LogIfInitialized($"Estate race WebSocket disconnected: {exception.Message}");
+        ScheduleReconnect();
     }
 
     private static async Task<RaceIncomingEnvelope> ReceiveEnvelopeAsync(
@@ -545,7 +705,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                         "client disconnect",
                         CancellationToken.None).ConfigureAwait(false);
             }
-            catch (WebSocketException) { }
+            catch (Exception exception)
+            {
+                LogIfInitialized($"Estate race socket close failed: {exception.Message}");
+            }
             activeSocket.Dispose();
         }
         var currentReceive = receiveTask;
@@ -555,15 +718,44 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             try { await currentReceive.ConfigureAwait(false); }
             catch (OperationCanceledException) { }
             catch (WebSocketException) { }
+            catch (Exception exception)
+            {
+                LogIfInitialized($"Estate race receive task ended with an error: {exception.Message}");
+            }
         }
         connectionCancellation?.Dispose();
         connectionCancellation = null;
+        try
+        {
+            lock (strategySync)
+            {
+                practiceTestManager.StopAutomatically("赛事连接已经中断，测试已自动关闭。 ");
+                PersistPendingStrategySamples();
+                pitStrategyPredictor.Reset();
+                practiceTestManager.Reset();
+            }
+        }
+        catch (Exception exception)
+        {
+            LogStrategyFailure(exception);
+        }
         participantId = null;
+        connectionIsObserver = false;
+        connectionAuthenticated = false;
         session = null;
         organizerLogo = null;
         failedOrganizerLogoHash = null;
         organizerLogoRetryAfter = default;
-        lastValidProjection = null;
+        lock (telemetryStateSync)
+        {
+            pitServiceTracker.Reset();
+            gripEstimator.Reset();
+            lastValidProjection = null;
+        }
+        loadedStrategyTrackKey = null;
+        observedVehicleFingerprint = null;
+        learnedVehicleFingerprint = null;
+        nextFingerprintRefreshAt = default;
         SetRaceTimingEnabled(false);
     }
 
@@ -604,7 +796,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             pitOutline,
             startFinishGate,
             trackSectors,
-            organizerLogo));
+            organizerLogo,
+            connectionIsObserver,
+            pitStrategyPredictor.Current,
+            practiceTestManager.Current));
     }
 
     private async Task RefreshOrganizerLogoAsync(
@@ -690,7 +885,16 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         await Context.Settings.SetAsync(ModuleId, ThemeColorSetting, profile.ThemeColor, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(ModuleId, TeamNameSetting, profile.TeamName ?? string.Empty, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(ModuleId, TeamIdSetting, profile.TeamId ?? string.Empty, cancellationToken).ConfigureAwait(false);
-        await Context.Settings.SetAsync(ModuleId, ResumeTokenSetting, token, cancellationToken).ConfigureAwait(false);
+        await Context.Settings.SetAsync(
+            ModuleId,
+            profile.IsObserver ? ObserverResumeTokenSetting : ResumeTokenSetting,
+            token,
+            cancellationToken).ConfigureAwait(false);
+        await Context.Settings.SetAsync(
+            ModuleId,
+            ConnectionRoleSetting,
+            profile.IsObserver ? "observer" : "driver",
+            cancellationToken).ConfigureAwait(false);
     }
 
     internal static Uri ServerWebSocketUri(string value)
@@ -739,7 +943,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             .Select(participant => participant with
             {
                 BestSectorSeconds = participant.BestSectorSeconds ?? [],
-                Penalties = participant.Penalties ?? []
+                Penalties = participant.Penalties ?? [],
+                QualifyingSessionBestLapSeconds = participant.QualifyingSessionBestLapSeconds ?? [],
+                PracticeSessionBestLapSeconds = participant.PracticeSessionBestLapSeconds ?? []
             })
             .ToArray();
         return value with
@@ -747,8 +953,15 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             FastestSectorSeconds = value.FastestSectorSeconds ?? [],
             FastestLapSectorSeconds = value.FastestLapSectorSeconds ?? [],
             Participants = participants,
-            YellowZones = value.YellowZones ?? []
-            ,BlueFlags = value.BlueFlags ?? []
+            YellowZones = value.YellowZones ?? [],
+            BlueFlags = value.BlueFlags ?? [],
+            Penalties = value.Penalties ?? [],
+            Investigations = value.Investigations ?? [],
+            QualifyingSessionMinutes = value.QualifyingSessionMinutes ?? [10],
+            QualifyingEliminationCounts = value.QualifyingEliminationCounts ?? [],
+            PracticeSessionMinutes = value.PracticeSessionMinutes ?? [60],
+            Observers = value.Observers ?? [],
+            MinimumRequiredPitStops = Math.Clamp(value.MinimumRequiredPitStops, 0, 20)
         };
     }
 
@@ -756,28 +969,232 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         EstateRaceSession value,
         bool resetForConnection = false)
     {
+        var qualifyingSessionBoundary = value.Phase == RaceSessionPhase.Qualifying &&
+                                        lastSessionPhase == RaceSessionPhase.Qualifying &&
+                                        value.QualifyingSessionNumber > 0 &&
+                                        value.QualifyingSessionNumber != lastQualifyingSessionNumber;
+        var practiceSessionBoundary = value.Phase == RaceSessionPhase.Practice &&
+                                      lastSessionPhase == RaceSessionPhase.Practice &&
+                                      value.PracticeSessionNumber > 0 &&
+                                      value.PracticeSessionNumber != lastPracticeSessionNumber;
         var phaseBoundary = lastSessionPhase != value.Phase &&
                             value.Phase is RaceSessionPhase.Lobby or
-                                RaceSessionPhase.Qualifying or RaceSessionPhase.Race;
-        if (resetForConnection || phaseBoundary)
+                                RaceSessionPhase.Practice or RaceSessionPhase.Qualifying or RaceSessionPhase.Race;
+        if (resetForConnection || phaseBoundary || qualifyingSessionBoundary || practiceSessionBoundary)
         {
-            pitServiceTracker.Reset();
-            gripEstimator.Reset();
-            if (resetForConnection) lastValidProjection = null;
+            lock (strategySync)
+            {
+                if (resetForConnection)
+                {
+                    pitStrategyPredictor.Reset();
+                    practiceTestManager.Reset();
+                    loadedStrategyTrackKey = null;
+                }
+                if (practiceSessionBoundary)
+                    practiceTestManager.StopAutomatically("练习赛已经进入下一节，当前测试已自动结束。 ");
+            }
+            if (qualifyingSessionBoundary || practiceSessionBoundary) SetRaceTimingEnabled(false);
+            lock (telemetryStateSync)
+            {
+                pitServiceTracker.Reset();
+                gripEstimator.Reset();
+                if (resetForConnection) lastValidProjection = null;
+            }
             sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
         }
         lastSessionPhase = value.Phase;
+        lastQualifyingSessionNumber = value.Phase == RaceSessionPhase.Qualifying
+            ? value.QualifyingSessionNumber
+            : 0;
+        lastPracticeSessionNumber = value.Phase == RaceSessionPhase.Practice
+            ? value.PracticeSessionNumber
+            : 0;
         session = value;
+        ObserveSnapshotStrategySafely(value);
         SetRaceTimingEnabled(ShouldEnableRaceTiming(value, participantId));
+    }
+
+    private void ObserveTelemetryStrategySafely(
+        EstateRaceTrackContext context,
+        bool pausedOrRewinding,
+        EstatePitServiceState pitService)
+    {
+        try
+        {
+            lock (strategySync)
+            {
+                if (pausedOrRewinding)
+                    practiceTestManager.NotifyDriverIntervention(pitService);
+                ObservePracticeTests(context);
+                PersistPendingStrategySamples();
+            }
+        }
+        catch (Exception exception)
+        {
+            LogStrategyFailure(exception);
+        }
+    }
+
+    private void ObserveSnapshotStrategySafely(EstateRaceSession value)
+    {
+        try
+        {
+            lock (strategySync)
+            {
+                var context = trackContext();
+                EnsureHistoricalStrategySamples(value, context);
+                _ = pitStrategyPredictor.Observe(
+                    value,
+                    participantId,
+                    context,
+                    gripEstimator.Current,
+                    connectionIsObserver,
+                    CurrentVehicleFingerprint());
+                ObservePracticeTests(context);
+                PersistPendingStrategySamples();
+            }
+        }
+        catch (Exception exception)
+        {
+            LogStrategyFailure(exception);
+        }
+    }
+
+    private void ObservePracticeTests(EstateRaceTrackContext? context)
+    {
+        practiceTestManager.Observe(
+            session,
+            participantId,
+            context,
+            pitServiceTracker.Current,
+            gripEstimator.Current,
+            CurrentVehicleFingerprint(),
+            connectionIsObserver);
+    }
+
+    private void EnsureHistoricalStrategySamples(
+        EstateRaceSession value,
+        EstateRaceTrackContext? context,
+        bool force = false)
+    {
+        if (context is null || strategySampleLoader is null) return;
+        var track = new EstateStrategyTrackIdentity(
+            value.TrackId ?? context.Definition.TrackId.ToString("D"),
+            value.TrackRevision ?? context.Definition.MapRevision,
+            value.TrackPackageHash ?? context.TrackPackageHash ?? string.Empty);
+        if (!force && string.Equals(loadedStrategyTrackKey, track.Key, StringComparison.Ordinal)) return;
+        try
+        {
+            var samples = strategySampleLoader(track);
+            pitStrategyPredictor.SetHistoricalSamples(samples);
+            practiceTestManager.SetStoredSampleCount(samples.Count);
+            loadedStrategyTrackKey = track.Key;
+        }
+        catch (Exception exception)
+        {
+            LogIfInitialized($"Estate strategy history load failed: {exception.Message}");
+        }
+    }
+
+    private void PersistPendingStrategySamples()
+    {
+        var samples = practiceTestManager.DrainSamples()
+            .Concat(pitStrategyPredictor.DrainSamples())
+            .ToArray();
+        if (samples.Length == 0 || strategySampleSaver is null) return;
+        foreach (var sample in samples)
+        {
+            try { strategySampleSaver(sample); }
+            catch (Exception exception)
+            {
+                LogIfInitialized($"Estate strategy sample save failed: {exception.Message}");
+            }
+        }
+        if (session is { } current)
+        {
+            loadedStrategyTrackKey = null;
+            EnsureHistoricalStrategySamples(current, trackContext(), force: true);
+            _ = pitStrategyPredictor.Observe(
+                current,
+                participantId,
+                trackContext(),
+                gripEstimator.Current,
+                connectionIsObserver,
+                CurrentVehicleFingerprint());
+        }
+    }
+
+    private VehicleProfileFingerprint CurrentVehicleFingerprint()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (vehicleFingerprint is not null && now >= nextFingerprintRefreshAt)
+        {
+            nextFingerprintRefreshAt = now + FingerprintRefreshInterval;
+            try
+            {
+                learnedVehicleFingerprint = vehicleFingerprint();
+            }
+            catch (Exception exception)
+            {
+                LogStrategyFailure(exception);
+            }
+        }
+        var learned = learnedVehicleFingerprint;
+        if (observedVehicleFingerprint is { CarOrdinal: > 0 } observed)
+        {
+            if (learned is { CarOrdinal: > 0 } &&
+                learned.CarOrdinal == observed.CarOrdinal &&
+                learned.PerformanceIndex == observed.PerformanceIndex)
+                return learned;
+            return observed;
+        }
+        if (learned is { CarOrdinal: > 0 }) return learned;
+        return new VehicleProfileFingerprint(
+            -1, -1, 0, -1, -1, 0,
+            VehicleProfileIdentity.PendingSignature,
+            VehicleProfileIdentity.PendingSignature);
+    }
+
+    private void LogStrategyFailure(Exception exception) =>
+        LogBackgroundFailure(
+            "strategy",
+            exception,
+            ref lastStrategyFailureAt,
+            ref lastStrategyFailure);
+
+    private void LogBackgroundFailure(
+        string component,
+        Exception exception,
+        ref DateTimeOffset lastLoggedAt,
+        ref string? lastMessage)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var message = $"{exception.GetType().Name}: {exception.Message}";
+        if (string.Equals(lastMessage, message, StringComparison.Ordinal) &&
+            now - lastLoggedAt < BackgroundFailureLogInterval)
+            return;
+        lastLoggedAt = now;
+        lastMessage = message;
+        LogIfInitialized($"Estate race {component} processing failed but core synchronization continues: {message}");
     }
 
     internal static bool ShouldEnableRaceTiming(EstateRaceSession value, Guid? localParticipantId)
     {
+        var localParticipant = localParticipantId is Guid localId
+            ? value.Participants.FirstOrDefault(participant => participant.Id == localId)
+            : null;
+        if (localParticipant is null) return false;
         if (value.Phase == RaceSessionPhase.Race) return true;
+        if (value.Phase == RaceSessionPhase.Practice)
+        {
+            if (!value.PracticeTimeExpired) return true;
+            return localParticipant.PracticeFinalLapPending;
+        }
         if (value.Phase != RaceSessionPhase.Qualifying) return false;
+        if (!localParticipant.QualifyingEligible)
+            return false;
         if (!value.QualifyingTimeExpired) return true;
-        return localParticipantId is Guid localId &&
-               value.Participants.FirstOrDefault(participant => participant.Id == localId)?.QualifyingFinalLapPending == true;
+        return localParticipant.QualifyingFinalLapPending;
     }
 
     private void SetRaceTimingEnabled(bool enabled)

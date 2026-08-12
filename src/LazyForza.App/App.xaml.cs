@@ -54,7 +54,10 @@ public partial class App : Application
             var captureEstateQa = e.Args.Contains(
                 "--capture-estate-qa",
                 StringComparer.OrdinalIgnoreCase);
-            var captureEstateRaceQa = e.Args.Contains(
+            var captureEstateRaceFinishedQa = e.Args.Contains(
+                "--capture-estate-race-finished-qa",
+                StringComparer.OrdinalIgnoreCase);
+            var captureEstateRaceQa = captureEstateRaceFinishedQa || e.Args.Contains(
                 "--capture-estate-race-qa",
                 StringComparer.OrdinalIgnoreCase);
             var recordSeconds = AutoRecordSeconds(e.Args);
@@ -161,7 +164,8 @@ public partial class App : Application
                     captureDriftQa,
                     captureDriftOnlyQa,
                     captureEstateQa,
-                    captureEstateRaceQa);
+                    captureEstateRaceQa,
+                    captureEstateRaceFinishedQa);
             }
             else if (recordSeconds is not null) _ = AutoRecordAndExitAsync(recordSeconds.Value);
         }
@@ -309,7 +313,8 @@ public partial class App : Application
         bool captureDriftQa,
         bool captureDriftOnlyQa,
         bool captureEstateQa,
-        bool captureEstateRaceQa)
+        bool captureEstateRaceQa,
+        bool captureEstateRaceFinishedQa)
     {
         try
         {
@@ -361,10 +366,13 @@ public partial class App : Application
                 await overlay.CapturePngAsync(
                     Path.Combine(
                         directory,
-                        $"hud-{size.Width:0}x{size.Height:0}-demo.png"),
+                        captureEstateRaceFinishedQa
+                            ? $"hud-{size.Width:0}x{size.Height:0}-estate-finished.png"
+                            : $"hud-{size.Width:0}x{size.Height:0}-demo.png"),
                     CancellationToken.None,
                     previewDrift: captureDriftQa || captureDriftOnlyQa,
-                    previewEstateRace: captureEstateRaceQa);
+                    previewEstateRace: captureEstateRaceQa,
+                    previewEstateRaceFinished: captureEstateRaceFinishedQa);
             }
             await overlay.SetLayoutAsync(original, CancellationToken.None);
         }
@@ -464,11 +472,14 @@ internal static class BuiltInModuleCatalog
         Func<OverlayLayout>? getOverlayLayout = null,
         Action<DiagnosticSignal>? diagnosticSink = null)
     {
+        var dashboard = new DashboardModule();
         var estate = new EstateCircuitModule(store, sourceKind, getOverlayLayout);
         var estatePackages = new EstateTrackPackageService(
             store,
             typeof(BuiltInModuleCatalog).Assembly.GetName().Version?.ToString(3) ?? "development");
         Guid? identityTrackId = null;
+        DateTimeOffset? identityTrackUpdatedAt = null;
+        DateTimeOffset? identityDefinitionUpdatedAt = null;
         EstateTrackPackageIdentity? identity = null;
         var estateRace = new EstateRaceModule(() =>
         {
@@ -477,10 +488,13 @@ internal static class BuiltInModuleCatalog
             if (track is null || definition is null) return null;
             var state = estate.State;
             var completed = estate.LastCompletedLap;
-            if (identityTrackId != track.Id)
+            if (identityTrackId != track.Id || identityTrackUpdatedAt != track.UpdatedAt ||
+                identityDefinitionUpdatedAt != definition.UpdatedAt)
             {
                 identity = estatePackages.Identify(track.Id);
                 identityTrackId = track.Id;
+                identityTrackUpdatedAt = track.UpdatedAt;
+                identityDefinitionUpdatedAt = definition.UpdatedAt;
             }
             return new EstateRaceTrackContext(
                 track,
@@ -500,7 +514,7 @@ internal static class BuiltInModuleCatalog
                         completed.InvalidReason,
                         completed.IsBestLapEligible),
                 estate.ActiveSectorCount,
-                identity?.PayloadSha256,
+                identity?.TrackFingerprintSha256,
                 estate.ActiveSectors);
         }, (trackId, enabled, invalidateLapOnDriverIntervention) =>
         {
@@ -513,10 +527,13 @@ internal static class BuiltInModuleCatalog
             }
             else
                 estate.PauseTimingForEstateRace();
-        });
+        },
+        () => dashboard.Learning.Fingerprint,
+        track => store.LoadEstateStrategySamples(track),
+        sample => store.SaveEstateStrategySample(sample));
         return
         [
-            new DashboardModule(),
+            dashboard,
             new LapAnalysisModule(store, sourceKind, getOverlayLayout, diagnosticSink),
             estate,
             estateRace,
