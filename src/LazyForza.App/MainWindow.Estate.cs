@@ -69,11 +69,29 @@ internal sealed partial class MainWindow
                 if (confirmation != MessageBoxResult.Yes) return;
 
                 var result = packageService.Import(dialog.FileName, CurrentTrackSource);
+                if (result.AlreadyExists && !result.ExistingTrackMatches)
+                {
+                    var replace = MessageBox.Show(
+                        this,
+                        $"本机已有相同赛道标识，但路线或比赛设置与文件不同。\n\n" +
+                        $"是否用文件中的“{preview.Track.Name}”替换本机版本？\n" +
+                        "替换会删除这条赛道已有的圈速记录；其他赛道和用户数据不受影响。",
+                        "赛道标识冲突",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning);
+                    if (replace == MessageBoxResult.Yes)
+                        result = packageService.Import(
+                            dialog.FileName, CurrentTrackSource, replaceExisting: true);
+                }
                 MessageBox.Show(
                     this,
-                    result.AlreadyExists
-                        ? $"“{result.TrackName}”已经存在，未重复导入。"
-                        : $"已导入“{result.TrackName}”。请确认游戏中加载的是对应地图和修订版本，再手动开始计时。",
+                    result.Imported
+                        ? $"已导入“{result.TrackName}”。请确认游戏中加载的是对应地图和修订版本，再手动开始计时。"
+                        : result.ExistingTrackMatches
+                            ? result.SourceUpdated
+                                ? $"“{result.TrackName}”的赛道内容已经存在，现已修复其本地归属，可在赛道页面正常看到。"
+                                : $"“{result.TrackName}”已经存在且内容一致，未重复导入。"
+                            : $"“{result.TrackName}”使用了相同标识，但内容不同；你已保留本机版本。",
                     "导入地产环道",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -239,8 +257,9 @@ internal sealed partial class MainWindow
                         manifest.TrackId,
                         manifest.TrackName,
                         manifest.MapRevision,
-                        manifest.PayloadSha256,
-                        sectorCount);
+                        manifest.TrackFingerprintSha256 ?? manifest.PayloadSha256,
+                        sectorCount,
+                        manifest.PayloadSha256);
                     new EstateTrackIdentityWindow(packageIdentity, dialog.FileName) { Owner = this }.ShowDialog();
                 }
                 catch (Exception exception)

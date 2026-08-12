@@ -28,8 +28,8 @@ internal sealed class EstateTrackIdentityWindow : Window
         root.Children.Add(Text(exportedPath is null ? "赛事赛道信息" : "地产环道已导出", 26, FontWeights.SemiBold));
         root.Children.Add(Text(
             exportedPath is null
-                ? "房主在服务端总控中配置赛道时，填写下面的赛道名称、赛道标识和 SHA-256。"
-                : $"文件已保存到：{exportedPath}\n把下面三项复制到服务端总控，参赛车手使用同一份 .lfzestate 文件。",
+                ? "下面的信息可用于核对赛道。房主也可以直接在服务端总控上传 .lfzestate，由服务端自动识别并填写。"
+                : $"文件已保存到：{exportedPath}\n把这份 .lfzestate 上传到服务端总控即可，服务端会自动识别赛道名称、标识和特征值。",
             13,
             FontWeights.Normal,
             ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185)),
@@ -37,9 +37,9 @@ internal sealed class EstateTrackIdentityWindow : Window
 
         root.Children.Add(Field("赛道名称", identity.TrackName));
         root.Children.Add(Field("赛道标识", identity.TrackId.ToString("D")));
-        root.Children.Add(Field("赛道数据 SHA-256", identity.PayloadSha256));
+        root.Children.Add(Field("赛道特征 SHA-256", identity.TrackFingerprintSha256));
         root.Children.Add(Text(
-            $"地图修订：{identity.MapRevision}    分段数：{identity.SectorCount}\nSHA-256 对应 track.json 的规范数据；圈速记录、个人配置和用户数据不包含在赛道文件中。",
+            $"地图修订：{identity.MapRevision}    分段数：{identity.SectorCount}\n特征值只对应会影响比赛的赛道几何、分段、终点门、检查点和维修区；本地数据来源、名称、圈速记录及个人配置不会改变它。",
             12,
             FontWeights.Normal,
             ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185)),
@@ -102,7 +102,7 @@ internal sealed class EstateTrackIdentityWindow : Window
     private string AllText() =>
         $"赛道名称：{identity.TrackName}\r\n" +
         $"赛道标识：{identity.TrackId:D}\r\n" +
-        $"赛道数据 SHA-256：{identity.PayloadSha256}";
+        $"赛道特征 SHA-256：{identity.TrackFingerprintSha256}";
 
     private void Copy(string value, string success)
     {

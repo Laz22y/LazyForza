@@ -4,6 +4,13 @@ namespace LazyForza.Overlay;
 
 public static class EstateRaceHudVisibilityPolicy
 {
+    public static bool ShouldShowPracticeProgram(
+        EstateRaceHudState state,
+        DateTimeOffset? now = null) =>
+        state.IsConnected && !state.IsObserver &&
+        state.Session?.Phase == RaceSessionPhase.Practice &&
+        state.PracticeTests?.Items.Any(item => item.IsVisibleOnHud(now ?? DateTimeOffset.UtcNow)) == true;
+
     public static bool ShouldShowPitLimiter(EstatePitServiceState pit) =>
         pit.SpeedLimitKph > 0 && (pit.IsApproachingPit || pit.IsInPitLane);
 
@@ -12,8 +19,9 @@ public static class EstateRaceHudVisibilityPolicy
         EstateRaceParticipant? participant,
         DateTimeOffset estimatedServerNow)
     {
-        if (participant is null ||
-            session.Phase is not (RaceSessionPhase.Race or RaceSessionPhase.Finished))
+        if (participant is null || session.Phase != RaceSessionPhase.Race ||
+            participant.Status is RaceParticipantStatus.Finished or RaceParticipantStatus.DidNotFinish or
+                RaceParticipantStatus.Disqualified or RaceParticipantStatus.Disconnected)
             return false;
 
         var reminderVisible = participant.DriveThroughReminderAt is DateTimeOffset reminderAt &&

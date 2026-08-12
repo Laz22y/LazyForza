@@ -1573,8 +1573,7 @@ internal sealed partial class MainWindow : Window
             .ToArray();
         var estateTracks = allTracks
             .Where(track => track.CatalogKind == TrackCatalogKind.UserCustom &&
-                            track.TimingKind == TrackTimingKind.EstateGeometry &&
-                            string.Equals(track.Source, CurrentTrackSource, StringComparison.Ordinal))
+                            track.TimingKind == TrackTimingKind.EstateGeometry)
             .ToArray();
         var officialTracks = allTracks
             .Where(track => track.CatalogKind == TrackCatalogKind.PlaygroundOfficial)
@@ -2970,7 +2969,9 @@ internal sealed partial class MainWindow : Window
             (EstateRaceHudWidgetKind.StartLights, "五盏红灯"),
             (EstateRaceHudWidgetKind.PitStopInfo, "维修站信息"),
             (EstateRaceHudWidgetKind.PitLimiter, "维修区限速"),
-            (EstateRaceHudWidgetKind.PenaltyStatus, "罚时指示器")
+            (EstateRaceHudWidgetKind.PenaltyStatus, "罚时指示器"),
+            (EstateRaceHudWidgetKind.PracticeProgram, "练习项目提示"),
+            (EstateRaceHudWidgetKind.PitWindowSuggestion, "进站窗口建议")
         };
         var estateRaceToggles = new Dictionary<EstateRaceHudWidgetKind, ToggleButton>();
         var estateRaceComponentPanel = new WrapPanel { Margin = new Thickness(-4, -2, 0, 0) };
@@ -2992,7 +2993,7 @@ internal sealed partial class MainWindow : Window
         }
         controls.Children.Add(SettingGroup(
             "地产赛事 HUD 部件",
-            "八个部件可独立开关；进入 Overlay 布局编辑器后可直接选择、拖动、缩放或恢复赛事默认布局。",
+            "十个部件可独立开关；进入 Overlay 布局编辑器后可直接选择、拖动、缩放或恢复赛事默认布局。",
             estateRaceComponentPanel));
         var estateRaceOpacitySliders = new Dictionary<EstateRaceHudWidgetKind, Slider>();
         var estateRaceOpacityPanel = new UniformGrid { Columns = 2 };
@@ -3012,7 +3013,7 @@ internal sealed partial class MainWindow : Window
         }
         controls.Children.Add(SettingGroup(
             "地产赛事 HUD 透明度",
-            "八个赛事部件分别保存透明度，互不影响。",
+            "十个赛事部件分别保存透明度，互不影响。",
             estateRaceOpacityPanel));
 
         var timingItems = new UniformGrid { Columns = 2 };

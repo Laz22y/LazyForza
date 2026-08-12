@@ -73,6 +73,17 @@ public sealed class EstateRaceClientModuleTests
             GapToLeaderSeconds = null,
             CompletedLaps = 3
         }, 4));
+        Assert.AreEqual("1:07.600",
+            EstateRaceLeaderboardFormatter.Format(leader, null, true, false, 4),
+            "OB 观看练习赛或排位赛时，榜首应显示完整最快圈。");
+        Assert.AreEqual("+1.472",
+            EstateRaceLeaderboardFormatter.Format(trailing, null, true, false, 4),
+            "OB 的其余车手应显示相对榜首的差值。");
+        Assert.AreEqual("LEADER",
+            EstateRaceLeaderboardFormatter.Format(leader, null, false, true, 4),
+            "OB 观看正赛时，榜首应显示 LEADER。");
+        Assert.AreEqual("+1.472",
+            EstateRaceLeaderboardFormatter.Format(trailing, null, false, true, 4));
     }
 
     [TestMethod]
@@ -159,10 +170,38 @@ public sealed class EstateRaceClientModuleTests
     }
 
     [TestMethod]
+    public void LeaderboardInvestigationMarkerOnlyTracksPendingRecordsForThatDriver()
+    {
+        var now = DateTimeOffset.Parse("2026-08-12T12:00:00Z");
+        var session = OverlayLayoutPreviewState.EstateRace(now).Session!;
+        var driver = session.Participants[0];
+        var other = session.Participants[1];
+        session = session with
+        {
+            Investigations =
+            [
+                new EstateRaceInvestigation(
+                    Guid.NewGuid(), driver.Id, "疑似切弯获利", now, 3,
+                    RaceInvestigationStatus.Pending),
+                new EstateRaceInvestigation(
+                    Guid.NewGuid(), other.Id, "已处理事件", now, 2,
+                    RaceInvestigationStatus.Dismissed)
+            ]
+        };
+
+        Assert.IsTrue(HudSurface.HasPendingInvestigation(session, driver.Id));
+        Assert.IsFalse(HudSurface.HasPendingInvestigation(session, other.Id));
+    }
+
+    [TestMethod]
     public void TimingRunsOnlyDuringActiveCompetitiveSessionsAndHonorsFinalFlyingLap()
     {
         var localId = Guid.NewGuid();
-        var local = Participant(localId) with { QualifyingFinalLapPending = true };
+        var local = Participant(localId) with
+        {
+            QualifyingFinalLapPending = true,
+            PracticeFinalLapPending = true
+        };
         var session = EmptySession() with { Participants = [local] };
 
         foreach (var phase in new[]
@@ -180,6 +219,22 @@ public sealed class EstateRaceClientModuleTests
         Assert.IsTrue(EstateRaceModule.ShouldEnableRaceTiming(session with { Phase = RaceSessionPhase.Race }, localId));
         Assert.IsTrue(EstateRaceModule.ShouldEnableRaceTiming(session with
         {
+            Phase = RaceSessionPhase.Practice,
+            PracticeTimeExpired = false
+        }, localId));
+        Assert.IsTrue(EstateRaceModule.ShouldEnableRaceTiming(session with
+        {
+            Phase = RaceSessionPhase.Practice,
+            PracticeTimeExpired = true
+        }, localId));
+        Assert.IsFalse(EstateRaceModule.ShouldEnableRaceTiming(session with
+        {
+            Phase = RaceSessionPhase.Practice,
+            PracticeTimeExpired = true,
+            Participants = [local with { PracticeFinalLapPending = false }]
+        }, localId));
+        Assert.IsTrue(EstateRaceModule.ShouldEnableRaceTiming(session with
+        {
             Phase = RaceSessionPhase.Qualifying,
             QualifyingTimeExpired = false
         }, localId));
@@ -194,8 +249,30 @@ public sealed class EstateRaceClientModuleTests
             QualifyingTimeExpired = true,
             Participants = [local with { QualifyingFinalLapPending = false }]
         }, localId));
+        Assert.IsFalse(EstateRaceModule.ShouldEnableRaceTiming(session with
+        {
+            Phase = RaceSessionPhase.Qualifying,
+            QualifyingTimeExpired = false,
+            QualifyingSessionNumber = 2,
+            QualifyingSessionCount = 3,
+            Participants = [local with
+            {
+                QualifyingEligible = false,
+                QualifyingEliminatedInSession = 1
+            }]
+        }, localId), "Q1 淘汰车手进入 Q2 后不能继续启用本机圈速计时。 ");
+        Assert.IsFalse(EstateRaceModule.ShouldEnableRaceTiming(
+            session with { Phase = RaceSessionPhase.Practice }, Guid.NewGuid()),
+            "OB 的连接标识不在车手名单中，练习赛不得启用本机计时。");
+        Assert.IsFalse(EstateRaceModule.ShouldEnableRaceTiming(
+            session with { Phase = RaceSessionPhase.Qualifying }, Guid.NewGuid()),
+            "OB 在排位赛不得启用本机计时。");
+        Assert.IsFalse(EstateRaceModule.ShouldEnableRaceTiming(
+            session with { Phase = RaceSessionPhase.Race }, Guid.NewGuid()),
+            "OB 在正赛不得启用本机计时。");
 
         Assert.IsTrue(EstateRaceModule.ShouldInvalidateLapOnDriverIntervention(session with { Phase = RaceSessionPhase.Qualifying }));
+        Assert.IsTrue(EstateRaceModule.ShouldInvalidateLapOnDriverIntervention(session with { Phase = RaceSessionPhase.Practice }));
         Assert.IsFalse(EstateRaceModule.ShouldInvalidateLapOnDriverIntervention(session with { Phase = RaceSessionPhase.Race }));
         Assert.IsTrue(EstateRaceModule.ShouldInvalidateLapOnDriverIntervention(session with
         {
@@ -273,7 +350,9 @@ public sealed class EstateRaceClientModuleTests
                 1,
                 2,
                 true,
-                completed));
+                completed,
+                4,
+                "LOCAL-FINGERPRINT"));
             await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
             await module.StartAsync(CancellationToken.None);
             try
@@ -284,7 +363,7 @@ public sealed class EstateRaceClientModuleTests
                     "测试车手",
                     "#42D7E8",
                     "远山车队",
-                    "team-mountain"), CancellationToken.None);
+                    "team-mountain"), CancellationToken.None, "LEGACY-SERVER-PAYLOAD-HASH");
                 Assert.AreEqual(EstateRaceConnectionState.Connected, module.State.ConnectionState);
                 Assert.AreEqual(participantId, module.State.LocalParticipantId);
 
@@ -296,6 +375,8 @@ public sealed class EstateRaceClientModuleTests
                 Assert.AreEqual("测试车手", login.DisplayName);
                 Assert.AreEqual("远山车队", login.TeamName);
                 Assert.AreEqual("team-mountain", login.TeamId);
+                Assert.AreEqual("LEGACY-SERVER-PAYLOAD-HASH", login.TrackPackageHash,
+                    "登录应使用服务端声明的兼容摘要，而不是强制发送本地首选特征值。 ");
                 Assert.IsNull(await store.GetAsync(EstateRaceModule.ModuleId, "password", CancellationToken.None));
 
                 feed.Publish(Frame(1, 10_000, 50, 2, 3));
@@ -374,6 +455,99 @@ public sealed class EstateRaceClientModuleTests
                 Assert.AreEqual(string.Empty, module.ActiveProfile?.Password);
                 await module.DisconnectAsync();
                 Assert.IsNull(module.ActiveProfile);
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            await app.StopAsync();
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task ObserverConnectsReadOnlyAndNeverUploadsTelemetry()
+    {
+        var received = Channel.CreateUnbounded<RaceIncomingEnvelope>();
+        var observerId = Guid.NewGuid();
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        app.UseWebSockets();
+        app.Map("/ws", async context =>
+        {
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            await received.Writer.WriteAsync(await ReceiveAsync(socket, context.RequestAborted), context.RequestAborted);
+            var snapshot = EmptySession() with { Phase = RaceSessionPhase.Race };
+            await socket.SendAsync(
+                EstateRaceWireProtocol.Serialize(
+                    "loginAccepted",
+                    1,
+                    new RaceLoginAccepted(
+                        observerId,
+                        "observer-resume-token",
+                        snapshot,
+                        DateTimeOffset.UtcNow,
+                        true)),
+                WebSocketMessageType.Text,
+                true,
+                context.RequestAborted);
+            try
+            {
+                while (socket.State == WebSocketState.Open)
+                    await received.Writer.WriteAsync(await ReceiveAsync(socket, context.RequestAborted), context.RequestAborted);
+            }
+            catch (OperationCanceledException) { }
+            catch (WebSocketException) { }
+        });
+        await app.StartAsync();
+        var address = app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-race-observer-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var feed = new TestFeed();
+            var track = CreateTrack();
+            var definition = CreateDefinition(track);
+            var timingEnabled = true;
+            var module = new EstateRaceModule(
+                () => new EstateRaceTrackContext(
+                    track, definition, 12.5, 1, 2, timingEnabled, null, 4, "LOCAL-FINGERPRINT"),
+                (_, enabled, _) => timingEnabled = enabled);
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                await module.ConnectAsync(new EstateRaceConnectionProfile(
+                    address,
+                    "secret-race-password",
+                    "转播席 A",
+                    "#42D7E8",
+                    null,
+                    null,
+                    EstateRaceConnectionRole.Observer), CancellationToken.None);
+                var loginEnvelope = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+                var login = loginEnvelope.Payload.Deserialize<RaceLoginRequest>(EstateRaceWireProtocol.JsonOptions);
+                Assert.IsNotNull(login);
+                Assert.IsTrue(login.IsObserver);
+                Assert.IsTrue(module.State.IsObserver);
+                Assert.IsFalse(timingEnabled, "OB 连接后必须停用地产赛事本机计时。");
+
+                feed.Publish(Frame(1, 10_000, 50, 2, 3));
+                using var noTelemetryTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(450));
+                var uploaded = false;
+                try
+                {
+                    uploaded = await received.Reader.WaitToReadAsync(noTelemetryTimeout.Token);
+                }
+                catch (OperationCanceledException) { }
+                Assert.IsFalse(uploaded, "OB 客户端不得上传遥测或圈速消息。");
             }
             finally
             {
@@ -532,6 +706,126 @@ public sealed class EstateRaceClientModuleTests
                 Assert.IsFalse(updates[3].IsTelemetryValid);
                 Assert.IsTrue(updates[3].IsPausedOrRewinding,
                     "只有与仪表盘隐藏一致的 IsRaceOn 信号才判定暂停或回转。");
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            await app.StopAsync();
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task OptionalStrategyFailuresAndMalformedSnapshotsCannotStopCoreRaceSynchronization()
+    {
+        var received = Channel.CreateUnbounded<RaceIncomingEnvelope>();
+        var participantId = Guid.NewGuid();
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        app.UseWebSockets();
+        app.Map("/ws", async context =>
+        {
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            await received.Writer.WriteAsync(await ReceiveAsync(socket, context.RequestAborted), context.RequestAborted);
+            var initial = EmptySession() with
+            {
+                Phase = RaceSessionPhase.Race,
+                Participants = [Participant(participantId)]
+            };
+            await socket.SendAsync(
+                EstateRaceWireProtocol.Serialize(
+                    "loginAccepted",
+                    1,
+                    new RaceLoginAccepted(participantId, "fault-containment-token", initial, DateTimeOffset.UtcNow)),
+                WebSocketMessageType.Text,
+                true,
+                context.RequestAborted);
+            await socket.SendAsync(
+                EstateRaceWireProtocol.Serialize("snapshot", 2, "malformed-snapshot"),
+                WebSocketMessageType.Text,
+                true,
+                context.RequestAborted);
+            var recovered = initial with
+            {
+                Revision = 3,
+                Participants =
+                [
+                    Participant(participantId) with
+                    {
+                        MapX = .82,
+                        MapY = .19,
+                        IsInPitLane = true,
+                        PitLaneElapsedSeconds = 8.4
+                    }
+                ]
+            };
+            await socket.SendAsync(
+                EstateRaceWireProtocol.Serialize("snapshot", 3, recovered),
+                WebSocketMessageType.Text,
+                true,
+                context.RequestAborted);
+            try
+            {
+                while (socket.State == WebSocketState.Open)
+                    await received.Writer.WriteAsync(await ReceiveAsync(socket, context.RequestAborted), context.RequestAborted);
+            }
+            catch (OperationCanceledException) { }
+            catch (WebSocketException) { }
+        });
+        await app.StartAsync();
+        var address = app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-race-containment-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var feed = new TestFeed();
+            var track = CreateTrack();
+            var definition = CreateDefinition(track);
+            var module = new EstateRaceModule(
+                () => new EstateRaceTrackContext(
+                    track, definition, 12.5, 1, 2, true, null, 4, "LOCAL-FINGERPRINT"),
+                vehicleFingerprint: () => throw new InvalidOperationException("simulated optional analysis failure"));
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                await module.ConnectAsync(new EstateRaceConnectionProfile(
+                    address,
+                    "secret-race-password",
+                    "容错车手",
+                    "#42D7E8",
+                    null), CancellationToken.None);
+                _ = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+
+                await WaitUntilAsync(
+                    () => module.State.Session?.Revision == 3,
+                    TimeSpan.FromSeconds(3));
+                var synchronized = module.State.Session!.Participants.Single();
+                Assert.AreEqual(.82, synchronized.MapX, 1e-9);
+                Assert.AreEqual(.19, synchronized.MapY, 1e-9);
+                Assert.IsTrue(synchronized.IsInPitLane);
+                Assert.AreEqual(8.4, synchronized.PitLaneElapsedSeconds, 1e-9);
+
+                await Task.Delay(TimeSpan.FromMilliseconds(2_100));
+                feed.Publish(Frame(1, 10_000, 50, 2, 3));
+                RaceIncomingEnvelope envelope;
+                do
+                {
+                    envelope = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                } while (envelope.Type != "telemetry");
+                var telemetry = envelope.Payload.Deserialize<RaceTelemetryUpdate>(EstateRaceWireProtocol.JsonOptions);
+                Assert.IsNotNull(telemetry);
+                Assert.IsTrue(telemetry.IsTelemetryValid);
+                Assert.IsTrue(telemetry.MapX is >= 0 and <= 1);
+                Assert.IsTrue(telemetry.MapY is >= 0 and <= 1);
             }
             finally
             {

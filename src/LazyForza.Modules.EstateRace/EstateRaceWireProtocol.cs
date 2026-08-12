@@ -44,13 +44,15 @@ internal sealed record RaceLoginRequest(
     string? TrackRevision,
     string? TrackPackageHash,
     int? SectorCount = null,
-    string? TeamId = null);
+    string? TeamId = null,
+    bool IsObserver = false);
 
 internal sealed record RaceLoginAccepted(
     Guid ParticipantId,
     string ResumeToken,
     EstateRaceSession Snapshot,
-    DateTimeOffset ServerTime);
+    DateTimeOffset ServerTime,
+    bool IsObserver = false);
 
 internal sealed record RaceLoginRejected(string Code, string Message);
 

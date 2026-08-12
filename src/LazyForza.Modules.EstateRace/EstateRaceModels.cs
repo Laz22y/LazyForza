@@ -12,9 +12,16 @@ public enum EstateRaceConnectionState
     Faulted
 }
 
+public enum EstateRaceConnectionRole
+{
+    Driver,
+    Observer
+}
+
 public enum RaceSessionPhase
 {
     Lobby,
+    Practice,
     Qualifying,
     Grid,
     OutLap,
@@ -77,13 +84,24 @@ public enum RaceBannerKind
     Winner
 }
 
+public enum RaceInvestigationStatus
+{
+    Pending,
+    Penalized,
+    Dismissed
+}
+
 public sealed record EstateRaceConnectionProfile(
     string ServerAddress,
     string Password,
     string DisplayName,
     string ThemeColor,
     string? TeamName,
-    string? TeamId = null);
+    string? TeamId = null,
+    EstateRaceConnectionRole Role = EstateRaceConnectionRole.Driver)
+{
+    public bool IsObserver => Role == EstateRaceConnectionRole.Observer;
+}
 
 public sealed record EstateRaceTeam(
     string Id,
@@ -114,7 +132,9 @@ public sealed record EstateRaceServerDescriptor(
     string? TrackPackageFileSha256 = null,
     string? OrganizerLogoHash = null,
     string? OrganizerLogoMimeType = null,
-    string? OrganizerLogoDownloadPath = null);
+    string? OrganizerLogoDownloadPath = null,
+    bool SupportsObservers = false,
+    int MaximumObservers = 0);
 
 public sealed record EstateCompletedLapEvent(
     Guid EventId,
@@ -155,7 +175,19 @@ public sealed record EstateRacePenalty(
     string Reason,
     bool IsServed,
     bool IsRevoked,
-    bool IsPostRaceAdjustment = false);
+    bool IsPostRaceAdjustment = false,
+    bool IsAutomatic = false,
+    Guid? InvestigationId = null);
+
+public sealed record EstateRaceInvestigation(
+    Guid Id,
+    Guid ParticipantId,
+    string Offense,
+    DateTimeOffset DetectedAt,
+    int LapNumber,
+    RaceInvestigationStatus Status,
+    Guid? PenaltyId = null,
+    DateTimeOffset? ResolvedAt = null);
 
 public sealed record EstateRaceParticipant(
     Guid Id,
@@ -203,7 +235,17 @@ public sealed record EstateRaceParticipant(
     int? DriveThroughLapsRemaining = null,
     DateTimeOffset? DriveThroughReminderAt = null,
     bool DriveThroughOverdue = false,
-    bool IsServingDriveThrough = false);
+    bool IsServingDriveThrough = false,
+    bool QualifyingEligible = true,
+    int? QualifyingEliminatedInSession = null,
+    IReadOnlyList<double?>? QualifyingSessionBestLapSeconds = null,
+    bool PracticeFinalLapPending = false,
+    IReadOnlyList<double?>? PracticeSessionBestLapSeconds = null);
+
+public sealed record EstateRaceObserver(
+    Guid Id,
+    string DisplayName,
+    DateTimeOffset ConnectedAt);
 
 public sealed record EstateRaceBanner(
     Guid Id,
@@ -212,7 +254,8 @@ public sealed record EstateRaceBanner(
     string? Detail,
     Guid? ParticipantId,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? ExpiresAt);
+    DateTimeOffset? ExpiresAt,
+    bool IsInvestigation = false);
 
 public sealed record EstateRaceYellowZone(
     int? SectorIndex,
@@ -261,7 +304,20 @@ public sealed record EstateRaceSession(
     IReadOnlyList<double?>? FastestLapSectorSeconds = null,
     string? OrganizerLogoHash = null,
     string? OrganizerLogoMimeType = null,
-    string? OrganizerLogoDownloadPath = null);
+    string? OrganizerLogoDownloadPath = null,
+    IReadOnlyList<EstateRacePenalty>? Penalties = null,
+    IReadOnlyList<EstateRaceInvestigation>? Investigations = null,
+    int QualifyingSessionNumber = 0,
+    int QualifyingSessionCount = 1,
+    IReadOnlyList<int>? QualifyingSessionMinutes = null,
+    IReadOnlyList<int>? QualifyingEliminationCounts = null,
+    DateTimeOffset? PracticeEndsAt = null,
+    bool PracticeTimeExpired = false,
+    int PracticeSessionNumber = 0,
+    int PracticeSessionCount = 1,
+    IReadOnlyList<int>? PracticeSessionMinutes = null,
+    IReadOnlyList<EstateRaceObserver>? Observers = null,
+    int MinimumRequiredPitStops = 1);
 
 public sealed record EstateRaceOrganizerLogo(
     string Sha256,
@@ -287,6 +343,103 @@ public sealed record EstatePitServiceState(
     public static EstatePitServiceState Empty { get; } = new(false, false, 0, 0, false, 0);
 }
 
+public enum EstatePitStrategyDecision
+{
+    Unavailable,
+    Collecting,
+    StayOut,
+    PitThisLap,
+    PitWindow,
+    InPit,
+    Finished
+}
+
+public enum EstatePitStrategyConfidence
+{
+    Low,
+    Medium,
+    High
+}
+
+public sealed record EstatePitStrategyPrediction(
+    EstatePitStrategyDecision Decision,
+    string Title,
+    string Summary,
+    int? PitWindowStartLap,
+    int? PitWindowEndLap,
+    double? EstimatedPitLossSeconds,
+    bool UsesObservedPitLoss,
+    double? RepresentativeLapSeconds,
+    double? DegradationPerLapSeconds,
+    double? ProjectedAdvantageSeconds,
+    EstatePitStrategyConfidence Confidence,
+    int CleanLapCount,
+    int ExcludedLapCount,
+    int BoundaryIncidentLapCount,
+    int AnomalousLapCount,
+    int PitAffectedLapCount,
+    int ObservedPitStopCount,
+    EstatePitLossSource PitLossSource = EstatePitLossSource.None,
+    int HistoricalSampleCount = 0,
+    int HistoricalEvidenceLapCount = 0,
+    string? HistoricalMatchDescription = null,
+    bool UsesHistoricalPace = false,
+    int MinimumRequiredPitStops = 0,
+    int CompletedPitStops = 0,
+    int RemainingRequiredPitStops = 0);
+
+public enum EstatePitLossSource
+{
+    None,
+    CurrentSession,
+    Historical,
+    ConfiguredGeometry
+}
+
+public enum EstatePracticeTestKind
+{
+    LongRun,
+    PitStopSimulation,
+    QualifyingSimulation
+}
+
+public enum EstatePracticeTestStatus
+{
+    Ready,
+    Active,
+    Completed,
+    Failed,
+    Cancelled
+}
+
+public sealed record EstatePracticeTestItemState(
+    EstatePracticeTestKind Kind,
+    string Title,
+    string Description,
+    EstatePracticeTestStatus Status,
+    string Guidance,
+    int CompletedSteps,
+    int TargetSteps,
+    string? LastResult = null,
+    DateTimeOffset? HudVisibleUntil = null)
+{
+    public bool IsActive => Status == EstatePracticeTestStatus.Active;
+
+    public bool IsVisibleOnHud(DateTimeOffset now) =>
+        IsActive ||
+        Status is EstatePracticeTestStatus.Completed or EstatePracticeTestStatus.Failed &&
+        HudVisibleUntil is DateTimeOffset visibleUntil && visibleUntil > now;
+}
+
+public sealed record EstatePracticeTestPanelState(
+    bool IsPracticeSession,
+    EstatePracticeTestKind? ActiveKind,
+    IReadOnlyList<EstatePracticeTestItemState> Items,
+    int StoredSampleCount = 0)
+{
+    public static EstatePracticeTestPanelState Hidden { get; } = new(false, null, []);
+}
+
 public sealed record EstateRaceHudState(
     DateTimeOffset UpdatedAt,
     EstateRaceConnectionState ConnectionState,
@@ -300,7 +453,10 @@ public sealed record EstateRaceHudState(
     IReadOnlyList<EstateRaceMapPoint>? PitLaneOutline = null,
     EstateRaceMapGate? StartFinishGate = null,
     IReadOnlyList<EstateRaceMapSector>? TrackSectors = null,
-    EstateRaceOrganizerLogo? OrganizerLogo = null)
+    EstateRaceOrganizerLogo? OrganizerLogo = null,
+    bool IsObserver = false,
+    EstatePitStrategyPrediction? PitStrategy = null,
+    EstatePracticeTestPanelState? PracticeTests = null)
 {
     public bool IsConnected => ConnectionState == EstateRaceConnectionState.Connected;
 }

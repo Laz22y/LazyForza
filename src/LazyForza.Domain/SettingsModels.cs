@@ -1,8 +1,8 @@
 namespace LazyForza.Domain;
 
 public sealed record OverlayLayout(
-    double Left = 579,
-    double Top = 669,
+    double Left = 622.5,
+    double Top = 688,
     double Width = 1338.3333333333335,
     double Height = 753.3333333333334,
     double Scale = 0.6,
@@ -61,7 +61,9 @@ public enum EstateRaceHudWidgetKind
     StartLights,
     PitStopInfo,
     PitLimiter,
-    PenaltyStatus
+    PenaltyStatus,
+    PracticeProgram,
+    PitWindowSuggestion
 }
 
 public sealed record EstateRaceHudWidgetPlacement(
@@ -79,7 +81,9 @@ public sealed record EstateRaceHudLayout(
     EstateRaceHudWidgetPlacement? StartLights = null,
     EstateRaceHudWidgetPlacement? PitStopInfo = null,
     EstateRaceHudWidgetPlacement? PitLimiter = null,
-    EstateRaceHudWidgetPlacement? PenaltyStatus = null)
+    EstateRaceHudWidgetPlacement? PenaltyStatus = null,
+    EstateRaceHudWidgetPlacement? PracticeProgram = null,
+    EstateRaceHudWidgetPlacement? PitWindowSuggestion = null)
 {
     public EstateRaceHudWidgetPlacement Get(EstateRaceHudWidgetKind kind) => kind switch
     {
@@ -90,7 +94,9 @@ public sealed record EstateRaceHudLayout(
         EstateRaceHudWidgetKind.StartLights => StartLights ?? EstateRaceHudLayoutSettings.Default.Get(kind),
         EstateRaceHudWidgetKind.PitStopInfo => PitStopInfo ?? EstateRaceHudLayoutSettings.Default.Get(kind),
         EstateRaceHudWidgetKind.PitLimiter => PitLimiter ?? EstateRaceHudLayoutSettings.Default.Get(kind),
-        _ => PenaltyStatus ?? EstateRaceHudLayoutSettings.Default.Get(kind)
+        EstateRaceHudWidgetKind.PenaltyStatus => PenaltyStatus ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        EstateRaceHudWidgetKind.PracticeProgram => PracticeProgram ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        _ => PitWindowSuggestion ?? EstateRaceHudLayoutSettings.Default.Get(kind)
     };
 
     public EstateRaceHudLayout Set(
@@ -104,21 +110,25 @@ public sealed record EstateRaceHudLayout(
             EstateRaceHudWidgetKind.StartLights => this with { StartLights = placement },
             EstateRaceHudWidgetKind.PitStopInfo => this with { PitStopInfo = placement },
             EstateRaceHudWidgetKind.PitLimiter => this with { PitLimiter = placement },
-            _ => this with { PenaltyStatus = placement }
+            EstateRaceHudWidgetKind.PenaltyStatus => this with { PenaltyStatus = placement },
+            EstateRaceHudWidgetKind.PracticeProgram => this with { PracticeProgram = placement },
+            _ => this with { PitWindowSuggestion = placement }
         };
 }
 
 public static class EstateRaceHudLayoutSettings
 {
     private static readonly EstateRaceHudLayout DefaultValue = new(
-        new(true, 0.025, 0.12, 1),
-        new(true, 0.80, 0.17, 0.96),
-        new(true, 0.80, 0.47, 0.96),
-        new(true, 0.25, 0.025, 1),
+        new(true, 0.011370009059528202, 0.010416666666666666, 0.939803114386994),
+        new(true, 0.024218749999999956, 0.6561111111111111, 0.96),
+        new(true, 0.808, 0.5859722222222222, 0.96),
+        new(true, 0.25, 0.010416666666666666, 1),
         new(true, 0.35, 0.12, 1),
-        new(true, 0.025, 0.815, 1),
-        new(true, 0.91, 0.62, 1),
-        new(true, 0.39, 0.70, 1));
+        new(true, 0.785, 0.39980555555555547, 1),
+        new(true, 0.46906250000000005, 0.3713888888888889, 1),
+        new(true, 0.365, 0.5055555555555555, 1),
+        new(true, 0.34, 0.1026388888888889, 1),
+        new(true, 0.790, 0.160, 1));
 
     public static EstateRaceHudLayout Default => DefaultValue;
 
@@ -135,7 +145,8 @@ public static class EstateRaceHudLayoutSettings
     {
         EstateRaceHudWidgetKind.TrackMap or EstateRaceHudWidgetKind.PitStopInfo => 0.80,
         EstateRaceHudWidgetKind.Leaderboard or EstateRaceHudWidgetKind.GripStatus or
-            EstateRaceHudWidgetKind.PenaltyStatus => 0.75,
+            EstateRaceHudWidgetKind.PenaltyStatus or EstateRaceHudWidgetKind.PracticeProgram or
+            EstateRaceHudWidgetKind.PitWindowSuggestion => 0.75,
         EstateRaceHudWidgetKind.Banner => 0.70,
         _ => 0.60
     };
@@ -296,8 +307,8 @@ public static class OverlayLayoutGeometry
     {
         var width = FinitePositive(value.Width, 1338.3333333333335);
         var height = FinitePositive(value.Height, 753.3333333333334);
-        var left = Finite(value.Left, 579);
-        var top = Finite(value.Top, 669);
+        var left = Finite(value.Left, 622.5);
+        var top = Finite(value.Top, 688);
         var scale = OverlayScaleSettings.Normalize(value.Scale);
         var normalized = value with
         {
@@ -401,8 +412,8 @@ public static class OverlayLayoutGeometry
         return value with
         {
             Scale = scale,
-            LapHudLeft = Finite(value.Left, 579),
-            LapHudTop = Finite(value.Top, 669),
+            LapHudLeft = Finite(value.Left, 622.5),
+            LapHudTop = Finite(value.Top, 688),
             LapHudScale = scale,
             LapHudAttachedToDashboard = true
         };

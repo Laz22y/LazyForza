@@ -288,6 +288,43 @@ public sealed class ShiftAnalysisTests
             "同一学习会话达到门槛后，档案 ID 不应随样本继续增加而漂移。");
     }
 
+    [TestMethod]
+    public async Task LearnerSnapshotRemainsSafeWhileTelemetryIsBeingObserved()
+    {
+        var learner = new ShiftLearner(new ShiftLearnerOptions(
+            MinimumSamplesPerBin: 1,
+            MinimumReadyBins: 2,
+            MinimumGearSamples: 2));
+        var parser = new Fh6PacketParser();
+        var frames = Enumerable.Range(0, 1_200)
+            .Select(index =>
+            {
+                var packet = StablePacket(index, 2 + index / 150 % 5, 3_200 + index % 28 * 160);
+                Assert.IsTrue(parser.TryParse(
+                    packet,
+                    index,
+                    DateTimeOffset.UtcNow.AddMilliseconds(index * 16),
+                    TelemetrySourceKind.Replay,
+                    out var frame,
+                    out _));
+                return frame!;
+            })
+            .ToArray();
+
+        var observer = Task.Run(() =>
+        {
+            for (var index = 0; index < 5_000; index++)
+                _ = learner.Snapshot;
+        });
+        var writer = Task.Run(() =>
+        {
+            foreach (var frame in frames) learner.Observe(frame);
+        });
+
+        await Task.WhenAll(observer, writer);
+        Assert.IsNotNull(learner.Snapshot);
+    }
+
     private static byte[] StablePacket(int index, int gear, float rpm)
     {
         var packet = Fh6PacketBuilder.BuildDemoPacket(index);

@@ -73,7 +73,9 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
         });
     }
 
-    public OverlayLayout? EditLayout(ForzaHorizonWindowInfo target)
+    public OverlayLayout? EditLayout(
+        ForzaHorizonWindowInfo target,
+        string? setupNotice = null)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         if (Application.Current is null ||
@@ -88,7 +90,8 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
             var editor = new OverlayLayoutEditorWindow(
                 () => contributions.Values.OrderBy(item => item.ZIndex).ToArray(),
                 layout,
-                target);
+                target,
+                setupNotice);
             var accepted = editor.ShowDialog() == true;
             if (!accepted || editor.Result is not { } result) return null;
             layout = NormalizeLayout(result);
@@ -120,7 +123,8 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
         string path,
         CancellationToken cancellationToken,
         bool previewDrift = false,
-        bool previewEstateRace = false)
+        bool previewEstateRace = false,
+        bool previewEstateRaceFinished = false)
     {
         if (Application.Current is null) throw new InvalidOperationException("WPF application is not running.");
         await Application.Current.Dispatcher.InvokeAsync(() =>
@@ -133,7 +137,8 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
                 bounds.Width,
                 bounds.Height,
                 previewDrift,
-                previewEstateRace);
+                previewEstateRace,
+                previewEstateRaceFinished);
         });
     }
 

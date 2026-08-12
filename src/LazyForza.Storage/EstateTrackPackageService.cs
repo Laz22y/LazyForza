@@ -13,7 +13,8 @@ public sealed record EstateTrackPackageManifest(
     Guid TrackId,
     string TrackName,
     string MapRevision,
-    string PayloadSha256);
+    string PayloadSha256,
+    string? TrackFingerprintSha256 = null);
 
 public sealed record EstateTrackPackagePreview(
     EstateTrackPackageManifest Manifest,
@@ -25,14 +26,23 @@ public sealed record EstateTrackImportResult(
     Guid TrackId,
     string TrackName,
     bool Imported,
-    bool AlreadyExists);
+    bool AlreadyExists,
+    bool ExistingTrackMatches = false,
+    bool SourceUpdated = false);
 
 public sealed record EstateTrackPackageIdentity(
     Guid TrackId,
     string TrackName,
     string MapRevision,
-    string PayloadSha256,
-    int SectorCount);
+    string TrackFingerprintSha256,
+    int SectorCount,
+    string? PayloadSha256 = null)
+{
+    public bool Matches(string? hash) =>
+        !string.IsNullOrWhiteSpace(hash) &&
+        (string.Equals(TrackFingerprintSha256, hash, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(PayloadSha256, hash, StringComparison.OrdinalIgnoreCase));
+}
 
 /// <summary>
 /// Portable estate-circuit geometry. Lap records and other user data are
@@ -80,6 +90,7 @@ public sealed class EstateTrackPackageService
         ValidatePayload(payload);
 
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
+        var fingerprint = ComputeTrackFingerprint(payload);
         var manifest = new EstateTrackPackageManifest(
             PackageFormat,
             CurrentFormatVersion,
@@ -88,7 +99,8 @@ public sealed class EstateTrackPackageService
             loaded.Track.Id,
             loaded.Track.Name,
             definition.MapRevision,
-            Convert.ToHexString(SHA256.HashData(payloadBytes)));
+            Convert.ToHexString(SHA256.HashData(payloadBytes)),
+            fingerprint);
 
         var fullTargetPath = Path.GetFullPath(targetPath);
         var targetDirectory = Path.GetDirectoryName(fullTargetPath) ??
@@ -131,8 +143,9 @@ public sealed class EstateTrackPackageService
             loaded.Track.Id,
             loaded.Track.Name,
             definition.MapRevision,
-            Convert.ToHexString(SHA256.HashData(payloadBytes)),
-            loaded.Sectors.Count);
+            ComputeTrackFingerprint(payload),
+            loaded.Sectors.Count,
+            Convert.ToHexString(SHA256.HashData(payloadBytes)));
     }
 
     public EstateTrackPackagePreview Preview(
@@ -161,7 +174,7 @@ public sealed class EstateTrackPackageService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetSource);
         var archive = ReadArchive(packagePath, cancellationToken);
-        if (store.LoadTrack(archive.Payload.Track.Id) is not null)
+        if (store.LoadTrack(archive.Payload.Track.Id) is { } existing)
         {
             if (replaceExisting)
             {
@@ -170,11 +183,23 @@ public sealed class EstateTrackPackageService
             }
             else
             {
-            return new EstateTrackImportResult(
-                archive.Payload.Track.Id,
-                archive.Payload.Track.Name,
-                Imported: false,
-                AlreadyExists: true);
+                var existingDefinition = store.LoadEstateTrackDefinition(existing.Track.Id);
+                var existingMatches = existingDefinition is not null &&
+                                      string.Equals(
+                                          ComputeTrackFingerprint(new EstateTrackPackagePayload(
+                                              existing.Track, existing.Sectors, existingDefinition)),
+                                          archive.Manifest.TrackFingerprintSha256,
+                                          StringComparison.OrdinalIgnoreCase);
+                var sourceUpdated = existingMatches &&
+                                    !string.Equals(existing.Track.Source, targetSource, StringComparison.Ordinal);
+                if (sourceUpdated) store.UpdateTrackSource(existing.Track.Id, targetSource);
+                return new EstateTrackImportResult(
+                    archive.Payload.Track.Id,
+                    archive.Payload.Track.Name,
+                    Imported: false,
+                    AlreadyExists: true,
+                    ExistingTrackMatches: existingMatches,
+                    SourceUpdated: sourceUpdated);
             }
         }
 
@@ -187,7 +212,9 @@ public sealed class EstateTrackPackageService
             LayoutKind = TrackLayoutKind.Circuit
         };
         store.SaveTrack(track, archive.Payload.Sectors, archive.Payload.Definition);
-        return new EstateTrackImportResult(track.Id, track.Name, Imported: true, AlreadyExists: false);
+        return new EstateTrackImportResult(
+            track.Id, track.Name, Imported: true, AlreadyExists: false,
+            ExistingTrackMatches: false, SourceUpdated: false);
     }
 
     private static EstateTrackArchive ReadArchive(string packagePath, CancellationToken cancellationToken)
@@ -244,7 +271,47 @@ public sealed class EstateTrackPackageService
             !string.Equals(manifest.TrackName, payload.Track.Name, StringComparison.Ordinal) ||
             !string.Equals(manifest.MapRevision, payload.Definition.MapRevision, StringComparison.Ordinal))
             throw new InvalidDataException("地产环道清单与赛道数据不一致。");
+        var fingerprint = ComputeTrackFingerprint(payload);
+        if (!string.IsNullOrWhiteSpace(manifest.TrackFingerprintSha256) &&
+            !string.Equals(manifest.TrackFingerprintSha256, fingerprint, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("地产环道特征值与赛道数据不一致。");
+        manifest = manifest with { TrackFingerprintSha256 = fingerprint };
         return new EstateTrackArchive(manifest, payload);
+    }
+
+    private static string ComputeTrackFingerprint(EstateTrackPackagePayload payload)
+    {
+        var track = payload.Track;
+        var definition = payload.Definition;
+        var canonical = new
+        {
+            Track = new
+            {
+                track.Id,
+                track.Direction,
+                track.Points,
+                track.LengthMeters,
+                track.MinX,
+                track.MinY,
+                track.MinZ,
+                track.MaxX,
+                track.MaxY,
+                track.MaxZ,
+                track.MatchingToleranceMeters,
+                track.LayoutKind,
+                track.TimingKind
+            },
+            Sectors = payload.Sectors.OrderBy(sector => sector.Index).ToArray(),
+            Definition = new
+            {
+                definition.TrackId,
+                definition.MapRevision,
+                definition.StartFinishGate,
+                Checkpoints = definition.Checkpoints.OrderBy(checkpoint => checkpoint.Index).ToArray(),
+                definition.Pit
+            }
+        };
+        return Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(canonical, JsonOptions)));
     }
 
     private static void ValidatePayload(EstateTrackPackagePayload payload)
