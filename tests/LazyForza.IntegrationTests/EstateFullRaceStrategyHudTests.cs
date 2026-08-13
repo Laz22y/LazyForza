@@ -151,6 +151,28 @@ public sealed class EstateFullRaceStrategyHudTests
     }
 
     [TestMethod]
+    public void FullRaceStrategyKeepsExactWindowWithFractionalMonotonicOrigin()
+    {
+        var runtime = new EstateFullRaceStrategyHudRuntime();
+        var serverStart = DateTimeOffset.UtcNow;
+        var participant = Participant();
+        var formation = Session(participant, serverStart) with
+        {
+            Phase = RaceSessionPhase.FormationLap,
+            Banner = null
+        };
+
+        Assert.IsFalse(runtime.Update(
+            formation, participant.Id, Prediction(), serverStart, 0.1).IsVisible);
+        Assert.IsFalse(runtime.Update(
+            formation, participant.Id, Prediction(), serverStart.AddSeconds(19.999), 20.099).IsVisible);
+        Assert.IsTrue(runtime.Update(
+            formation, participant.Id, Prediction(), serverStart.AddSeconds(20), 20.1).IsVisible);
+        Assert.IsFalse(runtime.Update(
+            formation, participant.Id, Prediction(), serverStart.AddSeconds(28), 28.1).IsVisible);
+    }
+
+    [TestMethod]
     public void FullRaceStrategyUsesFirstObservedFormationTimeWhenBannerAlreadyExpired()
     {
         var runtime = new EstateFullRaceStrategyHudRuntime();
