@@ -14,6 +14,8 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
     private CancellationTokenSource? runCancellation;
     private Task? runTask;
     private DashboardHudState? snapshot;
+    private DashboardHudState? staleSnapshotSource;
+    private DashboardHudState? staleSnapshot;
     private long framesObserved;
     private string? activeVehicleProfileId;
     private bool shiftRecommendationsEnabled = true;
@@ -41,7 +43,15 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
         get
         {
             var current = Volatile.Read(ref snapshot);
-            return current is null ? null : current with { IsStale = DateTimeOffset.UtcNow - current.UpdatedAt > TimeSpan.FromSeconds(0.8) };
+            if (current is null || current.IsStale ||
+                DateTimeOffset.UtcNow - current.UpdatedAt <= TimeSpan.FromSeconds(0.8))
+                return current;
+            if (ReferenceEquals(Volatile.Read(ref staleSnapshotSource), current))
+                return Volatile.Read(ref staleSnapshot);
+            var stale = current with { IsStale = true };
+            Volatile.Write(ref staleSnapshot, stale);
+            Volatile.Write(ref staleSnapshotSource, current);
+            return stale;
         }
     }
 
@@ -103,6 +113,8 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
         profilesPendingForget.Clear();
         profileAliases.Clear();
         Volatile.Write(ref snapshot, null);
+        Volatile.Write(ref staleSnapshotSource, null);
+        Volatile.Write(ref staleSnapshot, null);
     }
 
     private async Task ConsumeAsync(System.Threading.Channels.ChannelReader<TelemetryFrame> frames, CancellationToken cancellationToken)

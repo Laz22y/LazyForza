@@ -8,6 +8,8 @@ namespace LazyForza.Overlay;
 public sealed class OverlayCoordinator : IHudHost, IDisposable
 {
     private readonly ConcurrentDictionary<string, IHudContribution> contributions = new();
+    private readonly object contributionSync = new();
+    private IHudContribution[] orderedContributions = [];
     private TelemetryOverlayWindow? window;
     private OverlayLayout layout;
     private bool disposed;
@@ -21,7 +23,11 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
     public async ValueTask AttachAsync(IHudContribution contribution, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        contributions[contribution.Id] = contribution;
+        lock (contributionSync)
+        {
+            contributions[contribution.Id] = contribution;
+            RefreshContributionSnapshot();
+        }
         await Application.Current.Dispatcher.InvokeAsync(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -33,7 +39,11 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
 
     public async ValueTask DetachAsync(string contributionId, CancellationToken cancellationToken)
     {
-        contributions.TryRemove(contributionId, out _);
+        lock (contributionSync)
+        {
+            contributions.TryRemove(contributionId, out _);
+            RefreshContributionSnapshot();
+        }
         if (Application.Current is null) return;
         var dispatcher = Application.Current.Dispatcher;
         if (dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) return;
@@ -88,7 +98,7 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
         {
             _ = ForzaHorizonWindow.TryActivate(target);
             var editor = new OverlayLayoutEditorWindow(
-                () => contributions.Values.OrderBy(item => item.ZIndex).ToArray(),
+                GetContributionSnapshot,
                 layout,
                 target,
                 setupNotice);
@@ -124,7 +134,8 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
         CancellationToken cancellationToken,
         bool previewDrift = false,
         bool previewEstateRace = false,
-        bool previewEstateRaceFinished = false)
+        bool previewEstateRaceFinished = false,
+        bool previewEstateRaceChequered = false)
     {
         if (Application.Current is null) throw new InvalidOperationException("WPF application is not running.");
         await Application.Current.Dispatcher.InvokeAsync(() =>
@@ -138,15 +149,24 @@ public sealed class OverlayCoordinator : IHudHost, IDisposable
                 bounds.Height,
                 previewDrift,
                 previewEstateRace,
-                previewEstateRaceFinished);
+                previewEstateRaceFinished,
+                previewEstateRaceChequered);
         });
     }
 
     private void EnsureWindow()
     {
         if (window is not null) return;
-        window = new TelemetryOverlayWindow(() => contributions.Values.OrderBy(item => item.ZIndex).ToArray(), layout);
+        window = new TelemetryOverlayWindow(GetContributionSnapshot, layout);
     }
+
+    private IReadOnlyList<IHudContribution> GetContributionSnapshot() =>
+        Volatile.Read(ref orderedContributions);
+
+    private void RefreshContributionSnapshot() =>
+        Volatile.Write(
+            ref orderedContributions,
+            contributions.Values.OrderBy(item => item.ZIndex).ToArray());
 
     private static OverlayLayout NormalizeLayout(OverlayLayout value) =>
         OverlayLayoutGeometry.Normalize(value) with

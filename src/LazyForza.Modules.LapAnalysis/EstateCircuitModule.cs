@@ -947,6 +947,10 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             maximumProgress < activeTrack.LengthMeters * 0.85 ? "estate-route-progress-incomplete" :
             $"estate-projection-low-confidence ({ratio:P0})";
         EnsureComparisonReference(frame);
+        // Capture the comparison target before this lap is inserted. Once the
+        // new fastest lap enters timingHistory it must drive the next lap's live
+        // comparison, but the finish-line result still belongs against the
+        // fastest lap that existed when this lap started/finished.
         var previousHistoricalReference = historicalReferenceLap;
         var samples = Downsample(lapSamples);
         var lap = new LapRecord(
@@ -971,8 +975,11 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             classificationValid,
             lap.InvalidReason,
             geometryValid);
+        // Build the held finish-line sectors while timingHistory still excludes
+        // the just-completed lap. Including it here makes every new fastest lap
+        // compare against itself and incorrectly produces an all-zero Delta.
+        heldComparisons = BuildCompletedComparisons(lap, previousHistoricalReference);
         ReloadTimingHistory();
-        heldComparisons = BuildCompletedComparisons(lap);
         heldComparisonsUntil = frame.ArrivalTime +
                                LapHudDisplayTiming.CompletedLapHoldDuration(getOverlayLayout());
         heldCumulativeHistoricalDeltaSeconds = geometryValid && previousHistoricalReference is not null
@@ -1520,7 +1527,9 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         }).ToArray();
     }
 
-    private IReadOnlyList<SectorComparison> BuildCompletedComparisons(LapRecord lap)
+    private IReadOnlyList<SectorComparison> BuildCompletedComparisons(
+        LapRecord lap,
+        LapRecord? previousFastestLap)
     {
         return activeSectors.Select(sector =>
         {
@@ -1529,19 +1538,23 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                 ? segment.TimeSeconds
                 : (double?)null;
             var (sessionBest, historicalBest) = BestTimingSectorTimes(sector.Index, lap.Vehicle.CarClass);
+            var previousFastestSegment = previousFastestLap?.Segments
+                .FirstOrDefault(candidate => candidate.Index == sector.Index);
+            var deltaReference = previousFastestSegment is { IsValid: true, TimeSeconds: > 0 }
+                ? previousFastestSegment.TimeSeconds
+                : (double?)null;
             if (lap.IsValid && current is not null)
             {
                 sessionBest = sessionBest is null ? current : Math.Min(sessionBest.Value, current.Value);
                 historicalBest = historicalBest is null ? current : Math.Min(historicalBest.Value, current.Value);
             }
             var state = SectorColorClassifier.Classify(current, lap.IsValid && current is not null, sessionBest, historicalBest);
-            var reference = sessionBest ?? historicalBest;
             return new SectorComparison(
                 sector.Index,
                 current,
                 sessionBest,
                 historicalBest,
-                current is not null && reference is not null ? current - reference : null,
+                current is not null && deltaReference is not null ? current - deltaReference : null,
                 state,
                 false);
         }).ToArray();

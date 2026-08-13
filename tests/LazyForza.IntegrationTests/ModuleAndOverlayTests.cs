@@ -27,6 +27,7 @@ public sealed class ModuleAndOverlayTests
         AssertPlacement(EstateRaceHudWidgetKind.PenaltyStatus, .365, .5055555555555555, 1);
         AssertPlacement(EstateRaceHudWidgetKind.PracticeProgram, .34, .1026388888888889, 1);
         AssertPlacement(EstateRaceHudWidgetKind.PitWindowSuggestion, .790, .160, 1);
+        AssertPlacement(EstateRaceHudWidgetKind.FullRaceStrategy, .296, .7735833333333334, .60);
         return;
 
         void AssertPlacement(EstateRaceHudWidgetKind kind, double left, double top, double scale)
@@ -38,6 +39,46 @@ public sealed class ModuleAndOverlayTests
             Assert.AreEqual(scale, placement.Scale, 1e-12, kind.ToString());
             Assert.AreEqual(1, placement.Opacity, 1e-12, kind.ToString());
         }
+    }
+
+    [TestMethod]
+    public void EstateRaceLayoutPreviewUsesStableIdentityAndSharedWidgetGeometry()
+    {
+        var now = new DateTimeOffset(2026, 8, 13, 12, 0, 0, TimeSpan.Zero);
+        var first = OverlayLayoutPreviewState.EstateRace(now);
+        var second = OverlayLayoutPreviewState.EstateRace(now.AddSeconds(1));
+
+        CollectionAssert.AreEqual(
+            first.Session!.Participants.Select(item => item.Id).ToArray(),
+            second.Session!.Participants.Select(item => item.Id).ToArray(),
+            "布局预览刷新时不应把相同示例车手当成全新车手。");
+        Assert.AreEqual(first.Session.Banner!.Id, second.Session.Banner!.Id);
+
+        const double width = 1920;
+        const double height = 1080;
+        var leaderboard = HudSurface.EstateRaceWidgetNominalSize(
+            EstateRaceHudWidgetKind.Leaderboard,
+            width,
+            height);
+        Assert.AreEqual(width * .235, leaderboard.Width, 1e-9);
+        Assert.AreEqual(
+            height * (.053 + .026) + Math.Max(36, height * .045) * 12,
+            leaderboard.Height,
+            1e-9);
+
+        var pitStop = HudSurface.EstateRaceWidgetNominalSize(
+            EstateRaceHudWidgetKind.PitStopInfo,
+            width,
+            height);
+        Assert.AreEqual(width * .215, pitStop.Width, 1e-9);
+        Assert.AreEqual(height * (.041 + .0665 * 2), pitStop.Height, 1e-9);
+
+        var pitWindow = HudSurface.EstateRaceWidgetNominalSize(
+            EstateRaceHudWidgetKind.PitWindowSuggestion,
+            width,
+            height);
+        Assert.AreEqual(width * .19, pitWindow.Width, 1e-9);
+        Assert.AreEqual(height * .14, pitWindow.Height, 1e-9);
     }
 
     [TestMethod]
@@ -104,7 +145,7 @@ public sealed class ModuleAndOverlayTests
             Assert.AreEqual(0, placement.OffsetX, 1e-9);
             Assert.AreEqual(0, placement.OffsetY, 1e-9);
         }
-        Assert.AreEqual("1.4.5", LazyForza.App.ApplicationVersionInfo.Display);
+        Assert.AreEqual("1.4.6", LazyForza.App.ApplicationVersionInfo.Display);
     }
 
     [TestMethod]
@@ -631,6 +672,65 @@ public sealed class ModuleAndOverlayTests
         Assert.IsTrue(limiter.ShouldRender(0));
         Assert.IsFalse(limiter.ShouldRender(0.010));
         Assert.IsTrue(limiter.ShouldRender(0.017));
+        var animatedLimiter = new FrameRateLimiter(30);
+        Assert.IsTrue(animatedLimiter.ShouldRender(0));
+        Assert.IsFalse(animatedLimiter.ShouldRender(0.020));
+        Assert.IsTrue(animatedLimiter.ShouldRender(0.034));
+        var transitionLimiter = new FrameRateLimiter(60);
+        Assert.IsTrue(transitionLimiter.ShouldRender(0));
+        Assert.IsTrue(transitionLimiter.ShouldRender(0.017));
+    }
+
+    [TestMethod]
+    public void EstateRaceWidgetAnimationKeepsPersistentAndConditionalHudTransitionsStable()
+    {
+        var controller = new EstateRaceHudAnimationController();
+        var entering = controller.Update(
+            EstateRaceHudWidgetKind.Leaderboard,
+            visible: true,
+            nowSeconds: 0,
+            reduceMotion: false);
+        Assert.IsTrue(entering.ShouldDraw);
+        Assert.AreEqual(0, entering.Opacity, 0.000001);
+        Assert.IsTrue(entering.OffsetXFactor < 0);
+        Assert.IsTrue(controller.AnyAnimating);
+
+        var entered = controller.Update(
+            EstateRaceHudWidgetKind.Leaderboard,
+            visible: true,
+            nowSeconds: 0.18,
+            reduceMotion: false);
+        Assert.AreEqual(1, entered.Opacity, 0.000001);
+        Assert.AreEqual(0, entered.OffsetXFactor, 0.000001);
+
+        var exiting = controller.Update(
+            EstateRaceHudWidgetKind.Leaderboard,
+            visible: false,
+            nowSeconds: 0.27,
+            reduceMotion: false);
+        Assert.IsTrue(exiting.ShouldDraw, "退场期间必须保留最后一帧内容，不能突然消失。 ");
+        Assert.IsTrue(exiting.Opacity is > 0 and < 1);
+        var hidden = controller.Update(
+            EstateRaceHudWidgetKind.Leaderboard,
+            visible: false,
+            nowSeconds: 0.45,
+            reduceMotion: false);
+        Assert.IsFalse(hidden.ShouldDraw);
+
+        var reduced = new EstateRaceHudAnimationController();
+        var reducedEntry = reduced.Update(
+            EstateRaceHudWidgetKind.PitLimiter,
+            visible: true,
+            nowSeconds: 0,
+            reduceMotion: true);
+        Assert.AreEqual(1, reducedEntry.Scale, 0.000001);
+        Assert.AreEqual(0, reducedEntry.OffsetXFactor, 0.000001);
+        Assert.AreEqual(0, reducedEntry.OffsetYFactor, 0.000001);
+        Assert.AreEqual(1, reduced.Update(
+            EstateRaceHudWidgetKind.PitLimiter,
+            visible: true,
+            nowSeconds: 0.10,
+            reduceMotion: true).Opacity, 0.000001);
     }
 
     [TestMethod]

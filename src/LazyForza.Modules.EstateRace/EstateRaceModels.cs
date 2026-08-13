@@ -187,7 +187,33 @@ public sealed record EstateRaceInvestigation(
     int LapNumber,
     RaceInvestigationStatus Status,
     Guid? PenaltyId = null,
-    DateTimeOffset? ResolvedAt = null);
+    DateTimeOffset? ResolvedAt = null,
+    IReadOnlyList<Guid>? RelatedParticipantIds = null,
+    EstateCollisionEvidenceSnapshot? CollisionEvidence = null);
+
+public sealed record EstateCollisionEvidenceSnapshot(
+    DateTimeOffset IncidentAt,
+    Guid ReporterParticipantId,
+    Guid OtherParticipantId,
+    string ReporterName,
+    string OtherName,
+    string ReporterThemeColor,
+    string OtherThemeColor,
+    double ReporterWorldX,
+    double ReporterWorldY,
+    double ReporterWorldZ,
+    double OtherWorldX,
+    double OtherWorldY,
+    double OtherWorldZ,
+    double ReporterVelocityX,
+    double ReporterVelocityZ,
+    double OtherVelocityX,
+    double OtherVelocityZ,
+    double HorizontalDistanceMeters,
+    double VerticalDistanceMeters,
+    double RelativeSpeedKph,
+    double ImpactMagnitudeMps,
+    double ImpactSpeedLossMps);
 
 public sealed record EstateRaceParticipant(
     Guid Id,
@@ -421,7 +447,8 @@ public sealed record EstatePracticeTestItemState(
     int CompletedSteps,
     int TargetSteps,
     string? LastResult = null,
-    DateTimeOffset? HudVisibleUntil = null)
+    DateTimeOffset? HudVisibleUntil = null,
+    DateTimeOffset? HudVisibleFrom = null)
 {
     public bool IsActive => Status == EstatePracticeTestStatus.Active;
 
@@ -456,7 +483,9 @@ public sealed record EstateRaceHudState(
     EstateRaceOrganizerLogo? OrganizerLogo = null,
     bool IsObserver = false,
     EstatePitStrategyPrediction? PitStrategy = null,
-    EstatePracticeTestPanelState? PracticeTests = null)
+    EstatePracticeTestPanelState? PracticeTests = null,
+    TimeSpan EstimatedOneWayLatency = default,
+    TimeSpan? ServerClockOffset = null)
 {
     public bool IsConnected => ConnectionState == EstateRaceConnectionState.Connected;
 }

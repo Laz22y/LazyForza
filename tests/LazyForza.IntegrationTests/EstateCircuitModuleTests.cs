@@ -519,6 +519,104 @@ public sealed class EstateCircuitModuleTests
     }
 
     [TestMethod]
+    public async Task CompletedFastestEstateLapComparesAgainstFastestLapBeforeTheFinish()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-finish-delta-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var rawRoute = Enumerable.Range(0, 241)
+                .Select(index =>
+                {
+                    var angle = index * Math.PI * 2 / 240;
+                    return new TrackPoint(100 * Math.Cos(angle), 2, 100 * Math.Sin(angle), 0, 0, 0);
+                })
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("地产过线 Delta 测试", rawRoute) with
+            {
+                Source = TelemetryDataPartition.TrackSource(TelemetrySourceKind.Live),
+                TimingKind = TrackTimingKind.EstateGeometry,
+                Category = "地产环道",
+                CaptureLapCount = 2
+            };
+            var definition = new EstateTrackDefinition(
+                track.Id,
+                track.Name,
+                "test",
+                "estate-finish-delta",
+                "1",
+                new EstateTimingGate(
+                    new EstateGatePoint(88, 2, 0),
+                    new EstateGatePoint(112, 2, 0),
+                    0,
+                    1,
+                    0.05,
+                    0.04,
+                    0.1),
+                EstateTrackAlgorithms.CreateCheckpoints(track, 6),
+                null,
+                90,
+                90,
+                1,
+                DateTimeOffset.UnixEpoch,
+                DateTimeOffset.UnixEpoch);
+            store.SaveTrack(track, TrackAlgorithms.CreateSectors(track), definition);
+
+            var feed = new TestFeed();
+            var module = new EstateCircuitModule(
+                store,
+                TelemetrySourceKind.Live,
+                () => new OverlayLayout(LapCompletedHoldSeconds: 3));
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                module.StartTiming(track.Id);
+                PublishLap(feed, 1_000, sampleIntervalMilliseconds: 250);
+                await WaitUntilAsync(
+                    () => module.State.CompletedLaps == 1,
+                    TimeSpan.FromSeconds(5),
+                    () => module.State.ToString());
+                var firstLap = module.State.LastLapSeconds;
+                Assert.IsNotNull(firstLap);
+
+                PublishLap(feed, 100_000, sampleIntervalMilliseconds: 200);
+                await WaitUntilAsync(
+                    () => module.State.CompletedLaps == 2 &&
+                          ((LapHudState?)((IHudContribution)module).Snapshot) is
+                          { ShowingPreviousLap: true, CumulativeHistoricalDeltaSeconds: not null },
+                    TimeSpan.FromSeconds(5),
+                    () => module.State.ToString());
+
+                var completed = (LapHudState?)((IHudContribution)module).Snapshot;
+                Assert.IsNotNull(completed);
+                var expectedDelta = module.State.LastLapSeconds!.Value - firstLap.Value;
+                Assert.IsTrue(expectedDelta < -1,
+                    "第二圈必须明显快于此前最快圈，回归才能区分自比较的 ±0.000。 ");
+                Assert.AreEqual(expectedDelta, completed.CumulativeHistoricalDeltaSeconds!.Value, 0.001,
+                    "过线 Delta 必须使用过线前的最快圈，不能用刚保存的新最快圈与自己比较。 ");
+                Assert.IsTrue(completed.Sectors
+                        .Where(sector => sector.CurrentSeconds is not null)
+                        .Any(sector => sector.DeltaSeconds is < -0.001),
+                    "完成圈分段必须继续对比此前最快圈，不能全部变成 ±0.000。 ");
+                Assert.IsFalse(completed.Sectors
+                        .Where(sector => sector.DeltaSeconds is not null)
+                        .All(sector => Math.Abs(sector.DeltaSeconds!.Value) < 0.0005),
+                    "新最快圈的完成态不能把所有分段都与自身比较。 ");
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
     public async Task PitEnrollmentBuildsDirectedEntryLaneServicePolygonAndExit()
     {
         var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-pit-{Guid.NewGuid():N}.db");
@@ -655,13 +753,14 @@ public sealed class EstateCircuitModuleTests
         TestFeed feed,
         uint timestampStart,
         bool injectSmallReorderAtFinish = false,
-        bool injectTrackDeviation = false)
+        bool injectTrackDeviation = false,
+        uint sampleIntervalMilliseconds = 250)
     {
         const int samples = 360;
         for (var index = -2; index <= samples + 2; index++)
         {
             var angle = (index + 0.5) * Math.PI * 2 / samples;
-            var timestamp = timestampStart + (uint)((index + 2) * 250);
+            var timestamp = timestampStart + (uint)(index + 2) * sampleIntervalMilliseconds;
             var radius = injectTrackDeviation && index is >= 80 and <= 88 ? 125 : 100;
             if (injectSmallReorderAtFinish && index == samples)
             {

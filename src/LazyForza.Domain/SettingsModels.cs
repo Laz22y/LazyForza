@@ -63,7 +63,8 @@ public enum EstateRaceHudWidgetKind
     PitLimiter,
     PenaltyStatus,
     PracticeProgram,
-    PitWindowSuggestion
+    PitWindowSuggestion,
+    FullRaceStrategy
 }
 
 public sealed record EstateRaceHudWidgetPlacement(
@@ -83,7 +84,8 @@ public sealed record EstateRaceHudLayout(
     EstateRaceHudWidgetPlacement? PitLimiter = null,
     EstateRaceHudWidgetPlacement? PenaltyStatus = null,
     EstateRaceHudWidgetPlacement? PracticeProgram = null,
-    EstateRaceHudWidgetPlacement? PitWindowSuggestion = null)
+    EstateRaceHudWidgetPlacement? PitWindowSuggestion = null,
+    EstateRaceHudWidgetPlacement? FullRaceStrategy = null)
 {
     public EstateRaceHudWidgetPlacement Get(EstateRaceHudWidgetKind kind) => kind switch
     {
@@ -96,7 +98,8 @@ public sealed record EstateRaceHudLayout(
         EstateRaceHudWidgetKind.PitLimiter => PitLimiter ?? EstateRaceHudLayoutSettings.Default.Get(kind),
         EstateRaceHudWidgetKind.PenaltyStatus => PenaltyStatus ?? EstateRaceHudLayoutSettings.Default.Get(kind),
         EstateRaceHudWidgetKind.PracticeProgram => PracticeProgram ?? EstateRaceHudLayoutSettings.Default.Get(kind),
-        _ => PitWindowSuggestion ?? EstateRaceHudLayoutSettings.Default.Get(kind)
+        EstateRaceHudWidgetKind.PitWindowSuggestion => PitWindowSuggestion ?? EstateRaceHudLayoutSettings.Default.Get(kind),
+        _ => FullRaceStrategy ?? EstateRaceHudLayoutSettings.Default.Get(kind)
     };
 
     public EstateRaceHudLayout Set(
@@ -112,7 +115,8 @@ public sealed record EstateRaceHudLayout(
             EstateRaceHudWidgetKind.PitLimiter => this with { PitLimiter = placement },
             EstateRaceHudWidgetKind.PenaltyStatus => this with { PenaltyStatus = placement },
             EstateRaceHudWidgetKind.PracticeProgram => this with { PracticeProgram = placement },
-            _ => this with { PitWindowSuggestion = placement }
+            EstateRaceHudWidgetKind.PitWindowSuggestion => this with { PitWindowSuggestion = placement },
+            _ => this with { FullRaceStrategy = placement }
         };
 }
 
@@ -128,7 +132,8 @@ public static class EstateRaceHudLayoutSettings
         new(true, 0.46906250000000005, 0.3713888888888889, 1),
         new(true, 0.365, 0.5055555555555555, 1),
         new(true, 0.34, 0.1026388888888889, 1),
-        new(true, 0.790, 0.160, 1));
+        new(true, 0.790, 0.160, 1),
+        new(true, 0.296, 0.7735833333333334, 0.60));
 
     public static EstateRaceHudLayout Default => DefaultValue;
 
@@ -147,6 +152,7 @@ public static class EstateRaceHudLayoutSettings
         EstateRaceHudWidgetKind.Leaderboard or EstateRaceHudWidgetKind.GripStatus or
             EstateRaceHudWidgetKind.PenaltyStatus or EstateRaceHudWidgetKind.PracticeProgram or
             EstateRaceHudWidgetKind.PitWindowSuggestion => 0.75,
+        EstateRaceHudWidgetKind.FullRaceStrategy => 0.60,
         EstateRaceHudWidgetKind.Banner => 0.70,
         _ => 0.60
     };

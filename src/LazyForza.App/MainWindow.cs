@@ -2971,7 +2971,8 @@ internal sealed partial class MainWindow : Window
             (EstateRaceHudWidgetKind.PitLimiter, "维修区限速"),
             (EstateRaceHudWidgetKind.PenaltyStatus, "罚时指示器"),
             (EstateRaceHudWidgetKind.PracticeProgram, "练习项目提示"),
-            (EstateRaceHudWidgetKind.PitWindowSuggestion, "进站窗口建议")
+            (EstateRaceHudWidgetKind.PitWindowSuggestion, "进站窗口建议"),
+            (EstateRaceHudWidgetKind.FullRaceStrategy, "整场进站策略")
         };
         var estateRaceToggles = new Dictionary<EstateRaceHudWidgetKind, ToggleButton>();
         var estateRaceComponentPanel = new WrapPanel { Margin = new Thickness(-4, -2, 0, 0) };
@@ -2993,7 +2994,7 @@ internal sealed partial class MainWindow : Window
         }
         controls.Children.Add(SettingGroup(
             "地产赛事 HUD 部件",
-            "十个部件可独立开关；进入 Overlay 布局编辑器后可直接选择、拖动、缩放或恢复赛事默认布局。",
+            "十一个部件可独立开关；进入 Overlay 布局编辑器后可直接选择、拖动、缩放或恢复赛事默认布局。",
             estateRaceComponentPanel));
         var estateRaceOpacitySliders = new Dictionary<EstateRaceHudWidgetKind, Slider>();
         var estateRaceOpacityPanel = new UniformGrid { Columns = 2 };
@@ -3013,7 +3014,7 @@ internal sealed partial class MainWindow : Window
         }
         controls.Children.Add(SettingGroup(
             "地产赛事 HUD 透明度",
-            "十个赛事部件分别保存透明度，互不影响。",
+            "十一个赛事部件分别保存透明度，互不影响。",
             estateRaceOpacityPanel));
 
         var timingItems = new UniformGrid { Columns = 2 };

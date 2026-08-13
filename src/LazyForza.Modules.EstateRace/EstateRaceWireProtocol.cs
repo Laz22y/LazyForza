@@ -58,6 +58,12 @@ internal sealed record RaceLoginRejected(string Code, string Message);
 
 internal sealed record RaceReadyUpdate(bool IsReady);
 
+internal sealed record RaceClockPing(long ClientMonotonicMilliseconds);
+
+internal sealed record RaceClockPong(
+    long ClientMonotonicMilliseconds,
+    long ServerUnixMilliseconds);
+
 internal sealed record RaceTelemetryUpdate(
     long ClientMonotonicMilliseconds,
     double TrackProgress,
@@ -81,7 +87,21 @@ internal sealed record RaceTelemetryUpdate(
     double PitSpeedLimitKph = 0,
     double PitLaneElapsedSeconds = 0,
     bool IsApproachingPit = false,
-    bool IsOnPitRoute = false);
+    bool IsOnPitRoute = false,
+    bool HasWorldPosition = false,
+    double WorldX = 0,
+    double WorldY = 0,
+    double WorldZ = 0,
+    double VelocityX = 0,
+    double VelocityY = 0,
+    double VelocityZ = 0,
+    long ImpactSequence = 0,
+    double ImpactMagnitudeMps = 0,
+    double ImpactSpeedLossMps = 0,
+    double ImpactWorldX = 0,
+    double ImpactWorldY = 0,
+    double ImpactWorldZ = 0,
+    int ImpactAgeMilliseconds = 0);
 
 internal sealed record RaceLapCompleted(
     Guid EventId,

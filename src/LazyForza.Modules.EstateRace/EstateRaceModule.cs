@@ -23,6 +23,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private const string ConnectionRoleSetting = "connectionRole";
     private const int MaximumOrganizerLogoBytes = 262_144;
     private static readonly TimeSpan TelemetryInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan TelemetrySendTimeout = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan CommandSendTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan FingerprintRefreshInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan BackgroundFailureLogInterval = TimeSpan.FromSeconds(10);
     private readonly Func<EstateRaceTrackContext?> trackContext;
@@ -32,6 +35,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private readonly Action<EstateStrategySample>? strategySampleSaver;
     private readonly object strategySync = new();
     private readonly object telemetryStateSync = new();
+    private readonly EstateCollisionEvidenceDetector collisionEvidenceDetector = new();
+    private readonly object trackMapCacheSync = new();
     private readonly SemaphoreSlim connectionLock = new(1, 1);
     private readonly SemaphoreSlim sendLock = new(1, 1);
     private readonly EstateRaceGripEstimator gripEstimator = new();
@@ -45,6 +50,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private CancellationTokenSource? reconnectCancellation;
     private Task? telemetryTask;
     private Task? receiveTask;
+    private Task? heartbeatTask;
     private Task? reconnectTask;
     private ClientWebSocket? socket;
     private EstateRaceConnectionProfile? activeProfile;
@@ -59,6 +65,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private Guid? sentLapEventId;
     private long sequence;
     private DateTimeOffset lastTelemetrySentAt;
+    private long lastTelemetrySentMonotonicMilliseconds;
     private RaceSessionPhase? lastSessionPhase;
     private int lastQualifyingSessionNumber;
     private int lastPracticeSessionNumber;
@@ -81,6 +88,14 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private string? lastTelemetryFailure;
     private DateTimeOffset lastSnapshotFailureAt;
     private string? lastSnapshotFailure;
+    private long estimatedOneWayLatencyTicks;
+    private long serverClockOffsetTicks;
+    private int hasServerClockEstimate;
+    private EstateRaceTrackMapCacheKey? trackMapCacheKey;
+    private IReadOnlyList<EstateRaceMapPoint> cachedTrackOutline = [];
+    private IReadOnlyList<EstateRaceMapPoint> cachedPitOutline = [];
+    private EstateRaceMapGate? cachedStartFinishGate;
+    private IReadOnlyList<EstateRaceMapSector> cachedTrackSectors = [];
 
     public EstateRaceModule(
         Func<EstateRaceTrackContext?> trackContext,
@@ -186,8 +201,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             : expectedTrackPackageHash.Trim().ToUpperInvariant();
         if (!await ConnectOnceAsync(profile, cancellationToken, isReconnectAttempt: false).ConfigureAwait(false))
         {
+            var failure = State.ConnectionText;
             activeProfile = null;
             requestedTrackPackageHash = null;
+            throw new InvalidOperationException(failure);
         }
     }
 
@@ -222,7 +239,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             if (Status.State != ModuleRuntimeState.Running)
                 throw new InvalidOperationException("请先启用地产赛事模块。");
             ValidateProfile(profile);
-            await DisconnectCoreAsync().ConfigureAwait(false);
+            await DisconnectCoreAsync(preserveSessionState: isReconnectAttempt).ConfigureAwait(false);
             intentionalDisconnect = false;
             connectionAuthenticated = false;
             activeProfile = profile with
@@ -233,12 +250,15 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 TeamName = NullIfWhiteSpace(profile.TeamName)
             };
             resumeToken = activeProfile.IsObserver ? observerResumeToken : driverResumeToken;
-            SetConnectionState(EstateRaceConnectionState.Connecting, "正在连接赛事服务…");
+            SetConnectionState(
+                isReconnectAttempt ? EstateRaceConnectionState.Reconnecting : EstateRaceConnectionState.Connecting,
+                isReconnectAttempt ? "正在恢复赛事连接…" : "正在连接赛事服务…");
             connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 runCancellation?.Token ?? CancellationToken.None,
                 cancellationToken);
             socket = new ClientWebSocket();
             socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+            socket.Options.KeepAliveTimeout = TimeSpan.FromSeconds(10);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(connectionCancellation.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(12));
             await socket.ConnectAsync(ServerWebSocketUri(activeProfile.ServerAddress), timeout.Token).ConfigureAwait(false);
@@ -264,6 +284,17 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             if (loginEnvelope.Type == "loginRejected")
             {
                 var rejected = loginEnvelope.Payload.Deserialize<RaceLoginRejected>(EstateRaceWireProtocol.JsonOptions);
+                if (string.Equals(rejected?.Code, "disconnectedByControl", StringComparison.Ordinal))
+                {
+                    if (activeProfile.IsObserver) observerResumeToken = null;
+                    else driverResumeToken = null;
+                    resumeToken = null;
+                    await Context.Settings.SetAsync(
+                        ModuleId,
+                        activeProfile.IsObserver ? ObserverResumeTokenSetting : ResumeTokenSetting,
+                        string.Empty,
+                        CancellationToken.None).ConfigureAwait(false);
+                }
                 SetConnectionState(EstateRaceConnectionState.Rejected, rejected?.Message ?? "赛事服务拒绝登录。");
                 await DisconnectCoreAsync().ConfigureAwait(false);
                 return false;
@@ -291,17 +322,24 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             receiveTask = Task.Run(
                 () => ReceiveLoopAsync(connectedSocket, connectedCancellation.Token),
                 CancellationToken.None);
+            heartbeatTask = Task.Run(
+                () => HeartbeatLoopAsync(connectedCancellation.Token),
+                CancellationToken.None);
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await DisconnectCoreAsync().ConfigureAwait(false);
+            await DisconnectCoreAsync(preserveSessionState: isReconnectAttempt).ConfigureAwait(false);
             throw;
         }
         catch (Exception exception)
         {
-            SetConnectionState(EstateRaceConnectionState.Faulted, $"连接失败：{exception.Message}");
-            await DisconnectCoreAsync().ConfigureAwait(false);
+            await DisconnectCoreAsync(preserveSessionState: isReconnectAttempt).ConfigureAwait(false);
+            SetConnectionState(
+                isReconnectAttempt ? EstateRaceConnectionState.Reconnecting : EstateRaceConnectionState.Faulted,
+                isReconnectAttempt
+                    ? $"赛事连接尚未恢复：{exception.Message}"
+                    : $"连接失败：{exception.Message}");
             LogIfInitialized($"Estate race connection failed: {exception}");
             return false;
         }
@@ -371,6 +409,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         {
             gripEstimator.Reset();
             pitServiceTracker.Reset();
+            collisionEvidenceDetector.Reset();
         }
         pitStrategyPredictor.Reset();
         practiceTestManager.Reset();
@@ -421,9 +460,17 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     {
         if (socket?.State != WebSocketState.Open) return;
         if (!connectionAuthenticated || connectionIsObserver) return;
+        var monotonicNow = monotonicClock.ElapsedMilliseconds;
+        var valid = IsTelemetryValid(frame, out var pausedOrRewinding);
+        var collision = collisionEvidenceDetector.Observe(frame, valid);
+        if (lastTelemetrySentAt != default &&
+            frame.ArrivalTime - lastTelemetrySentAt < TelemetryInterval &&
+            monotonicNow - lastTelemetrySentMonotonicMilliseconds < TelemetryInterval.TotalMilliseconds)
+            return;
+        lastTelemetrySentAt = frame.ArrivalTime;
+        lastTelemetrySentMonotonicMilliseconds = monotonicNow;
         var context = trackContext();
         if (context is null) return;
-        var valid = IsTelemetryValid(frame, out var pausedOrRewinding);
         observedVehicleFingerprint = VehicleProfileFingerprint.FromFrame(frame);
         var positionReliable = valid;
         var localParticipant = session?.Participants.FirstOrDefault(candidate => candidate.Id == participantId);
@@ -448,12 +495,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             if (positionReliable) lastValidProjection = projection;
             gripCondition = gripEstimator.Current;
         }
-        if (frame.ArrivalTime - lastTelemetrySentAt < TelemetryInterval) return;
-        lastTelemetrySentAt = frame.ArrivalTime;
         var pit = context.Definition.Pit;
         var isOnPitRoute = positionReliable && pitService.IsOnPitRoute;
         var update = new RaceTelemetryUpdate(
-            monotonicClock.ElapsedMilliseconds,
+            monotonicNow,
             projection.Progress,
             projection.LateralOffsetMeters,
             projection.MapX,
@@ -475,7 +520,21 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             pit?.SpeedLimitKph ?? 0,
             pitService.PitLaneElapsedSeconds,
             pitService.IsApproachingPit,
-            isOnPitRoute);
+            isOnPitRoute,
+            positionReliable,
+            collision.WorldPosition.X,
+            collision.WorldPosition.Y,
+            collision.WorldPosition.Z,
+            collision.Velocity.X,
+            collision.Velocity.Y,
+            collision.Velocity.Z,
+            collision.ImpactSequence,
+            collision.ImpactMagnitudeMps,
+            collision.ImpactSpeedLossMps,
+            collision.ImpactPosition.X,
+            collision.ImpactPosition.Y,
+            collision.ImpactPosition.Z,
+            collision.ImpactAgeMilliseconds);
         await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
         if (context.LastCompletedLap is { } lap && lap.EventId != sentLapEventId)
         {
@@ -518,6 +577,11 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                         }
                         PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
                     }
+                    else if (envelope.Type == "pong")
+                    {
+                        var pong = envelope.Payload.Deserialize<RaceClockPong>(EstateRaceWireProtocol.JsonOptions);
+                        if (pong is not null) UpdateNetworkTiming(pong);
+                    }
                     else if (envelope.Type == "error")
                     {
                         var error = envelope.Payload.Deserialize<RaceProtocolError>(EstateRaceWireProtocol.JsonOptions);
@@ -550,6 +614,53 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         }
     }
 
+    private async Task HeartbeatLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await SendAsync(
+                    "ping",
+                    new RaceClockPing(monotonicClock.ElapsedMilliseconds),
+                    cancellationToken).ConfigureAwait(false);
+                await Task.Delay(HeartbeatInterval, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            LogBackgroundFailure(
+                "heartbeat",
+                exception,
+                ref lastSnapshotFailureAt,
+                ref lastSnapshotFailure);
+        }
+    }
+
+    private void UpdateNetworkTiming(RaceClockPong pong)
+    {
+        var receivedMonotonic = monotonicClock.ElapsedMilliseconds;
+        var roundTripMilliseconds = receivedMonotonic - pong.ClientMonotonicMilliseconds;
+        if (roundTripMilliseconds is < 0 or > 30_000) return;
+        var oneWay = TimeSpan.FromMilliseconds(roundTripMilliseconds / 2d);
+        var estimatedServerAtReceive = DateTimeOffset
+            .FromUnixTimeMilliseconds(pong.ServerUnixMilliseconds)
+            .Add(oneWay);
+        var offset = estimatedServerAtReceive - DateTimeOffset.UtcNow;
+        var priorLatency = Interlocked.Read(ref estimatedOneWayLatencyTicks);
+        var priorOffset = Interlocked.Read(ref serverClockOffsetTicks);
+        var latencyTicks = priorLatency == 0
+            ? oneWay.Ticks
+            : (long)Math.Round(priorLatency * 0.8 + oneWay.Ticks * 0.2);
+        var offsetTicks = Volatile.Read(ref hasServerClockEstimate) == 0
+            ? offset.Ticks
+            : (long)Math.Round(priorOffset * 0.8 + offset.Ticks * 0.2);
+        Interlocked.Exchange(ref estimatedOneWayLatencyTicks, latencyTicks);
+        Interlocked.Exchange(ref serverClockOffsetTicks, offsetTicks);
+        Volatile.Write(ref hasServerClockEstimate, 1);
+    }
+
     private void ScheduleReconnect()
     {
         if (intentionalDisconnect || activeProfile is null || runCancellation?.IsCancellationRequested != false)
@@ -568,10 +679,14 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 while (!cancellation.IsCancellationRequested && !intentionalDisconnect)
                 {
                     attempt++;
-                    var delay = TimeSpan.FromSeconds(Math.Min(10, Math.Pow(2, Math.Min(attempt - 1, 3))));
+                    var baseDelaySeconds = attempt == 1
+                        ? 0.5
+                        : Math.Min(10, Math.Pow(2, Math.Min(attempt - 2, 3)));
+                    var delay = TimeSpan.FromSeconds(
+                        baseDelaySeconds * (0.85 + Random.Shared.NextDouble() * 0.30));
                     SetConnectionState(
                         EstateRaceConnectionState.Reconnecting,
-                        $"连接中断，{delay.TotalSeconds:0} 秒后进行第 {attempt} 次重连…");
+                        $"连接中断，{delay.TotalSeconds:0.#} 秒后进行第 {attempt} 次重连…");
                     await Task.Delay(delay, cancellation.Token).ConfigureAwait(false);
                     if (await ConnectOnceAsync(profile, cancellation.Token, isReconnectAttempt: true).ConfigureAwait(false))
                     {
@@ -627,12 +742,16 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         if (activeSocket?.State != WebSocketState.Open)
             throw new InvalidOperationException("赛事服务尚未连接。");
         var bytes = EstateRaceWireProtocol.Serialize(type, Interlocked.Increment(ref sequence), payload);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(string.Equals(type, "telemetry", StringComparison.Ordinal)
+            ? TelemetrySendTimeout
+            : CommandSendTimeout);
         try
         {
-            await sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await sendLock.WaitAsync(timeout.Token).ConfigureAwait(false);
             try
             {
-                await activeSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+                await activeSocket.SendAsync(bytes, WebSocketMessageType.Text, true, timeout.Token).ConfigureAwait(false);
             }
             finally
             {
@@ -642,6 +761,17 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException exception)
+        {
+            activeSocket.Abort();
+            var timeoutException = new TimeoutException(
+                string.Equals(type, "telemetry", StringComparison.Ordinal)
+                    ? "赛事遥测发送超时。"
+                    : "赛事服务命令发送超时。",
+                exception);
+            HandleConnectionInterrupted(timeoutException);
+            throw timeoutException;
         }
         catch (Exception exception) when (
             exception is WebSocketException or ObjectDisposedException or InvalidOperationException)
@@ -663,24 +793,26 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         ClientWebSocket activeSocket,
         CancellationToken cancellationToken)
     {
-        var writer = new ArrayBufferWriter<byte>();
-        var buffer = ArrayPool<byte>.Shared.Rent(4096);
+        var buffer = ArrayPool<byte>.Shared.Rent(EstateRaceWireProtocol.MaximumMessageBytes);
+        var written = 0;
         try
         {
             while (true)
             {
-                var received = await activeSocket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (written >= EstateRaceWireProtocol.MaximumMessageBytes)
+                    throw new JsonException("赛事服务消息超过大小限制。");
+                var received = await activeSocket.ReceiveAsync(
+                    buffer.AsMemory(written, EstateRaceWireProtocol.MaximumMessageBytes - written),
+                    cancellationToken).ConfigureAwait(false);
                 if (received.MessageType == WebSocketMessageType.Close)
                     throw new WebSocketException("赛事服务已关闭连接。");
                 if (received.MessageType != WebSocketMessageType.Text)
                     throw new JsonException("赛事服务返回了非文本消息。");
-                if (writer.WrittenCount + received.Count > EstateRaceWireProtocol.MaximumMessageBytes)
-                    throw new JsonException("赛事服务消息超过大小限制。");
-                writer.Write(buffer.AsSpan(0, received.Count));
+                written += received.Count;
                 if (received.EndOfMessage) break;
             }
             return JsonSerializer.Deserialize<RaceIncomingEnvelope>(
-                       writer.WrittenSpan,
+                       buffer.AsSpan(0, written),
                        EstateRaceWireProtocol.JsonOptions) ??
                    throw new JsonException("赛事服务消息为空。");
         }
@@ -690,7 +822,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         }
     }
 
-    private async Task DisconnectCoreAsync()
+    private async Task DisconnectCoreAsync(bool preserveSessionState = false)
     {
         connectionCancellation?.Cancel();
         var activeSocket = socket;
@@ -723,8 +855,24 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 LogIfInitialized($"Estate race receive task ended with an error: {exception.Message}");
             }
         }
+        var currentHeartbeat = heartbeatTask;
+        heartbeatTask = null;
+        if (currentHeartbeat is not null)
+        {
+            try { await currentHeartbeat.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch (Exception exception)
+            {
+                LogIfInitialized($"Estate race heartbeat task ended with an error: {exception.Message}");
+            }
+        }
         connectionCancellation?.Dispose();
         connectionCancellation = null;
+        if (preserveSessionState)
+        {
+            connectionAuthenticated = false;
+            return;
+        }
         try
         {
             lock (strategySync)
@@ -750,6 +898,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         {
             pitServiceTracker.Reset();
             gripEstimator.Reset();
+            collisionEvidenceDetector.Reset();
             lastValidProjection = null;
         }
         loadedStrategyTrackKey = null;
@@ -771,35 +920,57 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private void PublishSnapshot(EstateRaceConnectionState state, string text)
     {
         var context = trackContext();
-        var outline = context is null
-            ? Array.Empty<EstateRaceMapPoint>()
-            : EstateRaceGeometry.NormalizeOutline(context.Track);
-        var pitOutline = context is null
-            ? Array.Empty<EstateRaceMapPoint>()
-            : EstateRaceGeometry.NormalizePitLane(context.Track, context.Definition.Pit);
-        var startFinishGate = context is null
-            ? (EstateRaceMapGate?)null
-            : EstateRaceGeometry.NormalizeGate(context.Track, context.Definition.StartFinishGate);
-        var trackSectors = context is null
-            ? Array.Empty<EstateRaceMapSector>()
-            : EstateRaceGeometry.NormalizeSectors(context.Track, context.Sectors);
+        var map = TrackMapSnapshot(context);
         Volatile.Write(ref snapshot, new EstateRaceHudState(
             DateTimeOffset.UtcNow,
             state,
             text,
             participantId,
             session,
-            outline,
+            map.TrackOutline,
             gripEstimator.Current,
             GripExplanation(gripEstimator.Current),
             pitServiceTracker.Current,
-            pitOutline,
-            startFinishGate,
-            trackSectors,
+            map.PitOutline,
+            map.StartFinishGate,
+            map.TrackSectors,
             organizerLogo,
             connectionIsObserver,
             pitStrategyPredictor.Current,
-            practiceTestManager.Current));
+            practiceTestManager.Current,
+            TimeSpan.FromTicks(Math.Max(0, Interlocked.Read(ref estimatedOneWayLatencyTicks))),
+            Volatile.Read(ref hasServerClockEstimate) == 0
+                ? null
+                : TimeSpan.FromTicks(Interlocked.Read(ref serverClockOffsetTicks))));
+    }
+
+    private EstateRaceTrackMapSnapshot TrackMapSnapshot(EstateRaceTrackContext? context)
+    {
+        if (context is null) return EstateRaceTrackMapSnapshot.Empty;
+        var key = new EstateRaceTrackMapCacheKey(
+            context.Track.Id,
+            context.Track.UpdatedAt,
+            context.Definition.UpdatedAt,
+            context.Definition.MapRevision,
+            context.Sectors?.Count ?? 0);
+        lock (trackMapCacheSync)
+        {
+            if (trackMapCacheKey != key)
+            {
+                cachedTrackOutline = EstateRaceGeometry.NormalizeOutline(context.Track);
+                cachedPitOutline = EstateRaceGeometry.NormalizePitLane(context.Track, context.Definition.Pit);
+                cachedStartFinishGate = EstateRaceGeometry.NormalizeGate(
+                    context.Track,
+                    context.Definition.StartFinishGate);
+                cachedTrackSectors = EstateRaceGeometry.NormalizeSectors(context.Track, context.Sectors);
+                trackMapCacheKey = key;
+            }
+            return new EstateRaceTrackMapSnapshot(
+                cachedTrackOutline,
+                cachedPitOutline,
+                cachedStartFinishGate,
+                cachedTrackSectors);
+        }
     }
 
     private async Task RefreshOrganizerLogoAsync(
@@ -938,6 +1109,25 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
 
     private static EstateRaceSession NormalizeSession(EstateRaceSession value)
     {
+        if (value.Participants is { Count: <= 12 } participantsFromServer &&
+            value.FastestSectorSeconds is not null &&
+            value.FastestLapSectorSeconds is not null &&
+            value.YellowZones is not null &&
+            value.BlueFlags is not null &&
+            value.Penalties is not null &&
+            value.Investigations is not null &&
+            value.QualifyingSessionMinutes is not null &&
+            value.QualifyingEliminationCounts is not null &&
+            value.PracticeSessionMinutes is not null &&
+            value.Observers is not null &&
+            value.MinimumRequiredPitStops is >= 0 and <= 20 &&
+            participantsFromServer.All(participant =>
+                participant.BestSectorSeconds is not null &&
+                participant.Penalties is not null &&
+                participant.QualifyingSessionBestLapSeconds is not null &&
+                participant.PracticeSessionBestLapSeconds is not null))
+            return value;
+
         var participants = (value.Participants ?? [])
             .Take(12)
             .Select(participant => participant with
@@ -998,6 +1188,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             {
                 pitServiceTracker.Reset();
                 gripEstimator.Reset();
+                collisionEvidenceDetector.Reset();
                 if (resetForConnection) lastValidProjection = null;
             }
             sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
@@ -1233,6 +1424,22 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         RaceGripCondition.Unknown,
         "样本不足，暂不判断",
         EstatePitServiceState.Empty);
+
+    private readonly record struct EstateRaceTrackMapCacheKey(
+        Guid TrackId,
+        DateTimeOffset TrackUpdatedAt,
+        DateTimeOffset DefinitionUpdatedAt,
+        string MapRevision,
+        int SectorCount);
+
+    private sealed record EstateRaceTrackMapSnapshot(
+        IReadOnlyList<EstateRaceMapPoint> TrackOutline,
+        IReadOnlyList<EstateRaceMapPoint> PitOutline,
+        EstateRaceMapGate? StartFinishGate,
+        IReadOnlyList<EstateRaceMapSector> TrackSectors)
+    {
+        public static EstateRaceTrackMapSnapshot Empty { get; } = new([], [], null, []);
+    }
 
     [GeneratedRegex("^#[0-9A-Fa-f]{6}$", RegexOptions.CultureInvariant)]
     private static partial Regex ThemeColorPattern();

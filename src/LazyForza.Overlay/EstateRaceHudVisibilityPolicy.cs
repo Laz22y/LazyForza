@@ -4,6 +4,14 @@ namespace LazyForza.Overlay;
 
 public static class EstateRaceHudVisibilityPolicy
 {
+    public static bool ShouldShowBanner(
+        EstateRaceSession session,
+        EstateRaceBanner? banner,
+        DateTimeOffset estimatedServerNow) =>
+        banner is not null &&
+        !(session.Phase == RaceSessionPhase.Finished && banner.Kind == RaceBannerKind.Winner) &&
+        (banner.ExpiresAt is null || banner.ExpiresAt > estimatedServerNow);
+
     public static bool ShouldShowPracticeProgram(
         EstateRaceHudState state,
         DateTimeOffset? now = null) =>
