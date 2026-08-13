@@ -106,7 +106,9 @@ internal sealed partial class MainWindow
 
         enterRoom.Click += async (_, _) =>
         {
-            if (module.State.IsConnected)
+            if (module.State.IsConnected ||
+                module.State.ConnectionState == EstateRaceConnectionState.Reconnecting &&
+                module.State.Session is not null)
             {
                 await module.DisconnectAsync();
                 UpdateRacePageState();
@@ -377,11 +379,14 @@ internal sealed partial class MainWindow
         void UpdateRacePageState()
         {
             var state = module.State;
+            var roomAttached = state.IsConnected ||
+                               state.ConnectionState == EstateRaceConnectionState.Reconnecting &&
+                               state.Session is not null;
             statusText.Text = state.ConnectionText;
             statusText.Foreground = Brush(ConnectionBrush(state.ConnectionState));
-            statusTitle.Text = state.IsConnected ? state.Session?.SessionName ?? "已进入房间" : "尚未进入房间";
-            enterRoom.Content = state.IsConnected ? "退出房间" : "进入房间";
-            connectedProfile.Text = state.IsConnected && module.ActiveProfile is { } profile
+            statusTitle.Text = roomAttached ? state.Session?.SessionName ?? "已进入房间" : "尚未进入房间";
+            enterRoom.Content = roomAttached ? "退出房间" : "进入房间";
+            connectedProfile.Text = roomAttached && module.ActiveProfile is { } profile
                 ? profile.IsObserver
                     ? $"{profile.DisplayName} · OB 转播 · {profile.ServerAddress}"
                     : $"{profile.DisplayName} · {profile.TeamName ?? "个人参赛"} · {profile.ServerAddress}"
@@ -389,8 +394,8 @@ internal sealed partial class MainWindow
             ready.IsEnabled = state.IsConnected && !state.IsObserver &&
                               state.Session?.Phase is RaceSessionPhase.Lobby or RaceSessionPhase.Grid;
             ready.Visibility = state.IsConnected && !state.IsObserver ? Visibility.Visible : Visibility.Collapsed;
-            connectedContent.Visibility = state.IsConnected ? Visibility.Visible : Visibility.Collapsed;
-            hostingGuide.Visibility = state.IsConnected ? Visibility.Collapsed : Visibility.Visible;
+            connectedContent.Visibility = roomAttached ? Visibility.Visible : Visibility.Collapsed;
+            hostingGuide.Visibility = roomAttached ? Visibility.Collapsed : Visibility.Visible;
             var session = state.Session;
             phaseValue.Text = session is null
                 ? "—"

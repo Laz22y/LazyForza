@@ -1030,7 +1030,12 @@ internal sealed class OverlayLayoutEditorWindow : Window
     {
         var frame = new Border
         {
-            BorderThickness = new Thickness(1.5),
+            // The estate-race surface is a full-window coordinate canvas. A
+            // Border would shrink its child and make every independently drawn
+            // widget disagree with the editor's screen-relative selection box.
+            BorderThickness = kind == EditorHudKind.EstateRace
+                ? new Thickness(0)
+                : new Thickness(1.5),
             CornerRadius = new CornerRadius(3),
             Background = Brushes.Transparent,
             Cursor = Cursors.SizeAll,
@@ -1195,8 +1200,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
             selectedHud == lapHud ? 2.5 : 1.2);
         driftHud.Frame.BorderThickness = new Thickness(
             selectedHud == driftHud ? 2.5 : 1.2);
-        estateRaceHud.Frame.BorderThickness = new Thickness(
-            selectedHud == estateRaceHud ? 2.5 : 1.2);
+        estateRaceHud.Frame.BorderThickness = new Thickness(0);
         var name = selectedHud.Kind switch
         {
             EditorHudKind.Dashboard => "仪表盘 HUD",
@@ -1641,31 +1645,14 @@ internal sealed class OverlayLayoutEditorWindow : Window
             EstateRaceHudWidgetKind.PitLimiter => "维修区限速",
             EstateRaceHudWidgetKind.PenaltyStatus => "罚时指示器",
             EstateRaceHudWidgetKind.PracticeProgram => "练习项目提示",
-            _ => "进站窗口建议"
+            EstateRaceHudWidgetKind.PitWindowSuggestion => "进站窗口建议",
+            _ => "整场进站策略"
         };
 
     private static Size EstateRaceWidgetBaseSize(
         EstateRaceHudWidgetKind kind,
         double width,
-        double height) => kind switch
-        {
-            EstateRaceHudWidgetKind.Leaderboard => new Size(
-                width * 0.235,
-                height * 0.092 + Math.Max(36, height * 0.045) * 12),
-            EstateRaceHudWidgetKind.TrackMap => new Size(
-                Math.Min(width * 0.19, height * 0.28),
-                Math.Min(width * 0.19, height * 0.28)),
-            EstateRaceHudWidgetKind.GripStatus => new Size(
-                width * 0.20,
-                height * 0.095),
-            EstateRaceHudWidgetKind.Banner => new Size(width * 0.50, height * 0.09),
-            EstateRaceHudWidgetKind.StartLights => new Size(width * 0.30, height * 0.09),
-            EstateRaceHudWidgetKind.PitStopInfo => new Size(width * 0.215, height * 0.174),
-            EstateRaceHudWidgetKind.PitLimiter => new Size(height * 0.11, height * 0.11),
-            EstateRaceHudWidgetKind.PracticeProgram => new Size(width * 0.32, height * 0.12),
-            EstateRaceHudWidgetKind.PitWindowSuggestion => new Size(width * 0.19, height * 0.14),
-            _ => new Size(width * 0.27, height * 0.105)
-        };
+        double height) => HudSurface.EstateRaceWidgetNominalSize(kind, width, height);
 
     private void BeginHudDrag(EditorHud hud, MouseButtonEventArgs eventArgs)
     {

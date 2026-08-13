@@ -8,6 +8,18 @@
 dotnet run --project src/LazyForza.App/LazyForza.App.csproj -c Debug -- --capture-qa docs/qa
 ```
 
+地产赛事方格旗顶栏可单独通过真实 WPF Overlay 渲染路径截图：
+
+```powershell
+dotnet run --project src/LazyForza.App/LazyForza.App.csproj -c Release -- --capture-qa docs/qa --capture-estate-race-chequered-qa
+```
+
+地产赛事完赛顶栏可使用同一渲染路径截图：
+
+```powershell
+dotnet run --project src/LazyForza.App/LazyForza.App.csproj -c Release -- --capture-qa docs/qa --capture-estate-race-finished-qa
+```
+
 自动生成：
 
 - `hud-1280x720-demo.png`

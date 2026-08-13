@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using LazyForza.Domain;
 
 namespace LazyForza.Modules.EstateRace;
@@ -12,6 +13,7 @@ internal sealed class EstatePitStrategyPredictor
     private const int MinimumCleanLaps = 3;
     private const int MaximumRetainedLaps = 40;
     private const int MaximumRetainedPitVisits = 16;
+    private static readonly long PredictionRefreshIntervalTicks = Stopwatch.Frequency;
     private readonly Dictionary<Guid, ParticipantObservation> observations = [];
     private readonly List<LapObservation> raceLaps = [];
     private readonly List<PitVisitObservation> pitVisits = [];
@@ -24,6 +26,8 @@ internal sealed class EstatePitStrategyPredictor
     private bool previousWasRaceContext;
     private Guid? activeLocalParticipantId;
     private Guid raceRunId = Guid.NewGuid();
+    private PredictionRefreshKey? lastPredictionRefreshKey;
+    private long nextPredictionRefreshTimestamp;
 
     public EstatePitStrategyPrediction Current { get; private set; } = Unavailable("尚未进入正赛。 ");
 
@@ -60,6 +64,7 @@ internal sealed class EstatePitStrategyPredictor
         if (previousPhase != session.Phase)
         {
             observations.Clear();
+            lastPredictionRefreshKey = null;
         }
         if (raceContext && !previousWasRaceContext)
         {
@@ -114,6 +119,25 @@ internal sealed class EstatePitStrategyPredictor
             return Current;
         }
 
+        var refreshKey = new PredictionRefreshKey(
+            session.Flag,
+            session.TotalRaceLaps,
+            session.MinimumRequiredPitStops,
+            local.Status,
+            local.CompletedLaps,
+            local.CompletedPitServices,
+            local.IsInPitLane,
+            raceLaps.Count,
+            pitVisits.Count,
+            historicalSamples.Count);
+        var now = Stopwatch.GetTimestamp();
+        if (refreshKey == lastPredictionRefreshKey && now < nextPredictionRefreshTimestamp)
+        {
+            return Current;
+        }
+
+        lastPredictionRefreshKey = refreshKey;
+        nextPredictionRefreshTimestamp = now + PredictionRefreshIntervalTicks;
         Current = AttachPitRequirement(BuildPrediction(session, local, context, vehicle), session, local);
         return Current;
     }
@@ -128,6 +152,7 @@ internal sealed class EstatePitStrategyPredictor
         historicalSamples.Clear();
         historicalSamples.AddRange(values);
         historicalTrackKey = values.FirstOrDefault()?.Track.Key;
+        lastPredictionRefreshKey = null;
     }
 
     public IReadOnlyList<EstateStrategySample> DrainSamples()
@@ -150,6 +175,8 @@ internal sealed class EstatePitStrategyPredictor
         previousPhase = null;
         previousWasRaceContext = false;
         activeLocalParticipantId = null;
+        lastPredictionRefreshKey = null;
+        nextPredictionRefreshTimestamp = 0;
         Current = Unavailable("尚未进入正赛。 ");
     }
 
@@ -1132,6 +1159,18 @@ internal sealed class EstatePitStrategyPredictor
         int BoundaryCount,
         int AnomalousCount,
         int PitCount);
+
+    private sealed record PredictionRefreshKey(
+        RaceControlFlag Flag,
+        int TotalRaceLaps,
+        int MinimumRequiredPitStops,
+        RaceParticipantStatus Status,
+        int CompletedLaps,
+        int CompletedPitServices,
+        bool IsInPitLane,
+        int RaceLapSamples,
+        int PitVisitSamples,
+        int HistoricalSamples);
 
     private sealed record StrategyCandidate(int LapsBeforeStop, double Cost);
 }

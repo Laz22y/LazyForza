@@ -11,7 +11,9 @@ public sealed class TelemetryHub : ITelemetryFeed
     private readonly TelemetryOptions options;
     private readonly StreamStatistics statistics = new();
     private readonly ConcurrentDictionary<Guid, Channel<TelemetryFrame>> subscribers = new();
+    private readonly object subscriberSync = new();
     private readonly SemaphoreSlim lifecycleLock = new(1, 1);
+    private Channel<TelemetryFrame>[] subscriberSnapshot = [];
     private CancellationTokenSource? sourceCancellation;
     private Task? sourceTask;
     private TelemetryFrame? latest;
@@ -60,7 +62,11 @@ public sealed class TelemetryHub : ITelemetryFeed
             AllowSynchronousContinuations = false
         });
         var id = Guid.NewGuid();
-        subscribers[id] = channel;
+        lock (subscriberSync)
+        {
+            subscribers[id] = channel;
+            RefreshSubscriberSnapshot();
+        }
 
         await lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -96,7 +102,7 @@ public sealed class TelemetryHub : ITelemetryFeed
         catch (Exception ex)
         {
             lastError = ex.Message;
-            foreach (var subscriber in subscribers.Values)
+            foreach (var subscriber in Volatile.Read(ref subscriberSnapshot))
             {
                 subscriber.Writer.TryComplete(ex);
             }
@@ -107,7 +113,7 @@ public sealed class TelemetryHub : ITelemetryFeed
     {
         Volatile.Write(ref latest, frame);
         statistics.OnPacket(frame);
-        foreach (var subscriber in subscribers.Values)
+        foreach (var subscriber in Volatile.Read(ref subscriberSnapshot))
         {
             subscriber.Writer.TryWrite(frame);
         }
@@ -148,7 +154,13 @@ public sealed class TelemetryHub : ITelemetryFeed
 
     private async ValueTask RemoveAsync(Guid id)
     {
-        if (subscribers.TryRemove(id, out var channel))
+        Channel<TelemetryFrame>? channel;
+        lock (subscriberSync)
+        {
+            subscribers.TryRemove(id, out channel);
+            RefreshSubscriberSnapshot();
+        }
+        if (channel is not null)
         {
             channel.Writer.TryComplete();
         }
@@ -183,6 +195,11 @@ public sealed class TelemetryHub : ITelemetryFeed
         {
             lifecycleLock.Release();
         }
+    }
+
+    private void RefreshSubscriberSnapshot()
+    {
+        Volatile.Write(ref subscriberSnapshot, subscribers.Values.ToArray());
     }
 
     public async ValueTask DisposeAsync()
@@ -231,4 +248,3 @@ public sealed class TelemetryHub : ITelemetryFeed
         }
     }
 }
-

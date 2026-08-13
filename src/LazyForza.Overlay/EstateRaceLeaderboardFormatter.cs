@@ -4,6 +4,30 @@ namespace LazyForza.Overlay;
 
 public static class EstateRaceLeaderboardFormatter
 {
+    public static string FormatFinished(
+        EstateRaceParticipant participant,
+        EstateRaceParticipant? leader,
+        int leaderCompletedLaps)
+    {
+        if (participant.Position == 1) return "WINNER";
+        if (participant.Status == RaceParticipantStatus.Disqualified) return "DSQ";
+        if (participant.Status == RaceParticipantStatus.DidNotFinish) return "DNF";
+
+        var adjustedGap = participant.AdjustedRaceTotalSeconds is double participantTime &&
+                          double.IsFinite(participantTime) &&
+                          leader?.AdjustedRaceTotalSeconds is double leaderTime &&
+                          double.IsFinite(leaderTime)
+            ? participantTime - leaderTime
+            : participant.GapToLeaderSeconds;
+        if (adjustedGap is double gap && double.IsFinite(gap))
+            return FormatDelta(Math.Max(0, gap));
+
+        var lapDeficit = Math.Max(0, leaderCompletedLaps - participant.CompletedLaps);
+        return lapDeficit > 0
+            ? $"+{lapDeficit} {(lapDeficit == 1 ? "LAP" : "LAPS")}"
+            : "—";
+    }
+
     public static string FormatLeaderComparison(EstateRaceParticipant participant, int leaderCompletedLaps)
     {
         if (participant.Position == 1) return "LEADER";
@@ -16,12 +40,13 @@ public static class EstateRaceLeaderboardFormatter
         EstateRaceParticipant? localParticipant,
         bool qualifying,
         bool race,
-        int leaderCompletedLaps)
+        int leaderCompletedLaps,
+        bool showPitStatus = true)
     {
         if (participant.Status == RaceParticipantStatus.Disqualified) return "DSQ";
         if (participant.Status == RaceParticipantStatus.DidNotFinish) return "DNF";
         if (!participant.IsConnected) return "OFFLINE";
-        if (participant.IsInPitLane || participant.IsInServiceZone) return "IN PIT";
+        if (showPitStatus && (participant.IsInPitLane || participant.IsInServiceZone)) return "IN PIT";
 
         var local = participant.Id == localParticipant?.Id;
         if (qualifying)

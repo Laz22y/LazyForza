@@ -38,6 +38,7 @@ public sealed class ShiftLearner
     private readonly Dictionary<int, int> gearMismatchEvidence = [];
     private readonly Dictionary<int, int> powerMismatchEvidence = [];
     private int stableTuneSamples;
+    private ShiftLearningSnapshot? cachedSnapshot;
 
     public ShiftLearner(ShiftLearnerOptions? options = null) => this.options = options ?? new ShiftLearnerOptions();
 
@@ -45,13 +46,15 @@ public sealed class ShiftLearner
     {
         get
         {
-            lock (sync) return BuildSnapshot();
+            lock (sync) return cachedSnapshot ?? RefreshSnapshot();
         }
     }
 
     public void Observe(TelemetryFrame frame)
     {
         lock (sync)
+        {
+        try
         {
         if (frame.Raw.IsRaceOn != 1)
         {
@@ -136,10 +139,13 @@ public sealed class ShiftLearner
         firstAcceptedAt ??= frame.ArrivalTime;
         lastAcceptedAt = frame.ArrivalTime;
         previous = frame;
-        state = BuildCurve().Count(bin => bin.SampleCount >= options.MinimumSamplesPerBin) >= options.MinimumReadyBins &&
-                BuildGears().Count >= 2
-            ? LearningState.Ready
-            : LearningState.Collecting;
+        }
+        finally
+        {
+            // Build curve/gears exactly once for this observation. Snapshot may
+            // be read by several HUD/settings consumers before the next frame.
+            RefreshSnapshot();
+        }
         }
     }
 
@@ -159,6 +165,7 @@ public sealed class ShiftLearner
         lastAcceptedAt = null;
         ClearTuneEvidence();
         configurationRevision++;
+        cachedSnapshot = null;
         }
     }
 
@@ -184,10 +191,24 @@ public sealed class ShiftLearner
         return true;
     }
 
-    private ShiftLearningSnapshot BuildSnapshot()
+    private ShiftLearningSnapshot RefreshSnapshot()
     {
         var curve = BuildCurve();
         var gears = BuildGears();
+        state = fingerprint is null
+            ? LearningState.NotStarted
+            : curve.Count(bin => bin.SampleCount >= options.MinimumSamplesPerBin) >= options.MinimumReadyBins &&
+              gears.Count >= 2
+                ? LearningState.Ready
+                : LearningState.Collecting;
+        cachedSnapshot = BuildSnapshot(curve, gears);
+        return cachedSnapshot;
+    }
+
+    private ShiftLearningSnapshot BuildSnapshot(
+        IReadOnlyList<EngineCurveBin> curve,
+        IReadOnlyList<GearModel> gears)
+    {
         var readyBins = curve.Count(bin => bin.SampleCount >= options.MinimumSamplesPerBin);
         var progress = Math.Clamp(0.75 * readyBins / options.MinimumReadyBins + 0.25 * Math.Min(1, gears.Count / 3d), 0, 1);
         var targets = ShiftPointCalculator.Calculate(curve, gears, fingerprint?.RoundedMaxRpm ?? 0);

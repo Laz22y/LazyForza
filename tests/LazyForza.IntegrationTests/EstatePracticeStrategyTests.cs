@@ -293,6 +293,126 @@ public sealed class EstatePracticeStrategyTests
     }
 
     [TestMethod]
+    public void PitSimulationUsesFullTrackTravelWhenFinishEventIsUnavailableInsidePit()
+    {
+        var manager = new EstatePracticeTestManager();
+        var context = Context();
+        context = context with
+        {
+            Definition = context.Definition with
+            {
+                Pit = context.Definition.Pit! with { StartFinishGate = Gate(50) }
+            }
+        };
+        var local = Participant() with { IsInPitLane = true, TrackProgress = .225 };
+        var inPit = EstatePitServiceState.Empty with { IsInPitLane = true, IsOnPitRoute = true };
+        manager.Start(EstatePracticeTestKind.PitStopSimulation, Session(local), local,
+            context, Vehicle(), inPit);
+
+        local = local with { IsInPitLane = false, TrackProgress = .23 };
+        manager.Observe(Session(local), local.Id, context, EstatePitServiceState.Empty,
+            RaceGripCondition.Unknown, Vehicle(), false);
+        foreach (var progress in new[] { .45, .68, .90 })
+        {
+            local = local with { TrackProgress = progress };
+            manager.Observe(Session(local), local.Id, context, EstatePitServiceState.Empty,
+                RaceGripCondition.Unknown, Vehicle(), false);
+        }
+
+        local = local with
+        {
+            IsInPitLane = true,
+            TrackProgress = .02,
+            PitLaneElapsedSeconds = 8.4,
+            CompletedPitServices = 1,
+            PitServiceRequirementMet = true
+        };
+        inPit = inPit with
+        {
+            PitLaneElapsedSeconds = 8.4,
+            CompletedServices = 1,
+            RequirementMet = true,
+            IsInServiceZone = true
+        };
+        manager.Observe(Session(local), local.Id, context, inPit,
+            RaceGripCondition.Unknown, Vehicle(), false);
+
+        local = local with { IsInPitLane = false, PitLaneElapsedSeconds = 0 };
+        manager.Observe(Session(local), local.Id, context, EstatePitServiceState.Empty,
+            RaceGripCondition.Unknown, Vehicle(), false);
+
+        var sample = manager.DrainSamples().Single();
+        Assert.AreEqual(EstateStrategySampleKind.PitStop, sample.Kind);
+        Assert.AreEqual(8.4, sample.PitLaneElapsedSeconds!.Value, 0.01);
+        Assert.AreEqual(EstatePracticeTestStatus.Completed,
+            manager.Current.Items.Single(item => item.Kind == EstatePracticeTestKind.PitStopSimulation).Status);
+    }
+
+    [TestMethod]
+    public void PitSimulationRejectsImmediateShortcutBackToPitWithoutFullTrackTravel()
+    {
+        var manager = new EstatePracticeTestManager();
+        var context = Context();
+        var local = Participant() with { IsInPitLane = true, TrackProgress = .225 };
+        var inPit = EstatePitServiceState.Empty with { IsInPitLane = true, IsOnPitRoute = true };
+        manager.Start(EstatePracticeTestKind.PitStopSimulation, Session(local), local,
+            context, Vehicle(), inPit);
+
+        local = local with { IsInPitLane = false, TrackProgress = .23 };
+        manager.Observe(Session(local), local.Id, context, EstatePitServiceState.Empty,
+            RaceGripCondition.Unknown, Vehicle(), false);
+        local = local with { TrackProgress = .35 };
+        manager.Observe(Session(local), local.Id, context, EstatePitServiceState.Empty,
+            RaceGripCondition.Unknown, Vehicle(), false);
+        local = local with
+        {
+            IsInPitLane = true,
+            CompletedPitServices = 1,
+            PitServiceRequirementMet = true,
+            PitLaneElapsedSeconds = 7
+        };
+        inPit = inPit with
+        {
+            CompletedServices = 1,
+            RequirementMet = true,
+            PitLaneElapsedSeconds = 7
+        };
+        manager.Observe(Session(local), local.Id, context, inPit,
+            RaceGripCondition.Unknown, Vehicle(), false);
+        local = local with { IsInPitLane = false };
+        manager.Observe(Session(local), local.Id, context, EstatePitServiceState.Empty,
+            RaceGripCondition.Unknown, Vehicle(), false);
+
+        Assert.HasCount(0, manager.DrainSamples());
+        var item = manager.Current.Items.Single(candidate =>
+            candidate.Kind == EstatePracticeTestKind.PitStopSimulation);
+        Assert.AreEqual(EstatePracticeTestStatus.Failed, item.Status);
+        StringAssert.Contains(item.LastResult, "没有完成一整圈");
+    }
+
+    [TestMethod]
+    public void LongTerminalPracticeGuidanceExtendsHudUntilMarqueeCanFinish()
+    {
+        var manager = new EstatePracticeTestManager();
+        var context = Context();
+        var local = Participant();
+        manager.Start(EstatePracticeTestKind.PitStopSimulation, Session(local), local,
+            context, Vehicle(), EstatePitServiceState.Empty);
+
+        local = local with { TrackLimitWarnings = 1 };
+        manager.Observe(Session(local), local.Id, context, EstatePitServiceState.Empty,
+            RaceGripCondition.Unknown, Vehicle(), false);
+
+        var item = manager.Current.Items.Single(candidate =>
+            candidate.Kind == EstatePracticeTestKind.PitStopSimulation);
+        Assert.IsNotNull(item.HudVisibleFrom);
+        Assert.IsNotNull(item.HudVisibleUntil);
+        Assert.IsTrue(
+            item.HudVisibleUntil!.Value - item.HudVisibleFrom!.Value > TimeSpan.FromSeconds(5),
+            "长文本应为完整滚动预留超过最低五秒的显示时间。 ");
+    }
+
+    [TestMethod]
     public void QualifyingSimulationUsesPreparationLapThenSavesOneFlyingLap()
     {
         var manager = new EstatePracticeTestManager();

@@ -433,6 +433,21 @@ public sealed class EstateRaceGeometryTests
             },
             now),
             "方格旗后不能再显示要求车手进站执行处罚的指示器。");
+
+        var winnerBanner = new EstateRaceBanner(
+            Guid.NewGuid(),
+            RaceBannerKind.Winner,
+            "比赛胜者",
+            participant.DisplayName,
+            participant.Id,
+            now,
+            null);
+        Assert.IsTrue(EstateRaceHudVisibilityPolicy.ShouldShowBanner(session, winnerBanner, now));
+        Assert.IsFalse(EstateRaceHudVisibilityPolicy.ShouldShowBanner(
+            session with { Phase = RaceSessionPhase.Finished },
+            winnerBanner,
+            now),
+            "完赛排行榜已经持续显示胜者，通知栏不应再常驻胜者横幅。");
     }
 
     [DataTestMethod]

@@ -84,6 +84,60 @@ public sealed class EstateRaceClientModuleTests
             "OB 观看正赛时，榜首应显示 LEADER。");
         Assert.AreEqual("+1.472",
             EstateRaceLeaderboardFormatter.Format(trailing, null, false, true, 4));
+
+        var finishedLeader = leader with { AdjustedRaceTotalSeconds = 600.250 };
+        var finishedLocal = local with { AdjustedRaceTotalSeconds = 601.082 };
+        Assert.AreEqual("WINNER",
+            EstateRaceLeaderboardFormatter.FormatFinished(finishedLeader, finishedLeader, 4),
+            "完赛后所有客户端都应把榜首标为 WINNER，不能再按本机视角显示。 ");
+        Assert.AreEqual("+0.832",
+            EstateRaceLeaderboardFormatter.FormatFinished(finishedLocal, finishedLeader, 4),
+            "完赛差值应优先使用已包含赛后加罚的总时间。 ");
+        Assert.AreEqual("+1 LAP",
+            EstateRaceLeaderboardFormatter.FormatFinished(
+                trailing with
+                {
+                    AdjustedRaceTotalSeconds = null,
+                    GapToLeaderSeconds = null,
+                    CompletedLaps = 3
+                },
+                finishedLeader,
+                4));
+    }
+
+    [TestMethod]
+    public void RaceLeaderboardDeltaRefreshesEveryThreeSecondsButPitStatusRemainsImmediate()
+    {
+        var now = DateTimeOffset.Parse("2026-08-13T12:00:00Z");
+        var leader = Participant(Guid.NewGuid()) with
+        {
+            Position = 1,
+            GapToLeaderSeconds = 0,
+            CompletedLaps = 4
+        };
+        var local = Participant(Guid.NewGuid()) with
+        {
+            Position = 2,
+            GapToLeaderSeconds = 1,
+            CompletedLaps = 4
+        };
+        var cache = new EstateRaceLeaderboardRefreshCache();
+        var initial = new[] { leader, local };
+        Assert.AreEqual("-1.000", cache.Format(leader, local, false, true, initial, now));
+
+        var changedLeader = leader with { GapToLeaderSeconds = 0 };
+        var changedLocal = local with { GapToLeaderSeconds = 3.5 };
+        var changed = new[] { changedLeader, changedLocal };
+        Assert.AreEqual("-1.000",
+            cache.Format(changedLeader, changedLocal, false, true, changed, now.AddSeconds(2.9)),
+            "正赛多人秒差在三秒刷新窗口内应保持稳定，避免 HUD 高频重排。 ");
+        Assert.AreEqual("-3.500",
+            cache.Format(changedLeader, changedLocal, false, true, changed, now.AddSeconds(3)),
+            "三秒到期后应显示服务端最新秒差。 ");
+        Assert.AreEqual("IN PIT",
+            cache.Format(changedLeader with { IsInPitLane = true }, changedLocal, false, true,
+                [changedLeader with { IsInPitLane = true }, changedLocal], now.AddSeconds(3.1)),
+            "进站等状态不能被三秒差值缓存延迟。 ");
     }
 
     [TestMethod]
@@ -170,6 +224,128 @@ public sealed class EstateRaceClientModuleTests
     }
 
     [TestMethod]
+    public void StartSequenceBannerUsesWholeSecondCountdownAndNewInstruction()
+    {
+        var now = DateTimeOffset.Parse("2026-08-13T12:00:00Z");
+        var banner = new EstateRaceBanner(
+            Guid.NewGuid(),
+            RaceBannerKind.Information,
+            "准备发车",
+            "旧提示",
+            null,
+            now,
+            now.AddSeconds(10));
+        var session = OverlayLayoutPreviewState.EstateRace(now).Session! with
+        {
+            Phase = RaceSessionPhase.Countdown,
+            StartSequenceAt = now.AddSeconds(10),
+            Banner = banner
+        };
+
+        Assert.AreEqual(
+            "10 秒后启动发车程序",
+            HudSurface.ApplyStartSequenceCountdown(session, banner, now)?.Detail);
+        Assert.AreEqual(
+            "10 秒后启动发车程序",
+            HudSurface.ApplyStartSequenceCountdown(session, banner, now.AddMilliseconds(1))?.Detail,
+            "倒计时应按整秒边界更新，不能显示连续变化的小数秒。 ");
+        Assert.AreEqual(
+            "9 秒后启动发车程序",
+            HudSurface.ApplyStartSequenceCountdown(session, banner, now.AddSeconds(1))?.Detail);
+        Assert.AreEqual(
+            "0 秒后启动发车程序",
+            HudSurface.ApplyStartSequenceCountdown(session, banner, now.AddSeconds(10))?.Detail);
+    }
+
+    [TestMethod]
+    public void RaceStartInformationBannerIsSuppressedAfterLightsOut()
+    {
+        var now = DateTimeOffset.Parse("2026-08-13T12:00:00Z");
+        var banner = new EstateRaceBanner(
+            Guid.NewGuid(), RaceBannerKind.Information, "比赛开始", "测试正赛",
+            null, now, now.AddSeconds(4));
+        var session = OverlayLayoutPreviewState.EstateRace(now).Session! with
+        {
+            Phase = RaceSessionPhase.Race,
+            StartLightsOut = true,
+            Banner = banner
+        };
+
+        Assert.IsTrue(HudSurface.ShouldSuppressRaceStartBanner(session, banner));
+        Assert.IsFalse(HudSurface.ShouldSuppressRaceStartBanner(
+            session with { StartLightsOut = false }, banner));
+        Assert.IsFalse(HudSurface.ShouldSuppressRaceStartBanner(
+            session, banner with { Title = "赛事通知" }));
+    }
+
+    [TestMethod]
+    public void LeaderboardMovesPitAndFinishStatesIntoDedicatedBadges()
+    {
+        var now = DateTimeOffset.Parse("2026-08-13T12:00:00Z");
+        var driver = Participant(Guid.NewGuid()) with
+        {
+            Position = 1,
+            BestLapSeconds = 68.432,
+            IsInPitLane = true,
+            Status = RaceParticipantStatus.InPitLane
+        };
+        var practice = OverlayLayoutPreviewState.EstateRace(now).Session! with
+        {
+            Phase = RaceSessionPhase.Practice,
+            Participants = [driver],
+            PracticeTimeExpired = false
+        };
+
+        Assert.IsTrue(HudSurface.ShouldShowLeaderboardPitBadge(practice, driver));
+        Assert.AreEqual("1:08.432", EstateRaceLeaderboardFormatter.Format(
+            driver, driver, qualifying: true, race: false, 0, showPitStatus: false),
+            "维修区图标出现后，原秒差区域仍应显示正常圈速。 ");
+        Assert.AreEqual("IN PIT", EstateRaceLeaderboardFormatter.Format(
+            driver, driver, qualifying: true, race: false, 0),
+            "正赛进行中的兼容路径仍需保留原 IN PIT 文本。 ");
+        Assert.IsFalse(HudSurface.ShouldShowLeaderboardPitBadge(
+            practice with { Phase = RaceSessionPhase.Race }, driver));
+        Assert.IsTrue(HudSurface.ShouldShowLeaderboardFinishBadge(
+            practice with { PracticeTimeExpired = true },
+            driver with { PracticeFinalLapPending = false }));
+        Assert.IsTrue(HudSurface.ShouldShowLeaderboardFinishBadge(
+            practice with { Phase = RaceSessionPhase.Finished },
+            driver with { Status = RaceParticipantStatus.Finished }));
+    }
+
+    [TestMethod]
+    public void QualifyingEliminationStylingSeparatesAtRiskAndEliminatedDrivers()
+    {
+        var now = DateTimeOffset.Parse("2026-08-13T12:00:00Z");
+        var participants = Enumerable.Range(1, 12)
+            .Select(position => Participant(Guid.NewGuid()) with { Position = position })
+            .ToArray();
+        var session = OverlayLayoutPreviewState.EstateRace(now).Session! with
+        {
+            Phase = RaceSessionPhase.Qualifying,
+            QualifyingSessionNumber = 1,
+            QualifyingSessionCount = 3,
+            QualifyingEliminationCounts = [3, 3, 0],
+            Participants = participants
+        };
+
+        Assert.AreEqual(QualifyingEliminationVisualState.None,
+            HudSurface.QualifyingEliminationState(session, participants[8]));
+        Assert.AreEqual(QualifyingEliminationVisualState.AtRisk,
+            HudSurface.QualifyingEliminationState(session, participants[9]));
+        Assert.AreEqual(QualifyingEliminationVisualState.AtRisk,
+            HudSurface.QualifyingEliminationState(session, participants[11]));
+        Assert.AreEqual(QualifyingEliminationVisualState.Eliminated,
+            HudSurface.QualifyingEliminationState(
+                session,
+                participants[11] with
+                {
+                    QualifyingEligible = false,
+                    QualifyingEliminatedInSession = 1
+                }));
+    }
+
+    [TestMethod]
     public void LeaderboardInvestigationMarkerOnlyTracksPendingRecordsForThatDriver()
     {
         var now = DateTimeOffset.Parse("2026-08-12T12:00:00Z");
@@ -181,8 +357,9 @@ public sealed class EstateRaceClientModuleTests
             Investigations =
             [
                 new EstateRaceInvestigation(
-                    Guid.NewGuid(), driver.Id, "疑似切弯获利", now, 3,
-                    RaceInvestigationStatus.Pending),
+                    Guid.NewGuid(), driver.Id, "疑似车辆接触", now, 3,
+                    RaceInvestigationStatus.Pending,
+                    RelatedParticipantIds: [driver.Id, other.Id]),
                 new EstateRaceInvestigation(
                     Guid.NewGuid(), other.Id, "已处理事件", now, 2,
                     RaceInvestigationStatus.Dismissed)
@@ -190,7 +367,7 @@ public sealed class EstateRaceClientModuleTests
         };
 
         Assert.IsTrue(HudSurface.HasPendingInvestigation(session, driver.Id));
-        Assert.IsFalse(HudSurface.HasPendingInvestigation(session, other.Id));
+        Assert.IsTrue(HudSurface.HasPendingInvestigation(session, other.Id));
     }
 
     [TestMethod]
@@ -547,7 +724,14 @@ public sealed class EstateRaceClientModuleTests
                     uploaded = await received.Reader.WaitToReadAsync(noTelemetryTimeout.Token);
                 }
                 catch (OperationCanceledException) { }
-                Assert.IsFalse(uploaded, "OB 客户端不得上传遥测或圈速消息。");
+                if (uploaded)
+                {
+                    while (received.Reader.TryRead(out var observerEnvelope))
+                        Assert.AreEqual(
+                            "ping",
+                            observerEnvelope.Type,
+                            "OB 只能发送连接保活/时钟校准，不得上传遥测、圈速或准备状态。");
+                }
             }
             finally
             {
@@ -619,6 +803,12 @@ public sealed class EstateRaceClientModuleTests
             {
                 await module.ConnectAsync(new EstateRaceConnectionProfile(
                     address, "secret-race-password", "重连车手", "#42D7E8", null), CancellationToken.None);
+                await WaitUntilAsync(
+                    () => module.State.ConnectionState == EstateRaceConnectionState.Reconnecting,
+                    TimeSpan.FromSeconds(3));
+                Assert.IsNotNull(module.State.Session,
+                    "短暂断线重连期间应保留最后一次赛事快照，HUD 不应消失。 ");
+                Assert.AreEqual(participantId, module.State.LocalParticipantId);
                 await WaitUntilAsync(
                     () => Volatile.Read(ref connectionCount) >= 2 && module.State.ConnectionState == EstateRaceConnectionState.Connected,
                     TimeSpan.FromSeconds(6));

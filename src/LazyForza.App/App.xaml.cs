@@ -57,7 +57,10 @@ public partial class App : Application
             var captureEstateRaceFinishedQa = e.Args.Contains(
                 "--capture-estate-race-finished-qa",
                 StringComparer.OrdinalIgnoreCase);
-            var captureEstateRaceQa = captureEstateRaceFinishedQa || e.Args.Contains(
+            var captureEstateRaceChequeredQa = e.Args.Contains(
+                "--capture-estate-race-chequered-qa",
+                StringComparer.OrdinalIgnoreCase);
+            var captureEstateRaceQa = captureEstateRaceFinishedQa || captureEstateRaceChequeredQa || e.Args.Contains(
                 "--capture-estate-race-qa",
                 StringComparer.OrdinalIgnoreCase);
             var recordSeconds = AutoRecordSeconds(e.Args);
@@ -165,7 +168,8 @@ public partial class App : Application
                     captureDriftOnlyQa,
                     captureEstateQa,
                     captureEstateRaceQa,
-                    captureEstateRaceFinishedQa);
+                    captureEstateRaceFinishedQa,
+                    captureEstateRaceChequeredQa);
             }
             else if (recordSeconds is not null) _ = AutoRecordAndExitAsync(recordSeconds.Value);
         }
@@ -314,7 +318,8 @@ public partial class App : Application
         bool captureDriftOnlyQa,
         bool captureEstateQa,
         bool captureEstateRaceQa,
-        bool captureEstateRaceFinishedQa)
+        bool captureEstateRaceFinishedQa,
+        bool captureEstateRaceChequeredQa)
     {
         try
         {
@@ -362,17 +367,20 @@ public partial class App : Application
                 await overlay.SetLayoutAsync(
                     captureLayout,
                     CancellationToken.None);
-                await Task.Delay(220);
+                await Task.Delay(captureEstateRaceChequeredQa ? 900 : 220);
                 await overlay.CapturePngAsync(
                     Path.Combine(
                         directory,
                         captureEstateRaceFinishedQa
                             ? $"hud-{size.Width:0}x{size.Height:0}-estate-finished.png"
+                            : captureEstateRaceChequeredQa
+                                ? $"hud-{size.Width:0}x{size.Height:0}-estate-chequered.png"
                             : $"hud-{size.Width:0}x{size.Height:0}-demo.png"),
                     CancellationToken.None,
                     previewDrift: captureDriftQa || captureDriftOnlyQa,
                     previewEstateRace: captureEstateRaceQa,
-                    previewEstateRaceFinished: captureEstateRaceFinishedQa);
+                    previewEstateRaceFinished: captureEstateRaceFinishedQa,
+                    previewEstateRaceChequered: captureEstateRaceChequeredQa);
             }
             await overlay.SetLayoutAsync(original, CancellationToken.None);
         }

@@ -8,7 +8,7 @@ internal sealed class EstatePracticeTestManager
     private const double LongRunFallbackDistanceMeters = 20_000;
     private const int MinimumLongRunLaps = 5;
     private const int MaximumLongRunLaps = 12;
-    private static readonly TimeSpan TerminalHudDuration = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan MinimumTerminalHudDuration = TimeSpan.FromSeconds(5);
     private readonly Dictionary<EstatePracticeTestKind, TestResult> results = [];
     private readonly Queue<EstateStrategySample> pendingSamples = new();
     private ActiveTest? active;
@@ -61,7 +61,8 @@ internal sealed class EstatePracticeTestManager
             ActivePenaltyIds(local),
             local.CompletedPitServices,
             pitService.IsInPitLane,
-            currentLongRunTargetLaps);
+            currentLongRunTargetLaps,
+            local.TrackProgress);
         driverInterventionDetected = false;
         results.Remove(kind);
         Current = BuildPanel();
@@ -253,15 +254,12 @@ internal sealed class EstatePracticeTestManager
             case TestStage.AwaitingPitExit:
                 if (!pitService.IsInPitLane && active.WasInPitLane)
                 {
-                    active.Stage = TestStage.OutLap;
-                    active.LastLapEventId = context.LastCompletedLap?.EventId;
-                    active.OutLapStartCompletedLaps = local.CompletedLaps;
-                    active.ServiceBaseline = Math.Max(local.CompletedPitServices, pitService.CompletedServices);
-                    active.PitElapsedMaximum = 0;
+                    ArmPitSimulationOutLap(active, local, context, pitService);
                 }
                 active.WasInPitLane = pitService.IsInPitLane;
                 return;
             case TestStage.OutLap:
+                ObserveOutLapProgress(active, local, pitService);
                 if (TryTakeLap(context, out var outLap))
                 {
                     if (!ValidLap(outLap, out var outLapReason))
@@ -269,60 +267,61 @@ internal sealed class EstatePracticeTestManager
                         FinishAutomatically(EstatePracticeTestStatus.Failed, outLapReason);
                         return;
                     }
+                    active.OutLapEvidenceSatisfied = true;
                     active.OutLapCompletedLaps = local.CompletedLaps;
-                    if (pitService.IsInPitLane)
-                    {
-                        BeginPitSimulationVisit(active, local, pitService);
-                        active.Stage = HasCompletedService(active, local, pitService)
-                            ? TestStage.FinalPitExit
-                            : TestStage.Servicing;
-                    }
-                    else
-                    {
-                        active.Stage = TestStage.ReturnToPit;
-                    }
-                    return;
                 }
                 if (pitService.IsInPitLane)
                 {
-                    if (!CanCompleteOutLapThroughPit(context))
-                    {
-                        FinishAutomatically(EstatePracticeTestStatus.Failed, "出站圈尚未完成就再次进站，测试已终止。 ");
-                        return;
-                    }
                     BeginPitSimulationVisit(active, local, pitService);
-                    active.Stage = TestStage.OutLapInPit;
+                    active.OutLapEvidenceSatisfied |= HasSufficientOutLapProgress(active, context);
+                    active.ServiceCompletedDuringPitVisit |= HasCompletedService(active, local, pitService);
+                    active.Stage = active.OutLapEvidenceSatisfied
+                        ? active.ServiceCompletedDuringPitVisit
+                            ? TestStage.FinalPitExit
+                            : TestStage.Servicing
+                        : TestStage.OutLapInPit;
                     return;
                 }
+                if (active.OutLapEvidenceSatisfied)
+                    active.Stage = TestStage.ReturnToPit;
                 return;
             case TestStage.OutLapInPit:
                 if (!pitService.IsInPitLane)
                 {
-                    FinishAutomatically(EstatePracticeTestStatus.Failed, "尚未通过维修区内的起终点线并完成模拟换胎就驶离维修区，测试已终止。 ");
+                    var reason = !active.OutLapEvidenceSatisfied
+                        ? "没有完成一整圈的有效行程就驶离维修区，测试已终止。 "
+                        : "尚未完成模拟换胎就驶离维修区，测试已终止。 ";
+                    FinishAutomatically(EstatePracticeTestStatus.Failed, reason);
                     return;
                 }
                 active.ServiceCompletedDuringPitVisit |= HasCompletedService(active, local, pitService);
-                if (!TryTakeLap(context, out var pitOutLap)) return;
-                if (!ValidLap(pitOutLap, out var pitOutLapReason))
+                if (TryTakeLap(context, out var pitOutLap))
                 {
-                    FinishAutomatically(EstatePracticeTestStatus.Failed, pitOutLapReason);
-                    return;
+                    if (!ValidLap(pitOutLap, out var pitOutLapReason))
+                    {
+                        FinishAutomatically(EstatePracticeTestStatus.Failed, pitOutLapReason);
+                        return;
+                    }
+                    active.OutLapEvidenceSatisfied = true;
+                    active.OutLapCompletedLaps = local.CompletedLaps;
                 }
-                active.OutLapCompletedLaps = local.CompletedLaps;
-                active.Stage = active.ServiceCompletedDuringPitVisit
-                    ? TestStage.FinalPitExit
-                    : TestStage.Servicing;
+                active.OutLapEvidenceSatisfied |= HasSufficientOutLapProgress(active, context);
+                if (active.OutLapEvidenceSatisfied)
+                    active.Stage = active.ServiceCompletedDuringPitVisit
+                        ? TestStage.FinalPitExit
+                        : TestStage.Servicing;
                 return;
             case TestStage.ReturnToPit:
                 if (pitService.IsInPitLane)
                 {
                     BeginPitSimulationVisit(active, local, pitService);
-                    active.Stage = HasCompletedService(active, local, pitService)
+                    active.ServiceCompletedDuringPitVisit |= HasCompletedService(active, local, pitService);
+                    active.Stage = active.ServiceCompletedDuringPitVisit
                         ? TestStage.FinalPitExit
                         : TestStage.Servicing;
                     return;
                 }
-                if (local.CompletedLaps > active.OutLapCompletedLaps)
+                if (TryTakeLap(context, out _))
                     FinishAutomatically(EstatePracticeTestStatus.Failed, "完成出站圈后没有立即进站，测试已终止。 ");
                 return;
             case TestStage.Servicing:
@@ -331,8 +330,7 @@ internal sealed class EstatePracticeTestManager
                     FinishAutomatically(EstatePracticeTestStatus.Failed, "尚未完成模拟换胎就离开维修区，测试已终止。 ");
                     return;
                 }
-                if (local.CompletedPitServices > active.ServiceBaseline ||
-                    pitService.CompletedServices > active.ServiceBaseline)
+                if (HasCompletedService(active, local, pitService))
                 {
                     active.ServiceCompletedDuringPitVisit = true;
                     active.Stage = TestStage.FinalPitExit;
@@ -358,7 +356,6 @@ internal sealed class EstatePracticeTestManager
         EstateRaceParticipant local,
         EstatePitServiceState pitService)
     {
-        test.ServiceBaseline = Math.Max(local.CompletedPitServices, pitService.CompletedServices);
         test.PitElapsedMaximum = Math.Max(local.PitLaneElapsedSeconds, pitService.PitLaneElapsedSeconds);
         test.WasInPitLane = true;
         test.ServiceCompletedDuringPitVisit = false;
@@ -368,25 +365,65 @@ internal sealed class EstatePracticeTestManager
         ActiveTest test,
         EstateRaceParticipant local,
         EstatePitServiceState pitService) =>
+        local.PitServiceRequirementMet ||
+        pitService.RequirementMet ||
         local.CompletedPitServices > test.ServiceBaseline ||
         pitService.CompletedServices > test.ServiceBaseline;
 
-    private static bool CanCompleteOutLapThroughPit(EstateRaceTrackContext context)
+    private static void ArmPitSimulationOutLap(
+        ActiveTest test,
+        EstateRaceParticipant local,
+        EstateRaceTrackContext context,
+        EstatePitServiceState pitService)
+    {
+        test.Stage = TestStage.OutLap;
+        test.LastLapEventId = context.LastCompletedLap?.EventId;
+        test.OutLapStartCompletedLaps = local.CompletedLaps;
+        test.OutLapCompletedLaps = local.CompletedLaps;
+        test.ServiceBaseline = Math.Max(local.CompletedPitServices, pitService.CompletedServices);
+        test.PitElapsedMaximum = 0;
+        test.OutLapProgress = 0;
+        test.LastTrackProgress = NormalizeProgress(local.TrackProgress);
+        test.OutLapEvidenceSatisfied = false;
+    }
+
+    private static void ObserveOutLapProgress(
+        ActiveTest test,
+        EstateRaceParticipant local,
+        EstatePitServiceState pitService)
+    {
+        if (pitService.IsInPitLane || !double.IsFinite(local.TrackProgress)) return;
+        var current = NormalizeProgress(local.TrackProgress);
+        var delta = current - test.LastTrackProgress;
+        if (delta < -0.55) delta += 1;
+        if (delta is > 0 and <= 0.35)
+            test.OutLapProgress = Math.Min(1.25, test.OutLapProgress + delta);
+        test.LastTrackProgress = current;
+    }
+
+    private static bool HasSufficientOutLapProgress(
+        ActiveTest test,
+        EstateRaceTrackContext context)
     {
         var pit = context.Definition.Pit;
-        if (pit?.StartFinishGate is not EstateTimingGate pitFinish || pit.CenterLine.Count < 2)
-            return false;
-        var entryProgress = EstateRaceGeometry.PitGateProgress(pit, pit.EntryGate);
-        var finishProgress = EstateRaceGeometry.PitGateProgress(pit, pitFinish);
-        var exitProgress = EstateRaceGeometry.PitGateProgress(pit, pit.ExitGate);
-        var upperBound = Math.Max(exitProgress, EstateRaceGeometry.ProjectPitRoute(
-            pit,
-            new Vector3F(
-                (float)pit.CenterLine[^1].X,
-                (float)pit.CenterLine[^1].Y,
-                (float)pit.CenterLine[^1].Z)).TotalLengthMeters);
-        return finishProgress >= entryProgress - 0.75 && finishProgress <= upperBound + 0.75;
+        if (pit is null || context.Track.LengthMeters <= 0)
+            return test.OutLapProgress >= 0.65;
+        static Vector3F Center(EstateTimingGate gate) => new(
+            (float)((gate.Left.X + gate.Right.X) / 2),
+            (float)((gate.Left.Y + gate.Right.Y) / 2),
+            (float)((gate.Left.Z + gate.Right.Z) / 2));
+        var exit = EstateRaceGeometry.Project(context.Track, Center(pit.ExitGate)).Progress;
+        var entry = EstateRaceGeometry.Project(context.Track, Center(pit.EntryGate)).Progress;
+        var expected = entry - exit;
+        if (expected < 0) expected += 1;
+        var required = double.IsFinite(expected) && expected is > 0.20 and <= 1
+            ? Math.Clamp(expected - 0.18, 0.55, 0.82)
+            : 0.65;
+        return test.OutLapProgress >= required;
     }
+
+    private static double NormalizeProgress(double value) =>
+        double.IsFinite(value) ? Math.Clamp(value, 0, 1) % 1 : 0;
 
     private void ObserveQualifying(
         EstateRaceParticipant local,
@@ -504,10 +541,14 @@ internal sealed class EstatePracticeTestManager
     {
         if (active is null) return;
         var kind = active.Kind;
-        var hudVisibleUntil = status is EstatePracticeTestStatus.Completed or EstatePracticeTestStatus.Failed
-            ? DateTimeOffset.UtcNow + TerminalHudDuration
+        var terminalMessage = message.Trim();
+        var hudVisibleFrom = status is EstatePracticeTestStatus.Completed or EstatePracticeTestStatus.Failed
+            ? DateTimeOffset.UtcNow
             : (DateTimeOffset?)null;
-        results[kind] = new TestResult(status, message.Trim(), hudVisibleUntil);
+        var hudVisibleUntil = hudVisibleFrom is DateTimeOffset visibleFrom
+            ? visibleFrom + TerminalHudDuration(status, terminalMessage)
+            : (DateTimeOffset?)null;
+        results[kind] = new TestResult(status, terminalMessage, hudVisibleFrom, hudVisibleUntil);
         if (sample is not null) pendingSamples.Enqueue(sample);
         active = null;
         driverInterventionDetected = false;
@@ -560,7 +601,8 @@ internal sealed class EstatePracticeTestManager
                 result.Status == EstatePracticeTestStatus.Completed ? TargetFor(kind) : 0,
                 TargetFor(kind),
                 result.Message,
-                result.HudVisibleUntil);
+                result.HudVisibleUntil,
+                result.HudVisibleFrom);
         }
         return new EstatePracticeTestItemState(
             kind,
@@ -581,6 +623,28 @@ internal sealed class EstatePracticeTestManager
         _ => result.Message
     };
 
+    private static TimeSpan TerminalHudDuration(
+        EstatePracticeTestStatus status,
+        string message)
+    {
+        var guidance = status switch
+        {
+            EstatePracticeTestStatus.Completed =>
+                $"项目成功：{message} 请返回维修区，等待下一项安排。",
+            EstatePracticeTestStatus.Failed =>
+                $"项目失败：{message} 请返回维修区，确认车辆和赛道状态后可重新开始。",
+            _ => message
+        };
+        var visualUnits = guidance.Sum(character => character <= 0x7F ? 0.55 : 1.0);
+        const double compactHudVisibleUnits = 32;
+        var overflowUnits = Math.Max(0, visualUnits - compactHudVisibleUnits);
+        var requiredSeconds = 2.4 + overflowUnits / 3.6;
+        return TimeSpan.FromSeconds(Math.Clamp(
+            Math.Max(MinimumTerminalHudDuration.TotalSeconds, requiredSeconds),
+            MinimumTerminalHudDuration.TotalSeconds,
+            45));
+    }
+
     private static (string Title, string Description, string ReadyGuidance) Metadata(
         EstatePracticeTestKind kind,
         int longRunTargetLaps) => kind switch
@@ -591,8 +655,8 @@ internal sealed class EstatePracticeTestManager
             "开始后先完整通过一次终点线，随后连续跑完系统指定圈数。"),
         EstatePracticeTestKind.PitStopSimulation => (
             "进站换胎模拟",
-            "从维修区驶出，完成出站圈后立即进站并完成一次模拟换胎。",
-            "系统会检查维修区超速、处罚、出站圈和完整维修区用时。"),
+            "从维修区出口开始，完成一整圈后按正常路线进站并完成一次模拟换胎。",
+            "开始后先进入维修区并从出口驶出；系统会同时核对圈线、赛道行程、限速和完整维修区用时。"),
         _ => (
             "排位赛模拟",
             "完成准备圈后跑一个有效飞驰圈，熟悉排位流程并留下单圈基线。",
@@ -612,9 +676,9 @@ internal sealed class EstatePracticeTestManager
         EstatePracticeTestKind.PitStopSimulation when test.Stage == TestStage.AwaitingPitExit =>
             "从维修区出口驶出，出站圈即将开始。",
         EstatePracticeTestKind.PitStopSimulation when test.Stage == TestStage.OutLap =>
-            "完成当前出站圈并立即进站；若终点位于维修区路径中，可先越过入口线再通过终点。",
+            "完成当前出站圈后按正常路线进站；终点位于维修区内时，直接进入维修区并继续完成流程。",
         EstatePracticeTestKind.PitStopSimulation when test.Stage == TestStage.OutLapInPit =>
-            "已进入本圈的维修区路径；继续通过维修区内终点线并完成模拟换胎。",
+            "已进入计划进站流程；继续沿维修区路线通过终点并停入换胎区。",
         EstatePracticeTestKind.PitStopSimulation when test.Stage == TestStage.ReturnToPit =>
             "现在立即进入维修区，不要再完成一圈。",
         EstatePracticeTestKind.PitStopSimulation when test.Stage == TestStage.Servicing =>
@@ -747,7 +811,8 @@ internal sealed class EstatePracticeTestManager
             HashSet<Guid> penaltyBaseline,
             int serviceBaseline,
             bool wasInPitLane,
-            int longRunTargetLaps)
+            int longRunTargetLaps,
+            double trackProgress)
         {
             Id = id;
             Kind = kind;
@@ -762,6 +827,7 @@ internal sealed class EstatePracticeTestManager
             ServiceBaseline = serviceBaseline;
             WasInPitLane = wasInPitLane;
             LongRunTargetLaps = longRunTargetLaps;
+            LastTrackProgress = NormalizeProgress(trackProgress);
         }
 
         public Guid Id { get; }
@@ -779,6 +845,9 @@ internal sealed class EstatePracticeTestManager
         public double PitElapsedMaximum { get; set; }
         public int LongRunTargetLaps { get; }
         public bool ServiceCompletedDuringPitVisit { get; set; }
+        public bool OutLapEvidenceSatisfied { get; set; }
+        public double OutLapProgress { get; set; }
+        public double LastTrackProgress { get; set; }
         public List<PracticeLap> Laps { get; } = [];
     }
 
@@ -786,5 +855,6 @@ internal sealed class EstatePracticeTestManager
     private sealed record TestResult(
         EstatePracticeTestStatus Status,
         string Message,
+        DateTimeOffset? HudVisibleFrom,
         DateTimeOffset? HudVisibleUntil);
 }
