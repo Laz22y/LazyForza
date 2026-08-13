@@ -6,6 +6,12 @@ internal sealed class EstateFullRaceStrategyHudRuntime
 {
     internal static readonly TimeSpan RevealDelay = TimeSpan.FromSeconds(20);
     internal static readonly TimeSpan HoldDuration = TimeSpan.FromSeconds(8);
+    // Double-based clocks can land a few microseconds below an exact boundary
+    // after subtraction. The DateTime-compatible overload is especially prone
+    // to this because its epoch value is large. A 0.1 ms tolerance keeps the
+    // visible window inclusive at 20 s and exclusive at 28 s without a
+    // perceptible change to either user-facing boundary.
+    private const double BoundaryToleranceSeconds = 0.0001;
     private double? formationLapStartedAtMonotonicSeconds;
     private RaceSessionPhase? previousPhase;
     private string? sessionKey;
@@ -55,8 +61,9 @@ internal sealed class EstateFullRaceStrategyHudRuntime
             return FullRaceStrategyHudSnapshot.Empty;
 
         var elapsedSeconds = Math.Max(0, monotonicNowSeconds - startsAt);
-        if (elapsedSeconds < RevealDelay.TotalSeconds ||
-            elapsedSeconds >= (RevealDelay + HoldDuration).TotalSeconds)
+        if (elapsedSeconds + BoundaryToleranceSeconds < RevealDelay.TotalSeconds ||
+            elapsedSeconds + BoundaryToleranceSeconds >=
+                (RevealDelay + HoldDuration).TotalSeconds)
             return FullRaceStrategyHudSnapshot.Empty;
 
         return CreateSnapshot(session, local, prediction);
