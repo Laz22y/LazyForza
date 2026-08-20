@@ -3,19 +3,13 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta
-      name="description"
-      content="LazyForza：面向 Forza Horizon 6 的本地遥测仪表盘、圈速分析与赛后复盘工具。"
-    >
-    <meta name="theme-color" content="#080d14">
-    <meta property="og:title" content="LazyForza · FH6 遥测与圈速分析">
-    <meta
-      property="og:description"
-      content="透明遥测仪表盘、圈速与走线分析，以及完全保存在本机的个人数据。"
-    >
+    <meta name="description" content="LazyForza：基于 Forza Horizon 6 官方 UDP 的实时 HUD、圈速分析、遥测回放与自托管赛事工具。">
+    <meta name="theme-color" content="#070b11">
+    <meta property="og:title" content="LazyForza · 读懂每一圈">
+    <meta property="og:description" content="实时 HUD、圈速与走线分析、遥测回放和自托管地产赛事。只使用 FH6 官方 UDP。">
     <meta property="og:type" content="website">
-    <meta property="og:image" content="assets/app-preview.png">
-    <title>LazyForza · FH6 遥测与圈速分析</title>
+    <meta property="og:image" content="assets/lazyforza-logo.png">
+    <title>LazyForza · FH6 遥测、分析与赛事工具</title>
     <link rel="icon" href="assets/favicon.png" type="image/png">
     <link rel="preload" href="assets/lazyforza-logo-transparent.png" as="image">
     <link rel="stylesheet" href="styles.css">
@@ -23,180 +17,145 @@
   </head>
   <body>
     <a class="skip-link" href="#main">跳到主要内容</a>
-
     <div class="page-shell">
       <header class="site-header" aria-label="主导航">
         <a class="brand" href="#top" aria-label="LazyForza 首页">
           <img src="assets/lazyforza-logo-transparent.png" alt="LazyForza">
         </a>
-
-        <nav class="repo-links" aria-label="项目仓库">
-          <a
-            href="https://github.com/Laz22y/LazyForza"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub
-            <span aria-hidden="true">↗</span>
-          </a>
-          <a
-            href="https://gitcode.com/Laz22y/LazyForza"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitCode
-            <span aria-hidden="true">↗</span>
-          </a>
+        <nav class="site-nav" aria-label="页面导航">
+          <a href="#capabilities">功能</a>
+          <a href="#race-server">RaceServer</a>
+          <a href="docs/">文档</a>
+          <a href="https://github.com/Laz22y/LazyForza" target="_blank" rel="noreferrer">GitHub <span aria-hidden="true">↗</span></a>
         </nav>
       </header>
 
       <main id="main">
         <section class="hero" id="top">
-          <div class="hero-glow hero-glow-left" aria-hidden="true"></div>
-          <div class="hero-glow hero-glow-right" aria-hidden="true"></div>
+          <div class="hero-copy-block">
+            <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span>FORZA HORIZON 6 · OFFICIAL UDP</div>
+            <h1>读懂每一圈。</h1>
+            <p class="hero-copy">LazyForza 将 FH6 官方 Data Out 转成实时 HUD、圈速与走线分析、遥测回放和自托管赛事能力。个人数据默认只保存在本机。</p>
 
-          <div class="eyebrow">
-            <span class="status-dot" aria-hidden="true"></span>
-            Forza Horizon 6 · 本地遥测工具
-          </div>
-
-          <div class="hero-logo" aria-label="LazyForza">
-            <img src="assets/lazyforza-logo-transparent.png" alt="LazyForza">
-          </div>
-          <p class="hero-copy">
-            从实时仪表盘到圈速、走线和赛后复盘。只使用 FH6 官方 UDP Data Out，
-            所有个人数据都留在你的电脑里。
-          </p>
-
-          <div class="download-grid" aria-label="下载最新版">
-            <a
-              class="download-card download-card-primary"
-              id="gitcode-download"
-              href="https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza/releases/v1.4.7/attach_files/LazyForza-1.4.7-win-x64.zip/download"
-            >
-              <span class="download-source">
-                <span class="source-mark source-mark-gitcode" aria-hidden="true">
-                  <img src="assets/gitcode.png" alt="">
+            <div class="download-grid" aria-label="下载 LazyForza 客户端">
+              <a class="download-card download-card-primary" id="gitcode-download" href="https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza/releases/v1.4.7/attach_files/LazyForza-1.4.7-win-x64.zip/download">
+                <span class="download-source">
+                  <span class="source-mark source-mark-gitcode" aria-hidden="true"><img src="assets/gitcode.png" alt=""></span>
+                  <span><strong>下载客户端</strong><small>GitCode · 中国大陆网络优先</small></span>
                 </span>
-                <span>
-                  <strong>通过 GitCode 下载</strong>
-                  <small>中国大陆网络优先</small>
+                <span class="release-meta"><strong data-release-version>v1.4.7</strong><time data-release-date datetime="2026-08-20">2026.08.20 更新</time><span class="download-arrow" aria-hidden="true">↓</span></span>
+              </a>
+              <a class="download-card" id="github-download" href="https://github.com/Laz22y/LazyForza/releases/download/v1.4.7/LazyForza-1.4.7-win-x64.zip">
+                <span class="download-source">
+                  <span class="source-mark" aria-hidden="true"><img src="assets/github.png" alt=""></span>
+                  <span><strong>备用下载</strong><small>GitHub · 全球下载源</small></span>
                 </span>
-              </span>
-              <span class="release-meta">
-                <strong data-release-version>v1.4.7</strong>
-                <span aria-hidden="true">·</span>
-                <time data-release-date datetime="2026-08-20">2026.08.20 更新</time>
-                <span class="download-arrow" aria-hidden="true">↓</span>
-              </span>
-            </a>
-
-            <a
-              class="download-card"
-              id="github-download"
-              href="https://github.com/Laz22y/LazyForza/releases/download/v1.4.7/LazyForza-1.4.7-win-x64.zip"
-            >
-              <span class="download-source">
-                <span class="source-mark" aria-hidden="true">
-                  <img src="assets/github.png" alt="">
-                </span>
-                <span>
-                  <strong>通过 GitHub 下载</strong>
-                  <small>全球备用下载源</small>
-                </span>
-              </span>
-              <span class="release-meta">
-                <strong data-release-version>v1.4.7</strong>
-                <span aria-hidden="true">·</span>
-                <time data-release-date datetime="2026-08-20">2026.08.20 更新</time>
-                <span class="download-arrow" aria-hidden="true">↓</span>
-              </span>
-            </a>
-          </div>
-
-          <p class="download-note">
-            Windows 10 / 11 x64 · 解压即用 · 已包含 .NET 运行时
-          </p>
-
-          <div class="product-frame">
-            <div class="frame-bar" aria-hidden="true">
-              <span></span><span></span><span></span>
-              <b>LIVE TELEMETRY WORKSPACE</b>
+                <span class="release-meta"><strong data-release-version>v1.4.7</strong><time data-release-date datetime="2026-08-20">2026.08.20 更新</time><span class="download-arrow" aria-hidden="true">↓</span></span>
+              </a>
             </div>
-            <div class="preview-wrap">
-              <img
-                src="assets/app-preview.png"
-                alt="LazyForza 深色界面，显示遥测工作区、当前模式和圈速数据"
-                width="1584"
-                height="993"
-              >
-              <div class="preview-sheen" aria-hidden="true"></div>
+
+            <div class="hero-links">
+              <a href="docs/">开始使用 <span aria-hidden="true">→</span></a>
+              <a href="https://github.com/Laz22y/LazyForza" target="_blank" rel="noreferrer">查看客户端源码 <span aria-hidden="true">↗</span></a>
             </div>
+            <p class="download-note">Windows 10 / 11 x64 · 解压即用 · 已包含 .NET 运行时</p>
+          </div>
+
+          <div class="signal-board" aria-label="LazyForza 数据流概览">
+            <div class="signal-board-head"><span>LAZYFORZA / DATA FLOW</span><b><i></i> LOCAL</b></div>
+            <div class="signal-stage signal-stage-source"><span class="stage-index">01</span><div><small>INPUT</small><strong>FH6 DATA OUT</strong></div><em>UDP 2299</em></div>
+            <div class="flow-line" aria-hidden="true"><span></span></div>
+            <div class="signal-stage-grid">
+              <div class="signal-stage"><span class="stage-index">02</span><div><small>LIVE</small><strong>HUD</strong></div></div>
+              <div class="signal-stage"><span class="stage-index">03</span><div><small>COMPARE</small><strong>LAPS</strong></div></div>
+              <div class="signal-stage"><span class="stage-index">04</span><div><small>REVIEW</small><strong>REPLAY</strong></div></div>
+            </div>
+            <div class="signal-board-foot"><span>不读内存</span><span>不注入 DLL</span><span>本地存储</span></div>
           </div>
         </section>
 
-        <section class="features" aria-labelledby="features-title">
+        <section class="facts" aria-label="项目特点">
+          <div><strong>官方 UDP</strong><span>唯一游戏数据入口</span></div>
+          <div><strong>本地优先</strong><span>设置、圈速和录制留在本机</span></div>
+          <div><strong>开源</strong><span>MIT License，源码与发行记录公开</span></div>
+          <div><strong>可扩展赛事</strong><span>客户端与 RaceServer 分离部署</span></div>
+        </section>
+
+        <section class="capabilities" id="capabilities" aria-labelledby="capabilities-title">
           <div class="section-heading">
-            <p>核心功能</p>
-            <h2 id="features-title">需要的信息，刚好够用。</h2>
+            <p>CAPABILITIES</p>
+            <h2 id="capabilities-title">从实时信息，到可复盘的数据。</h2>
+            <span>日常驾驶、练习、单圈分析和地产赛事使用同一套本地数据链路。</span>
           </div>
-
-          <div class="feature-grid">
-            <article class="feature-card">
-              <div class="feature-index">01</div>
-              <h3>实时仪表盘</h3>
-              <p>速度、挡位、踏板、轮胎与换挡提示保持在视线之内，布局和大小都能按习惯调整。</p>
-              <div class="signal-line" aria-hidden="true">
-                <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-              </div>
+          <div class="capability-grid">
+            <article class="capability-card capability-card-wide">
+              <span class="card-code">LIVE / 01</span><h3>自由布局的实时 HUD</h3>
+              <p>速度、挡位、转速、踏板、轮胎、动力和换挡提示可独立开关、移动、缩放与调节透明度。</p>
+              <div class="meter-art" aria-hidden="true"><i style="--level: 34%"></i><i style="--level: 52%"></i><i style="--level: 79%"></i><i style="--level: 64%"></i><i style="--level: 91%"></i><i style="--level: 72%"></i></div>
             </article>
-
-            <article class="feature-card feature-card-accent">
-              <div class="feature-index">02</div>
-              <h3>圈速与走线</h3>
-              <p>对比同等级个人最快圈，定位刹车、入弯、出弯和油门恢复带来的真实差距。</p>
-              <div class="track-line" aria-hidden="true">
-                <span></span>
-              </div>
+            <article class="capability-card">
+              <span class="card-code">ANALYZE / 02</span><h3>圈速与走线对比</h3>
+              <p>按距离联动速度、油门、制动、方向和走线，定位每一段时间差的来源。</p>
+              <div class="delta-art" aria-hidden="true"><span>REFERENCE</span><b>−0.284</b></div>
             </article>
-
-            <article class="feature-card">
-              <div class="feature-index">03</div>
-              <h3>赛后复盘</h3>
-              <p>用稳定性、分段趋势和组合最佳回看一场比赛，也可以导出简洁的 PNG 报告。</p>
-              <div class="lap-bars" aria-hidden="true">
-                <i style="--bar: 48%"></i>
-                <i style="--bar: 72%"></i>
-                <i style="--bar: 58%"></i>
-                <i style="--bar: 86%"></i>
-                <i style="--bar: 68%"></i>
-              </div>
+            <article class="capability-card">
+              <span class="card-code">REPLAY / 03</span><h3>录制与回放</h3>
+              <p>可选自动录制保留赛前与赛后片段；回放工作台联动时间轴、驾驶输入和动态遥测。</p>
+              <div class="timeline-art" aria-hidden="true"><i></i><b></b><i></i><i></i></div>
+            </article>
+            <article class="capability-card">
+              <span class="card-code">LEARN / 04</span><h3>车辆与换挡学习</h3>
+              <p>按车型、性能等级和可观测调校特征保存学习结果，在信息不足时保持保守。</p>
+            </article>
+            <article class="capability-card capability-card-accent">
+              <span class="card-code">RACE / 05</span><h3>地产环道赛事</h3>
+              <p>练习、排位、正赛、维修区、旗语、处罚、OB 与赛果归档接入独立赛事服务端。</p>
+            </article>
+            <article class="capability-card">
+              <span class="card-code">DATA / 06</span><h3>可控的数据与更新</h3>
+              <p>数据目录、备份、录制容量和自动更新都由用户控制；更新包同时校验外部哈希与内部清单。</p>
             </article>
           </div>
         </section>
 
-        <section class="principles" aria-label="项目特点">
-          <div>
-            <span>01</span>
-            <strong>官方 UDP</strong>
-            <p>不读内存，不注入 DLL。</p>
+        <section class="quick-start" aria-labelledby="quick-start-title">
+          <div class="section-heading section-heading-compact"><p>QUICK START</p><h2 id="quick-start-title">三步开始。</h2></div>
+          <ol class="step-grid">
+            <li><span>01</span><strong>下载并完整解压</strong><p>运行 <code>LazyForza.App.exe</code>，无需另装 .NET 运行时。</p></li>
+            <li><span>02</span><strong>开启 FH6 Data Out</strong><p>地址设为 <code>127.0.0.1</code>，端口设为 <code>2299</code>。</p></li>
+            <li><span>03</span><strong>进入驾驶</strong><p>实时 HUD 自动连接；圈速、赛道与车辆数据按功能设置保存。</p></li>
+          </ol>
+        </section>
+
+        <section class="server-section" id="race-server" aria-labelledby="server-title">
+          <div class="server-copy">
+            <p class="section-label">RACESERVER</p><h2 id="server-title">需要办赛时，再部署服务端。</h2>
+            <p>RaceServer 是独立项目。它提供 1–12 名车手、OB、练习与多节排位、正赛控制、旗语、处罚调查、维修区和阶段赛果归档。</p>
+            <div class="server-tags" aria-label="部署方式"><span>Windows / Linux / macOS</span><span>Cloudflare Durable Objects</span><span>协议 v2</span></div>
           </div>
-          <div>
-            <span>02</span>
-            <strong>本地优先</strong>
-            <p>圈速、赛道与车辆学习留在本机。</p>
+          <div class="server-actions" aria-label="RaceServer 资源">
+            <a class="server-action server-action-primary" href="docs/#race-server"><span><small>先阅读</small><strong>部署与连接指引</strong></span><b aria-hidden="true">→</b></a>
+            <a class="server-action" href="https://github.com/Laz22y/LazyForza.RaceServer/releases/latest" target="_blank" rel="noreferrer"><span><small>正式版本</small><strong>下载 RaceServer</strong></span><b aria-hidden="true">↗</b></a>
+            <a class="server-action" href="https://github.com/Laz22y/LazyForza.RaceServer" target="_blank" rel="noreferrer"><span><small>源码与问题</small><strong>服务端仓库</strong></span><b aria-hidden="true">↗</b></a>
           </div>
-          <div>
-            <span>03</span>
-            <strong>开源透明</strong>
-            <p>源码与正式发行记录均可查阅。</p>
-          </div>
+        </section>
+
+        <section class="docs-section" aria-labelledby="docs-title">
+          <div><p class="section-label">DOCUMENTATION</p><h2 id="docs-title">一份文档，覆盖使用与开发。</h2><p>安装、Data Out、功能说明、数据目录、RaceServer、常见问题、架构、构建与验证边界都集中在文档站。</p></div>
+          <a class="docs-link" href="docs/">打开 LazyForza 文档 <span aria-hidden="true">→</span></a>
+        </section>
+
+        <section class="boundary" aria-label="项目边界">
+          <div><span>01</span><strong>只使用官方 Data Out</strong><p>不读取游戏内存，不修改游戏进程，不注入 DLL。</p></div>
+          <div><span>02</span><strong>不虚构缺失数据</strong><p>官方 UDP 不提供的赛事 ID、车辆尺寸和轮胎位置不会被伪装成官方数据。</p></div>
+          <div><span>03</span><strong>明确验证来源</strong><p>自动测试、模拟回放与真实 FH6 多机验证分开记录。</p></div>
         </section>
       </main>
 
       <footer>
-        <p>LazyForza 是非官方社区项目，与 Microsoft、Xbox 或 Playground Games 无隶属关系。</p>
-        <p>MIT License · <span id="copyright-year">2026</span></p>
+        <div><img src="assets/lazyforza-logo-transparent.png" alt="LazyForza"><p>非官方社区项目，与 Microsoft、Xbox 或 Playground Games 无隶属关系。</p></div>
+        <nav aria-label="页脚链接"><a href="docs/">文档</a><a href="https://github.com/Laz22y/LazyForza">客户端仓库</a><a href="https://github.com/Laz22y/LazyForza.RaceServer">服务端仓库</a><a href="https://github.com/Laz22y/LazyForza/blob/main/LICENSE">MIT License</a></nav>
+        <p class="copyright">© <span id="copyright-year">2026</span> LazyForza</p>
       </footer>
     </div>
   </body>

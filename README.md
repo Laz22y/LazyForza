@@ -2,53 +2,59 @@
   <img src="docs/assets/LazyForzaReadmeBanner.png" alt="LazyForza" width="720">
 </p>
 
+<p align="center">Forza Horizon 6 的本地遥测、驾驶分析与地产赛事工具</p>
+
 <p align="center">
-  Forza Horizon 6 的透明遥测仪表盘与本地圈速分析工具
+  <a href="https://laz22y.github.io/LazyForza/">官网</a> ·
+  <a href="https://laz22y.github.io/LazyForza/docs/">完整文档</a> ·
+  <a href="https://github.com/Laz22y/LazyForza/releases/latest">下载</a> ·
+  <a href="https://github.com/Laz22y/LazyForza.RaceServer">RaceServer</a>
 </p>
 
-LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、不注入 DLL，也不会修改游戏进程。默认监听 `127.0.0.1:2299`，启动后即可进入 Live 模式。
+LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、不注入 DLL、不修改游戏进程。设置、圈速、车辆学习和录制默认保存在本机。
 
 ## 功能
 
-- 透明、置顶、鼠标穿透的车辆仪表盘，支持缩放、透明度、惯性跟随和静止淡出；转速灯带、速度/挡位、动力、轮胎、踏板、方向和等级/PI 均可独立开关、移动并恢复默认布局；
-- 默认关闭的实验性漂移仪表盘，以防止 Spin 为优先，用本车 UDP 遥测推导侧滑角、控车余量和积分速度趋势，并以方向箭头、换挡箭头及颜色区间提供低干扰提示；该模块的辅助能力有限，不代替玩家判断，可独立显示或与主仪表盘并排显示，并支持独立拖动和固定中心缩放；
-- 轮胎温度/抓地力、动力、扭矩、踏板、方向输入、挡位与升降挡提示；
-- 按车型和调校特征分别学习换挡目标，车辆名称可离线识别；
-- 环道与定点赛事学习、自动匹配、分段 HUD、圈速和走线对比；
-- 仪表盘、圈速与漂移 HUD 可独立移动和固定中心缩放；布局编辑时可临时隐藏任一 HUD 以设置重叠布局，圈速 HUD 另支持一键吸附及靠近时的对齐辅助；
-- 赛道识别纠错助手，以及速度、油门、制动、方向与走线的距离游标联动；
-- 可选的比赛自动录制，包含赛前 15 秒与赛后 10 秒，并提供容量上限、保守停止和受保护轮换；
-- 回放工作台可直接打开 `.lfztelemetry`，也可将数据库单圈导出为带完整性校验的单圈 `.lfztelemetry`，联动回放时间轴、速度、驾驶输入、走线与动态遥测；
-- 内置 86 条 Playground 官方赛事模板，用户数据保存在本机；
-- 优先从 GitCode 检查和下载稳定版更新；GitCode 不可用时自动回退 GitHub。用户确认后执行校验、替换和重启。
+| 模块 | 能力 |
+| --- | --- |
+| 实时 HUD | 速度、挡位、转速、踏板、方向、轮胎、动力和换挡提示；部件可独立移动、缩放和调节透明度 |
+| 圈速分析 | 分段、实时 Delta、速度与驾驶输入、走线和距离游标联动 |
+| 车辆学习 | 按车型、性能等级和可观测调校特征学习换挡目标，离线识别车辆名称 |
+| 录制与回放 | 可选自动录制、容量保护、`.lfztelemetry` 导入导出和联动回放 |
+| 地产赛事 | 地产环道、维修区、赛事 HUD，并可连接独立 RaceServer 参加练习、排位和正赛 |
+| 数据与更新 | 本地数据库、备份、诊断；GitCode/GitHub 更新回退及双层完整性校验 |
 
-## 下载与使用
+实验性漂移 HUD 默认关闭。它只根据本车 UDP 推导侧滑和控车趋势，不复刻游戏评分，也不代替玩家判断。
 
-在 [Releases](https://github.com/Laz22y/LazyForza/releases/latest) 下载最新版 `win-x64.zip`，完整解压后运行 `LazyForza.App.exe`。发行包已包含 .NET 运行时。
+## 快速开始
 
-在 FH6 的“设置 > HUD 与游戏玩法”中：
+1. 从 [Releases](https://github.com/Laz22y/LazyForza/releases/latest) 下载最新版 `win-x64.zip`，完整解压；
+2. 运行 `LazyForza.App.exe`；
+3. 在 FH6“设置 > HUD 与游戏玩法”中开启 Data Out；
+4. 地址填写 `127.0.0.1`，端口填写 `2299`。
 
-1. 开启 Data Out；
-2. 地址填写 `127.0.0.1`；
-3. 端口填写 `2299`。
+正式包已包含 .NET 运行时。默认数据目录为 `%LOCALAPPDATA%\LazyForza`。需要隔离数据时可使用：
 
-FH6 的官方说明见 [Forza Horizon 6 Data Out Documentation](https://support.forza.net/hc/en-us/articles/51744149102611-Forza-Horizon-6-Data-Out-Documentation)。
+```powershell
+LazyForza.App.exe --data-dir "D:\LazyForza_Data"
+```
 
-如果同一台电脑也用于开发，可运行发行包里的 `Start-Isolated.cmd`。它会把发行版数据隔离到 `%LOCALAPPDATA%\LazyForza-Release`。
+完整的安装、功能、数据、故障排查和开发说明见 [LazyForza 文档](https://laz22y.github.io/LazyForza/docs/)。
 
-## 数据与更新
+## RaceServer
 
-默认数据目录为 `%LOCALAPPDATA%\LazyForza`，其中包含设置、圈速、赛道、车辆学习、日志和录制。发行包不包含开发者的个人数据。
+[LazyForza.RaceServer](https://github.com/Laz22y/LazyForza.RaceServer) 是独立的地产赛事服务端，提供：
 
-比赛自动录制默认关闭，可在设置中启用。达到容量上限时默认停止新录制而不删除文件；用户主动开启轮换后，程序仍会保留最近 5 场，并跳过手动固定、个人最佳圈和赛道识别异常样本。
+- 1–12 名车手和额外 OB 席位；
+- 练习、多节排位、正赛、旗语、处罚和调查；
+- 维修区、车队、赛道文件托管与阶段赛果归档；
+- Windows、Linux、macOS 自托管包和 Cloudflare Durable Objects 版本。
 
-漂移仪表盘首次开启时会说明其推导边界，并可选择开启“自动关闭主仪表盘”。其中换挡箭头用于降低失控风险，不代表车辆最佳换挡点；积分速度格仅表达“有漂移即开始、侧滑角越大增长越快”的趋势，不复刻或伪造游戏分数。漂移仪表盘开启期间，圈速分析停止订阅且不会写入新的圈速；关闭后按用户原有偏好恢复主仪表盘与圈速分析。
-
-启动检查更新默认开启，可在设置中关闭。发现新版本时 LazyForza 只会提示，不会强制更新；程序优先使用 GitCode，检查或下载失败时自动回退 GitHub。确认更新后会校验发行包 SHA-256 与包内清单，安装失败则恢复原版本。自定义 `--data-dir` 在更新后仍会保留。
+只使用实时 HUD 和圈速分析时不需要部署服务端。部署前阅读[赛事服务端指引](https://laz22y.github.io/LazyForza/docs/#race-server)。
 
 ## 本地构建
 
-需要 Windows 10/11 x64 与 .NET SDK 9：
+需要 Windows 10/11 x64、.NET SDK 9 和 PowerShell 7：
 
 ```powershell
 dotnet restore LazyForza.sln --configfile NuGet.Config
@@ -64,15 +70,16 @@ dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --demo
 dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --replay "C:\path\session.lfztelemetry"
 ```
 
-## 说明
+## 开发资料
 
-- FH6 UDP 不提供赛事 ID、对手遥测或调校 ID；赛道与调校识别来自可观测遥测特征，因此仍需保守处理无法区分的情况；
-- 紫色分段只表示 LazyForza 本地可见记录中的同性能等级最快，不代表在线世界纪录；
-- 车型名称使用 [HDR 维护的 FH6 Car Ordinals](https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f) 的内置快照，运行时无需访问 GitHub；
-- 项目由 OpenAI GPT-5.6 Sol 协助开发。
+- [完整用户与开发者文档](docs/LazyForza-Documentation.md)
+- [架构](ARCHITECTURE.md)
+- [FH6 遥测开发参考](FH6_TELEMETRY_DEVELOPMENT_GUIDE.md)
+- [真实 FH6 验证清单](VALIDATION_WITH_FH6.md)
+- [性能基线](docs/PERFORMANCE_BASELINE.md)
 
-更多实现边界与实机验证项目见 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [VALIDATION_WITH_FH6.md](VALIDATION_WITH_FH6.md)。
+FH6 UDP 不提供官方赛事 ID、对手遥测、调校 ID、车辆精确几何或四轮世界坐标。推导值不会被表述为官方字段；自动测试、模拟回放和真实 FH6 实机验证分开记录。
 
 ## License
 
-[MIT](LICENSE)。LazyForza 是非官方社区项目，Forza、Forza Horizon、Xbox 及相关商标属于其各自权利人。
+[MIT](LICENSE)。LazyForza 是非官方社区项目，与 Microsoft、Xbox 或 Playground Games 无隶属关系；相关商标属于其各自权利人。
