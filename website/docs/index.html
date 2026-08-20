@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="LazyForza 用户与开发者文档：安装、配置、功能、RaceServer、架构、构建和验证边界。">
+    <meta name="theme-color" content="#080d14">
+    <title>LazyForza 文档</title>
+    <link rel="icon" href="../assets/favicon.png" type="image/png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#document">跳到文档正文</a>
+    <header class="docs-header">
+      <a class="docs-brand" href="../" aria-label="返回 LazyForza 官网">
+        <img src="../assets/lazyforza-logo-transparent.png" alt="LazyForza">
+        <span>DOCS</span>
+      </a>
+      <nav aria-label="文档外部链接">
+        <a href="../">官网</a>
+        <a href="https://github.com/Laz22y/LazyForza" target="_blank" rel="noreferrer">客户端仓库 ↗</a>
+        <a href="https://github.com/Laz22y/LazyForza.RaceServer" target="_blank" rel="noreferrer">服务端仓库 ↗</a>
+      </nav>
+    </header>
+
+    <div class="docs-layout">
+      <aside class="docs-sidebar" aria-label="文档目录">
+        <p>文档目录</p>
+        <nav>
+          <a href="#overview">概览</a>
+          <a href="#quick-start">快速开始</a>
+          <a href="#client">客户端功能</a>
+          <a href="#data">数据与更新</a>
+          <a href="#race-server">RaceServer</a>
+          <a href="#troubleshooting">常见问题</a>
+          <a href="#development">开发者指南</a>
+          <a href="#boundaries">协议与验证边界</a>
+          <a href="#references">参考资料</a>
+        </nav>
+        <div class="version-card">
+          <span>当前文档</span>
+          <strong>Client 1.4.7</strong>
+          <strong>Server 0.4.0</strong>
+        </div>
+      </aside>
+
+      <main class="docs-main" id="document">
+        <article>
+          <section class="doc-hero" id="overview">
+            <p class="doc-kicker">LAZYFORZA DOCUMENTATION</p>
+            <h1>用户与开发者文档</h1>
+            <p class="doc-lead">从第一次接收 FH6 遥测，到部署赛事服务端、阅读架构和提交代码。只保留需要的信息。</p>
+            <div class="doc-status">
+              <div><span>客户端</span><strong>1.4.7</strong><small>Windows 10 / 11 x64</small></div>
+              <div><span>RaceServer</span><strong>0.4.0</strong><small>Native / Cloudflare</small></div>
+              <div><span>数据入口</span><strong>UDP 2299</strong><small>FH6 Official Data Out</small></div>
+            </div>
+            <div class="callout callout-info"><strong>项目边界</strong><p>不读取游戏内存，不注入 DLL，不修改游戏进程。官方 UDP 没有提供的数据不会被包装成官方数据。</p></div>
+          </section>
+
+          <section class="doc-section" id="quick-start">
+            <p class="section-index">01 / QUICK START</p>
+            <h2>快速开始</h2>
+            <h3>下载与安装</h3>
+            <p>从 <a href="https://github.com/Laz22y/LazyForza/releases/latest">GitHub Releases</a> 或官网的 GitCode 入口下载最新版 <code>win-x64.zip</code>。完整解压后运行 <code>LazyForza.App.exe</code>。正式包已包含 .NET 运行时。</p>
+            <div class="callout callout-warn"><strong>不要在 ZIP 内直接运行</strong><p>更新、日志、数据库和录制需要正常的可写目录。</p></div>
+
+            <h3>配置 FH6 Data Out</h3>
+            <ol class="ordered-steps">
+              <li><span>1</span><div><strong>打开设置</strong><p>进入 FH6“设置 > HUD 与游戏玩法”。</p></div></li>
+              <li><span>2</span><div><strong>开启 Data Out</strong><p>地址填写 <code>127.0.0.1</code>。</p></div></li>
+              <li><span>3</span><div><strong>设置端口</strong><p>端口填写 <code>2299</code>，返回驾驶。</p></div></li>
+            </ol>
+
+            <h3>第一次使用</h3>
+            <ul>
+              <li>只开启当前需要的 HUD 部件；</li>
+              <li>用布局编辑器调整位置、缩放和透明度；</li>
+              <li>正常完成几圈，让程序建立车辆与赛道记录；</li>
+              <li>确实需要复盘时再开启自动录制。</li>
+            </ul>
+          </section>
+
+          <section class="doc-section" id="client">
+            <p class="section-index">02 / CLIENT</p>
+            <h2>客户端功能</h2>
+            <div class="feature-list">
+              <div><span>LIVE HUD</span><h3>实时仪表盘</h3><p>速度、挡位、转速、踏板、方向、轮胎、动力和性能等级可独立开关、移动、缩放与调节透明度。窗口支持置顶和鼠标穿透。</p></div>
+              <div><span>LAP ANALYSIS</span><h3>圈速与走线</h3><p>按距离对齐单圈，联动速度、油门、制动、方向与走线。紫色分段只表示本地同等级最快，不代表在线世界纪录。</p></div>
+              <div><span>VEHICLE</span><h3>车辆与换挡学习</h3><p>按车型、性能等级和可观测调校特征保存结果。FH6 不提供调校 ID，无法可靠区分时保持保守。</p></div>
+              <div><span>RECORDING</span><h3>录制与回放</h3><p>自动录制默认关闭。可保留赛前 15 秒与赛后 10 秒；回放工作台联动时间轴、驾驶输入、走线和动态遥测。</p></div>
+              <div><span>DRIFT</span><h3>实验性漂移 HUD</h3><p>用本车 UDP 推导侧滑角和控车趋势，优先降低 Spin 风险。换挡箭头不是最佳换挡点，积分趋势不复刻游戏分数。</p></div>
+              <div><span>ESTATE RACE</span><h3>地产环道与赛事</h3><p>支持本地计时、赛道交换、维修区、地图和赛事 HUD；连接 RaceServer 后接入练习、排位、正赛、旗语与处罚。</p></div>
+            </div>
+          </section>
+
+          <section class="doc-section" id="data">
+            <p class="section-index">03 / DATA</p>
+            <h2>数据、隐私与更新</h2>
+            <h3>默认数据目录</h3>
+            <pre><code>%LOCALAPPDATA%\LazyForza</code></pre>
+            <div class="table-wrap"><table>
+              <thead><tr><th>路径</th><th>内容</th></tr></thead>
+              <tbody>
+                <tr><td><code>lazyforza.db</code></td><td>设置、车辆、赛道和圈速索引</td></tr>
+                <tr><td><code>Recordings</code></td><td>自动或手动遥测录制</td></tr>
+                <tr><td><code>Logs</code></td><td>运行日志</td></tr>
+                <tr><td><code>Backups</code></td><td>数据迁移备份</td></tr>
+                <tr><td><code>Diagnostics</code></td><td>用户主动生成的诊断资料</td></tr>
+                <tr><td><code>Updates</code></td><td>更新下载和临时文件</td></tr>
+              </tbody>
+            </table></div>
+            <p>使用 <code>--data-dir</code> 指定独立目录：</p>
+            <pre><code class="language-powershell">LazyForza.App.exe --data-dir "D:\LazyForza_Data"</code></pre>
+
+            <h3>隐私边界</h3>
+            <ul class="check-list">
+              <li>默认不要求账号，个人数据保存在本机；</li>
+              <li>只有主动连接 RaceServer 时，赛事所需资料和遥测摘要才发送到该服务器；</li>
+              <li>不伪造官方 UDP 未提供的赛道 ID、调校 ID、车辆尺寸或轮胎位置；</li>
+              <li>录制容量、轮换、备份和更新均由用户控制。</li>
+            </ul>
+
+            <h3>更新</h3>
+            <p>启动检查默认开启，可在设置中关闭。程序只提示，不强制安装。下载优先使用 GitCode，失败时回退 GitHub；安装前校验发行包 SHA-256 和包内清单，失败时恢复原版本。</p>
+          </section>
+
+          <section class="doc-section" id="race-server">
+            <p class="section-index">04 / RACESERVER</p>
+            <h2>RaceServer</h2>
+            <p>RaceServer 是独立项目，只进行日常驾驶和圈速分析时无需安装。</p>
+            <div class="metric-grid">
+              <div><strong>1–12</strong><span>参赛车手</span></div>
+              <div><strong>12</strong><span>额外 OB 席位</span></div>
+              <div><strong>2</strong><span>部署方式</span></div>
+              <div><strong>v2</strong><span>赛事协议</span></div>
+            </div>
+
+            <h3>提供什么</h3>
+            <ul>
+              <li>1–3 节练习与排位、正赛、五盏红灯和方格旗；</li>
+              <li>车队、维修区、旗语、处罚、碰撞调查和 OB；</li>
+              <li>阶段赛果归档，返回大厅后仍可回看并导出 PNG/CSV；</li>
+              <li>适配电脑宽屏和 Pad 触控的浏览器总控。</li>
+            </ul>
+
+            <h3>选择部署方式</h3>
+            <div class="table-wrap"><table>
+              <thead><tr><th>方式</th><th>适合场景</th><th>维护要求</th></tr></thead>
+              <tbody>
+                <tr><td>原生自托管</td><td>本地联机、VPS、固定服务器</td><td>自行维护进程、端口、TLS 和备份</td></tr>
+                <tr><td>Cloudflare Durable Objects</td><td>不想维护 VPS</td><td>Cloudflare 账号与 Workers 部署权限</td></tr>
+              </tbody>
+            </table></div>
+
+            <h3>原生服务端</h3>
+            <p>从 <a href="https://github.com/Laz22y/LazyForza.RaceServer/releases/latest">RaceServer Releases</a> 下载对应平台 ZIP。支持 <code>win-x64</code>、<code>linux-x64</code>、<code>linux-arm64</code>、<code>osx-x64</code> 和 <code>osx-arm64</code>。</p>
+            <pre><code class="language-powershell"># Windows
+./LazyForza.RaceServer.Web.exe</code></pre>
+            <pre><code class="language-bash"># Linux / macOS
+chmod +x ./LazyForza.RaceServer.Web
+./LazyForza.RaceServer.Web</code></pre>
+            <p>默认监听 <code>http://0.0.0.0:24876</code>。首次打开网页时设置房间密码、总控密码和赛事规则。公网部署应由 Caddy、Nginx 或同类反向代理终止 TLS，让客户端连接 <code>wss://</code>。</p>
+
+            <h3>Cloudflare 部署</h3>
+            <p>在服务端仓库使用 Deploy to Cloudflare，或运行：</p>
+            <pre><code class="language-powershell">./scripts/Deploy-Cloudflare.ps1</code></pre>
+            <p>需要 Node.js 20+、npm 和 PowerShell 7。部署后打开 Worker 域名完成首次设置，再上传 <code>.lfzestate</code> 赛道文件。</p>
+
+            <h3>客户端连接</h3>
+            <p>车手需要服务端域名或 IP、房间密码、匹配的地产赛道、显示名和可选车队。OB 只接收赛事快照，不上传遥测、不参与排名和处罚。</p>
+
+            <h3>兼容性</h3>
+            <p>RaceServer <code>0.4.0</code> 支持 LazyForza <code>1.4.2–1.4.7</code> 的协议 v2 主要流程。客户端 <code>1.4.7</code> 才会上报完整增强碰撞证据；旧版仍可连接，但不会拥有后续新增的全部能力。</p>
+          </section>
+
+          <section class="doc-section" id="troubleshooting">
+            <p class="section-index">05 / TROUBLESHOOTING</p>
+            <h2>常见问题</h2>
+            <details open><summary>客户端一直显示没有遥测</summary><p>确认 FH6 已开启 Data Out，IP 为 <code>127.0.0.1</code>，端口为 <code>2299</code>。检查端口占用和本机防火墙；游戏与 LazyForza 的端口必须一致。</p></details>
+            <details><summary>HUD 没有显示或位置错误</summary><p>确认对应 HUD 已开启。进入布局编辑器检查显示器、位置、缩放和透明度；多显示器或分辨率变化后可先恢复默认布局。</p></details>
+            <details><summary>赛道没有自动识别</summary><p>先完成一段稳定驾驶，避免倒车、重置、暂停和大幅偏离路线。用户自定义路线需要单独录入；无法可靠区分时程序会要求人工确认。</p></details>
+            <details><summary>自动录制停止</summary><p>检查录制目录空间和容量上限。默认达到上限后停止，不自动删除；需要轮换时由用户明确开启。</p></details>
+            <details><summary>无法连接 RaceServer</summary><p>检查地址、房间密码和协议版本。公网环境需要 HTTPS/WSS，反向代理必须转发 WebSocket Upgrade。网页能打开不代表 WebSocket 一定可用。</p></details>
+            <details><summary>更新失败</summary><p>保留提示和 <code>%LOCALAPPDATA%\LazyForza\Logs</code>。重新下载完整 ZIP 并解压到新目录即可；个人数据默认不在程序目录中。</p></details>
+          </section>
+
+          <section class="doc-section" id="development">
+            <p class="section-index">06 / DEVELOPMENT</p>
+            <h2>开发者指南</h2>
+            <h3>技术栈</h3>
+            <div class="tag-list"><span>.NET 9</span><span>WPF</span><span>SQLite</span><span>UDP</span><span>ASP.NET Core</span><span>TypeScript</span><span>Durable Objects</span></div>
+
+            <h3>构建客户端</h3>
+            <pre><code class="language-powershell">git clone https://github.com/Laz22y/LazyForza.git
+cd LazyForza
+dotnet restore LazyForza.sln --configfile NuGet.Config
+dotnet build LazyForza.sln --no-restore -c Debug
+dotnet test LazyForza.sln --no-build --no-restore -c Debug
+dotnet run --project src/LazyForza.App/LazyForza.App.csproj --no-build --no-restore -c Debug</code></pre>
+            <p>开发和 QA 使用隔离目录或模拟输入：</p>
+            <pre><code class="language-powershell">dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --data-dir ".\.dev-data"
+dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --demo
+dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --replay "C:\path\session.lfztelemetry"</code></pre>
+
+            <h3>客户端项目结构</h3>
+            <div class="table-wrap"><table>
+              <thead><tr><th>项目</th><th>职责</th></tr></thead>
+              <tbody>
+                <tr><td><code>LazyForza.Telemetry</code></td><td>UDP 接收、解析和遥测帧</td></tr>
+                <tr><td><code>LazyForza.Domain</code></td><td>领域模型与公共类型</td></tr>
+                <tr><td><code>LazyForza.Analysis</code></td><td>圈速、路线、分段和驾驶分析</td></tr>
+                <tr><td><code>LazyForza.Storage</code></td><td>SQLite、录制、备份与数据目录</td></tr>
+                <tr><td><code>LazyForza.Modules.*</code></td><td>仪表盘、圈速和地产赛事模块</td></tr>
+                <tr><td><code>LazyForza.Overlay</code></td><td>透明 HUD、布局与格式化</td></tr>
+                <tr><td><code>LazyForza.Update</code></td><td>更新检查、校验与替换</td></tr>
+                <tr><td><code>LazyForza.App</code></td><td>WPF 主程序与模块装配</td></tr>
+              </tbody>
+            </table></div>
+            <pre><code>FH6 UDP → Telemetry → Domain Frame → Modules → Analysis / Storage → App / Overlay</code></pre>
+
+            <h3>构建 RaceServer</h3>
+            <pre><code class="language-powershell">git clone https://github.com/Laz22y/LazyForza.RaceServer.git
+cd LazyForza.RaceServer
+dotnet restore LazyForza.RaceServer.sln
+dotnet build LazyForza.RaceServer.sln -c Release --no-restore
+dotnet test LazyForza.RaceServer.sln -c Release --no-build --no-restore
+
+cd cloudflare
+npm ci
+npm run check
+npm test</code></pre>
+            <p>原生端与 Cloudflare 端共享协议语义。协议、总控接口和 Web 功能变更必须同步实现并补齐双端测试。</p>
+          </section>
+
+          <section class="doc-section" id="boundaries">
+            <p class="section-index">07 / BOUNDARIES</p>
+            <h2>协议与验证边界</h2>
+            <p>FH6 官方 Data Out 固定为 324 字节。可以直接获得位置、速度、姿态、输入、动力、悬挂和轮胎状态等字段，但不提供：</p>
+            <ul class="cross-list">
+              <li>官方赛道 ID 和赛事 ID；</li>
+              <li>对手车辆遥测；</li>
+              <li>调校 ID、宽体或精确车辆几何；</li>
+              <li>四轮世界坐标、轮胎宽度和接地区域。</li>
+            </ul>
+            <div class="callout callout-info"><strong>赛道限制</strong><p>没有可信车辆足迹标定时，只能使用 LazyForza 定位点规则，不能宣称为 FIA 式“四轮全部越线”判定。</p></div>
+            <h3>验证口径</h3>
+            <p>算法推导必须标注来源。自动测试、模拟器、Replay、截图 QA 和真实 FH6 多机验证分开记录。真实 FH6 结论以仓库中的 <code>VALIDATION_WITH_FH6.md</code> 为准。</p>
+          </section>
+
+          <section class="doc-section" id="references">
+            <p class="section-index">08 / REFERENCES</p>
+            <h2>参考资料</h2>
+            <div class="reference-grid">
+              <a href="https://github.com/Laz22y/LazyForza/blob/main/ARCHITECTURE.md"><strong>客户端架构</strong><span>数据流、模块、Overlay 与存储</span></a>
+              <a href="https://github.com/Laz22y/LazyForza/blob/main/FH6_TELEMETRY_DEVELOPMENT_GUIDE.md"><strong>FH6 遥测开发参考</strong><span>字段、推导和缺失数据</span></a>
+              <a href="https://github.com/Laz22y/LazyForza/blob/main/VALIDATION_WITH_FH6.md"><strong>真实 FH6 验证清单</strong><span>实机结论与待验证项目</span></a>
+              <a href="https://github.com/Laz22y/LazyForza/blob/main/docs/PERFORMANCE_BASELINE.md"><strong>性能基线</strong><span>性能与 Replay soak 记录</span></a>
+              <a href="https://github.com/Laz22y/LazyForza/releases/latest"><strong>客户端 Releases</strong><span>正式包与 SHA-256</span></a>
+              <a href="https://github.com/Laz22y/LazyForza.RaceServer/releases/latest"><strong>RaceServer Releases</strong><span>全平台与 Cloudflare 发行包</span></a>
+            </div>
+            <h3>License 与商标</h3>
+            <p>LazyForza 和 RaceServer 使用 MIT License。项目为非官方社区作品，与 Microsoft、Xbox 或 Playground Games 无隶属关系；相关商标属于其各自权利人。</p>
+          </section>
+        </article>
+
+        <footer class="docs-footer">
+          <p>LazyForza Docs · <span id="copyright-year">2026</span></p>
+          <a href="#overview">返回顶部 ↑</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>
