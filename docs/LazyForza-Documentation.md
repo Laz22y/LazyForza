@@ -57,13 +57,13 @@ LazyForza 按赛道距离对齐单圈，联动显示：
 
 程序按车型、性能等级和可观测调校特征保存换挡学习结果。FH6 UDP 不提供调校 ID，因此无法可靠区分的配置会保持保守，不会伪造精确身份。
 
-车辆名称使用内置的 Car Ordinals 快照，运行时不需要访问外部服务。
+车辆名称映射使用内置的 Car Ordinals 快照，运行时不需要访问外部服务。感谢 [HDR 维护并提供 FH6 Car Ordinals 车辆标识符文档](https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f)。
 
 ### 2.4 自动录制与回放
 
 自动录制默认关闭。启用后可保留赛前 15 秒和赛后 10 秒，并设置容量上限。默认策略是在达到上限时停止新录制，不主动删除文件；用户开启轮换后，程序仍会保护手动固定、个人最佳圈和需要诊断的样本。
 
-回放工作台支持 `.lfztelemetry` 文件，并联动时间轴、驾驶输入、走线和动态遥测。模拟器、回放和截图只用于开发验证，不等同于真实 FH6 实机结论。
+回放工作台支持 `.lfztelemetry` 文件，并联动时间轴、驾驶输入、走线和动态遥测。
 
 ### 2.5 实验性漂移 HUD
 
@@ -74,8 +74,6 @@ LazyForza 按赛道距离对齐单圈，联动显示：
 ### 2.6 地产环道与赛事
 
 地产环道支持本地计时、赛道文件交换、维修区路线、地图和赛事 HUD。连接 RaceServer 后可参加练习、排位和正赛，并接收旗语、处罚、调查、进站与发车状态。
-
-FH6 官方 UDP 不提供四轮世界坐标、车辆轮距、轴距和轮胎接地区域。没有可信车辆足迹标定时，赛道限制只能按 LazyForza 的定位点规则处理，不能宣称为 FIA 式“四轮全部越线”判定。
 
 ## 3. 数据、隐私与更新
 
@@ -283,29 +281,23 @@ npm test
 
 原生端与 Cloudflare 端共享协议语义，但各自维护状态实现。任何赛事协议、总控接口或 Web 功能变更都必须同步修改并补齐双端测试。
 
-### 6.5 协议与推导边界
+### 6.5 协议字段边界
 
 FH6 官方 Data Out 固定为 324 字节。可以直接获得位置、速度、姿态、输入、动力、悬挂和轮胎状态等字段，但不提供：
 
 - 官方赛道 ID 和赛事 ID；
 - 对手车辆遥测；
-- 调校 ID、宽体或精确车辆几何；
-- 四轮世界坐标、轮胎宽度和接地区域。
+- 调校 ID、宽体或精确车辆几何。
 
-算法推导必须明确标注来源。不能把推导值写成官方字段，也不能把模拟器、回放或自动测试结果表述为真实 FH6 实机验证。
-
-### 6.6 测试与验证
-
-提交前至少执行受影响项目的构建和测试。涉及协议、存储、路线、Overlay 或更新时应补回归测试。真实 FH6 结论统一记录在 `VALIDATION_WITH_FH6.md`；性能基线、Replay soak 和截图 QA 各自保留独立证据。
+开发时以官方字段定义为准。推导数据必须与官方字段明确区分。
 
 ## 7. 参考资料
 
 - [客户端架构](../ARCHITECTURE.md)
 - [FH6 遥测开发参考](../FH6_TELEMETRY_DEVELOPMENT_GUIDE.md)
-- [真实 FH6 验证清单](../VALIDATION_WITH_FH6.md)
-- [性能基线](PERFORMANCE_BASELINE.md)
 - [地产坐标验证](ESTATE_COORDINATE_VALIDATION.md)
 - [地产赛事进站策略](ESTATE_RACE_PIT_STRATEGY.md)
+- [HDR 维护的 FH6 Car Ordinals](https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f)
 - [客户端 Releases](https://github.com/Laz22y/LazyForza/releases/latest)
 - [RaceServer Releases](https://github.com/Laz22y/LazyForza.RaceServer/releases/latest)
 

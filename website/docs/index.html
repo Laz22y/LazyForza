@@ -35,7 +35,7 @@
           <a href="#race-server">RaceServer</a>
           <a href="#troubleshooting">常见问题</a>
           <a href="#development">开发者指南</a>
-          <a href="#boundaries">协议与验证边界</a>
+          <a href="#boundaries">协议字段</a>
           <a href="#references">参考资料</a>
         </nav>
         <div class="version-card">
@@ -88,7 +88,7 @@
             <div class="feature-list">
               <div><span>LIVE HUD</span><h3>实时仪表盘</h3><p>速度、挡位、转速、踏板、方向、轮胎、动力和性能等级可独立开关、移动、缩放与调节透明度。窗口支持置顶和鼠标穿透。</p></div>
               <div><span>LAP ANALYSIS</span><h3>圈速与走线</h3><p>按距离对齐单圈，联动速度、油门、制动、方向与走线。紫色分段只表示本地同等级最快，不代表在线世界纪录。</p></div>
-              <div><span>VEHICLE</span><h3>车辆与换挡学习</h3><p>按车型、性能等级和可观测调校特征保存结果。FH6 不提供调校 ID，无法可靠区分时保持保守。</p></div>
+              <div><span>VEHICLE</span><h3>车辆与换挡学习</h3><p>按车型、性能等级和可观测调校特征保存结果。车辆名称映射使用 HDR 提供的 Car Ordinals 文档内置快照。</p></div>
               <div><span>RECORDING</span><h3>录制与回放</h3><p>自动录制默认关闭。可保留赛前 15 秒与赛后 10 秒；回放工作台联动时间轴、驾驶输入、走线和动态遥测。</p></div>
               <div><span>DRIFT</span><h3>实验性漂移 HUD</h3><p>用本车 UDP 推导侧滑角和控车趋势，优先降低 Spin 风险。换挡箭头不是最佳换挡点，积分趋势不复刻游戏分数。</p></div>
               <div><span>ESTATE RACE</span><h3>地产环道与赛事</h3><p>支持本地计时、赛道交换、维修区、地图和赛事 HUD；连接 RaceServer 后接入练习、排位、正赛、旗语与处罚。</p></div>
@@ -235,18 +235,15 @@ npm test</code></pre>
           </section>
 
           <section class="doc-section" id="boundaries">
-            <p class="section-index">07 / BOUNDARIES</p>
-            <h2>协议与验证边界</h2>
+            <p class="section-index">07 / PROTOCOL</p>
+            <h2>协议字段边界</h2>
             <p>FH6 官方 Data Out 固定为 324 字节。可以直接获得位置、速度、姿态、输入、动力、悬挂和轮胎状态等字段，但不提供：</p>
             <ul class="cross-list">
               <li>官方赛道 ID 和赛事 ID；</li>
               <li>对手车辆遥测；</li>
-              <li>调校 ID、宽体或精确车辆几何；</li>
-              <li>四轮世界坐标、轮胎宽度和接地区域。</li>
+              <li>调校 ID、宽体或精确车辆几何。</li>
             </ul>
-            <div class="callout callout-info"><strong>赛道限制</strong><p>没有可信车辆足迹标定时，只能使用 LazyForza 定位点规则，不能宣称为 FIA 式“四轮全部越线”判定。</p></div>
-            <h3>验证口径</h3>
-            <p>算法推导必须标注来源。自动测试、模拟器、Replay、截图 QA 和真实 FH6 多机验证分开记录。真实 FH6 结论以仓库中的 <code>VALIDATION_WITH_FH6.md</code> 为准。</p>
+            <p>开发时以官方字段定义为准。推导数据必须与官方字段明确区分。</p>
           </section>
 
           <section class="doc-section" id="references">
@@ -255,11 +252,13 @@ npm test</code></pre>
             <div class="reference-grid">
               <a href="https://github.com/Laz22y/LazyForza/blob/main/ARCHITECTURE.md"><strong>客户端架构</strong><span>数据流、模块、Overlay 与存储</span></a>
               <a href="https://github.com/Laz22y/LazyForza/blob/main/FH6_TELEMETRY_DEVELOPMENT_GUIDE.md"><strong>FH6 遥测开发参考</strong><span>字段、推导和缺失数据</span></a>
-              <a href="https://github.com/Laz22y/LazyForza/blob/main/VALIDATION_WITH_FH6.md"><strong>真实 FH6 验证清单</strong><span>实机结论与待验证项目</span></a>
-              <a href="https://github.com/Laz22y/LazyForza/blob/main/docs/PERFORMANCE_BASELINE.md"><strong>性能基线</strong><span>性能与 Replay soak 记录</span></a>
+              <a href="https://github.com/Laz22y/LazyForza.RaceServer"><strong>RaceServer 仓库</strong><span>协议、总控与部署源码</span></a>
+              <a href="https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f"><strong>HDR · FH6 Car Ordinals</strong><span>车辆标识符文档与离线名称映射来源</span></a>
               <a href="https://github.com/Laz22y/LazyForza/releases/latest"><strong>客户端 Releases</strong><span>正式包与 SHA-256</span></a>
               <a href="https://github.com/Laz22y/LazyForza.RaceServer/releases/latest"><strong>RaceServer Releases</strong><span>全平台与 Cloudflare 发行包</span></a>
             </div>
+            <h3>致谢</h3>
+            <p>感谢 <a href="https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f">HDR 维护并提供 FH6 Car Ordinals 车辆标识符文档</a>。LazyForza 使用其内置快照完成离线车辆名称映射。</p>
             <h3>License 与商标</h3>
             <p>LazyForza 和 RaceServer 使用 MIT License。项目为非官方社区作品，与 Microsoft、Xbox 或 Playground Games 无隶属关系；相关商标属于其各自权利人。</p>
           </section>
