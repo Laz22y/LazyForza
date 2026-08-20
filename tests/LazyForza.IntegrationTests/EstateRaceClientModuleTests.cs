@@ -66,13 +66,14 @@ public sealed class EstateRaceClientModuleTests
         Assert.AreEqual("+1 LAP", EstateRaceLeaderboardFormatter.Format(
             trailing with { CompletedLaps = 3, GapToLeaderSeconds = null },
             local with { GapToLeaderSeconds = null }, false, true, 5));
-        Assert.AreEqual("LEADER", EstateRaceLeaderboardFormatter.FormatLeaderComparison(local with { Position = 1 }, 4));
-        Assert.AreEqual("+0.832", EstateRaceLeaderboardFormatter.FormatLeaderComparison(local, 4));
+        Assert.AreEqual("LEADER", EstateRaceLeaderboardFormatter.FormatLeaderComparison(
+            local with { Position = 1 }, leader, 4));
+        Assert.AreEqual("+0.832", EstateRaceLeaderboardFormatter.FormatLeaderComparison(local, leader, 4));
         Assert.AreEqual("+1 LAP", EstateRaceLeaderboardFormatter.FormatLeaderComparison(trailing with
         {
             GapToLeaderSeconds = null,
             CompletedLaps = 3
-        }, 4));
+        }, leader, 4));
         Assert.AreEqual("1:07.600",
             EstateRaceLeaderboardFormatter.Format(leader, null, true, false, 4),
             "OB 观看练习赛或排位赛时，榜首应显示完整最快圈。");
@@ -103,6 +104,39 @@ public sealed class EstateRaceClientModuleTests
                 },
                 finishedLeader,
                 4));
+    }
+
+    [TestMethod]
+    public void RaceLeaderboardOnlyUsesLapTextAfterACompleteLapHasBeenLost()
+    {
+        var leader = Participant(Guid.NewGuid()) with
+        {
+            Position = 1,
+            CompletedLaps = 5,
+            TrackProgress = .02,
+            GapToLeaderSeconds = 0
+        };
+        var local = Participant(Guid.NewGuid()) with
+        {
+            Position = 2,
+            CompletedLaps = 4,
+            TrackProgress = .95,
+            GapToLeaderSeconds = null
+        };
+
+        Assert.AreEqual("—", EstateRaceLeaderboardFormatter.Format(
+            leader, local, qualifying: false, race: true, 5),
+            "前车刚过线时双方只差 0.07 圈，不能显示本机已落后一圈。");
+        Assert.AreEqual("—", EstateRaceLeaderboardFormatter.FormatLeaderComparison(
+            local, leader, 5),
+            "OB/总控视角同样不能用已完成圈数直接判断套圈。");
+
+        var fullyLapped = local with { TrackProgress = 0 };
+        var oneLapAhead = leader with { TrackProgress = .12 };
+        Assert.AreEqual("-1 LAP", EstateRaceLeaderboardFormatter.Format(
+            oneLapAhead, fullyLapped, qualifying: false, race: true, 5));
+        Assert.AreEqual("+1 LAP", EstateRaceLeaderboardFormatter.FormatLeaderComparison(
+            fullyLapped, oneLapAhead, 5));
     }
 
     [TestMethod]

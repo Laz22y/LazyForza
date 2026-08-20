@@ -213,7 +213,11 @@ public sealed record EstateCollisionEvidenceSnapshot(
     double VerticalDistanceMeters,
     double RelativeSpeedKph,
     double ImpactMagnitudeMps,
-    double ImpactSpeedLossMps);
+    double ImpactSpeedLossMps,
+    double ApproachDistanceReductionMeters = 0,
+    bool BothDriversReportedImpact = false,
+    int ContactCount = 1,
+    DateTimeOffset? LastIncidentAt = null);
 
 public sealed record EstateRaceParticipant(
     Guid Id,

@@ -28,11 +28,19 @@ public static class EstateRaceLeaderboardFormatter
             : "—";
     }
 
-    public static string FormatLeaderComparison(EstateRaceParticipant participant, int leaderCompletedLaps)
+    public static string FormatLeaderComparison(
+        EstateRaceParticipant participant,
+        EstateRaceParticipant? leader,
+        int leaderCompletedLaps)
     {
         if (participant.Position == 1) return "LEADER";
         if (participant.GapToLeaderSeconds is double gap) return FormatDelta(gap);
-        return $"+{Math.Max(1, leaderCompletedLaps - participant.CompletedLaps)} LAP";
+        var lapDeficit = leader is null
+            ? Math.Max(0, leaderCompletedLaps - participant.CompletedLaps)
+            : Math.Max(0, WholeLapDelta(leader, participant));
+        return lapDeficit > 0
+            ? $"+{lapDeficit} {(lapDeficit == 1 ? "LAP" : "LAPS")}"
+            : "—";
     }
 
     public static string Format(
@@ -41,7 +49,8 @@ public static class EstateRaceLeaderboardFormatter
         bool qualifying,
         bool race,
         int leaderCompletedLaps,
-        bool showPitStatus = true)
+        bool showPitStatus = true,
+        EstateRaceParticipant? leaderParticipant = null)
     {
         if (participant.Status == RaceParticipantStatus.Disqualified) return "DSQ";
         if (participant.Status == RaceParticipantStatus.DidNotFinish) return "DNF";
@@ -64,18 +73,31 @@ public static class EstateRaceLeaderboardFormatter
 
         if (local) return "REFERENCE";
         if (localParticipant is null)
-            return FormatLeaderComparison(participant, leaderCompletedLaps);
+            return FormatLeaderComparison(participant, leaderParticipant, leaderCompletedLaps);
 
         var participantGap = GapToLeader(participant);
         var localGap = GapToLeader(localParticipant);
         if (participantGap is double otherGap && localGap is double referenceGap)
             return FormatDelta(otherGap - referenceGap);
 
-        var lapDelta = localParticipant.CompletedLaps - participant.CompletedLaps;
+        var lapDelta = WholeLapDelta(localParticipant, participant);
         if (lapDelta != 0)
             return $"{lapDelta:+0;-0} {(Math.Abs(lapDelta) == 1 ? "LAP" : "LAPS")}";
         return "—";
     }
+
+    private static int WholeLapDelta(
+        EstateRaceParticipant reference,
+        EstateRaceParticipant participant)
+    {
+        var difference = RaceDistance(reference) - RaceDistance(participant);
+        var fullLaps = (int)Math.Floor(Math.Abs(difference) + 1e-9);
+        return Math.Sign(difference) * fullLaps;
+    }
+
+    private static double RaceDistance(EstateRaceParticipant participant) =>
+        Math.Max(0, participant.CompletedLaps) +
+        Math.Clamp(double.IsFinite(participant.TrackProgress) ? participant.TrackProgress : 0, 0, 1);
 
     private static double? GapToLeader(EstateRaceParticipant participant) =>
         participant.Position == 1
