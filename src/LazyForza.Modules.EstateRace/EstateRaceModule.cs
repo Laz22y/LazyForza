@@ -534,7 +534,16 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             collision.ImpactPosition.X,
             collision.ImpactPosition.Y,
             collision.ImpactPosition.Z,
-            collision.ImpactAgeMilliseconds);
+            collision.ImpactAgeMilliseconds,
+            positionReliable,
+            collision.WorldVelocity.X,
+            collision.WorldVelocity.Y,
+            collision.WorldVelocity.Z,
+            collision.ImpactWorldVelocity.X,
+            collision.ImpactWorldVelocity.Y,
+            collision.ImpactWorldVelocity.Z,
+            collision.ImpactSmashableVelDiff,
+            collision.ImpactSmashableMass);
         await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
         if (context.LastCompletedLap is { } lap && lap.EventId != sentLapEventId)
         {

@@ -101,7 +101,16 @@ internal sealed record RaceTelemetryUpdate(
     double ImpactWorldX = 0,
     double ImpactWorldY = 0,
     double ImpactWorldZ = 0,
-    int ImpactAgeMilliseconds = 0);
+    int ImpactAgeMilliseconds = 0,
+    bool HasWorldVelocity = false,
+    double WorldVelocityX = 0,
+    double WorldVelocityY = 0,
+    double WorldVelocityZ = 0,
+    double ImpactWorldVelocityX = 0,
+    double ImpactWorldVelocityY = 0,
+    double ImpactWorldVelocityZ = 0,
+    double ImpactSmashableVelDiff = 0,
+    double ImpactSmashableMass = 0);
 
 internal sealed record RaceLapCompleted(
     Guid EventId,

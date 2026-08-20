@@ -54,11 +54,63 @@ public sealed class EstateCollisionEvidenceDetectorTests
         Assert.IsTrue(second.ImpactSequence > first.ImpactSequence);
     }
 
+    [TestMethod]
+    public void UsesWorldVelocitySoNormalYawChangeDoesNotLookLikeAnImpact()
+    {
+        var detector = new EstateCollisionEvidenceDetector();
+        var now = DateTimeOffset.Parse("2026-08-13T12:00:00Z");
+        _ = detector.Observe(Frame(1, now, 1_000, new(0, 0, 20), yaw: 0), true);
+        var turning = detector.Observe(Frame(
+            2,
+            now.AddMilliseconds(80),
+            1_080,
+            new(-9.59f, 0, 17.55f),
+            yaw: .5f), true);
+
+        Assert.AreEqual(0, turning.ImpactMagnitudeMps, .01,
+            "车辆转向时本地速度分量会变化，但转换到世界坐标后不应误报碰撞。");
+    }
+
+    [TestMethod]
+    public void DetectsAnImpulseDistributedAcrossSeveralFrames()
+    {
+        var detector = new EstateCollisionEvidenceDetector();
+        var now = DateTimeOffset.Parse("2026-08-13T12:00:00Z");
+        _ = detector.Observe(Frame(1, now, 1_000, new(20, 0, 0)), true);
+        _ = detector.Observe(Frame(2, now.AddMilliseconds(35), 1_035, new(19.4f, 0, 0)), true);
+        _ = detector.Observe(Frame(3, now.AddMilliseconds(70), 1_070, new(18.7f, 0, 0)), true);
+        var impact = detector.Observe(Frame(4, now.AddMilliseconds(105), 1_105, new(17.8f, 0, 0)), true);
+
+        Assert.IsTrue(impact.ImpactSequence > 0);
+        Assert.IsTrue(impact.ImpactMagnitudeMps >= 2.1);
+        Assert.IsTrue(impact.ImpactSpeedLossMps >= 2.1);
+    }
+
+    [TestMethod]
+    public void OfficialSmashableObjectFieldsVetoVehicleCollisionEvidence()
+    {
+        var detector = new EstateCollisionEvidenceDetector();
+        var now = DateTimeOffset.Parse("2026-08-13T12:00:00Z");
+        _ = detector.Observe(Frame(1, now, 1_000, new(20, 0, 0)), true);
+        var impact = detector.Observe(Frame(
+            2,
+            now.AddMilliseconds(60),
+            1_060,
+            new(14, 0, 0),
+            smashableVelDiff: 6,
+            smashableMass: 25), true);
+
+        Assert.AreEqual(0, impact.ImpactMagnitudeMps, .01);
+    }
+
     private static TelemetryFrame Frame(
         long sequence,
         DateTimeOffset arrival,
         uint timestamp,
-        Vector3F velocity)
+        Vector3F velocity,
+        float yaw = 0,
+        float smashableVelDiff = 0,
+        float smashableMass = 0)
     {
         var raw = new Fh6RawTelemetry
         {
@@ -66,6 +118,9 @@ public sealed class EstateCollisionEvidenceDetectorTests
             TimestampMS = timestamp,
             Position = new Vector3F(100, 0, 50),
             Velocity = velocity,
+            Yaw = yaw,
+            SmashableVelDiff = smashableVelDiff,
+            SmashableMass = smashableMass,
             Speed = (float)Math.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z)
         };
         return new TelemetryFrame(

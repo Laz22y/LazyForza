@@ -771,10 +771,11 @@ internal sealed partial class MainWindow
         total.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(total, 3);
         grid.Children.Add(total);
-        var leaderLaps = session.Participants.FirstOrDefault()?.CompletedLaps ?? participant.CompletedLaps;
+        var leader = session.Participants.FirstOrDefault();
+        var leaderLaps = leader?.CompletedLaps ?? participant.CompletedLaps;
         var deltaText = qualifyingPhase && participant.Position != 1 && participant.BestLapSeconds is null
             ? "—"
-            : EstateRaceLeaderboardFormatter.FormatLeaderComparison(participant, leaderLaps);
+            : EstateRaceLeaderboardFormatter.FormatLeaderComparison(participant, leader, leaderLaps);
         var result = Label(deltaText, 13, FontWeights.SemiBold,
             participant.Position == 1 ? "PurpleBrush" : null);
         result.HorizontalAlignment = HorizontalAlignment.Right;

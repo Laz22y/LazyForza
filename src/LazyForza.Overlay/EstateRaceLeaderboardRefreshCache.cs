@@ -25,7 +25,8 @@ internal sealed class EstateRaceLeaderboardRefreshCache(TimeSpan? refreshInterva
                 timedLap,
                 race,
                 participants.FirstOrDefault()?.CompletedLaps ?? 0,
-                showPitStatus);
+                showPitStatus,
+                participants.FirstOrDefault());
 
         if (now >= nextRefreshAt ||
             referenceId != localParticipant?.Id ||
@@ -34,13 +35,15 @@ internal sealed class EstateRaceLeaderboardRefreshCache(TimeSpan? refreshInterva
         {
             comparisons.Clear();
             var leaderLaps = participants.FirstOrDefault()?.CompletedLaps ?? 0;
+            var leader = participants.FirstOrDefault();
             foreach (var item in participants)
                 comparisons[item.Id] = EstateRaceLeaderboardFormatter.Format(
                     item,
                     localParticipant,
                     qualifying: false,
                     race: true,
-                    leaderLaps);
+                    leaderLaps,
+                    leaderParticipant: leader);
             referenceId = localParticipant?.Id;
             nextRefreshAt = now + interval;
         }
