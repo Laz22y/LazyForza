@@ -75,10 +75,12 @@ dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --replay "C:\path
 - [完整用户与开发者文档](docs/LazyForza-Documentation.md)
 - [架构](ARCHITECTURE.md)
 - [FH6 遥测开发参考](FH6_TELEMETRY_DEVELOPMENT_GUIDE.md)
-- [真实 FH6 验证清单](VALIDATION_WITH_FH6.md)
-- [性能基线](docs/PERFORMANCE_BASELINE.md)
 
-FH6 UDP 不提供官方赛事 ID、对手遥测、调校 ID、车辆精确几何或四轮世界坐标。推导值不会被表述为官方字段；自动测试、模拟回放和真实 FH6 实机验证分开记录。
+FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与官方字段明确区分。
+
+## 致谢
+
+感谢 [HDR 维护并提供 FH6 Car Ordinals 车辆标识符文档](https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f)。LazyForza 使用其内置快照完成离线车辆名称映射。
 
 ## License
 
