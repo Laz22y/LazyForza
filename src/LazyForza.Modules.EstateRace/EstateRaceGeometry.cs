@@ -6,7 +6,17 @@ internal readonly record struct EstateRaceProjection(
     double Progress,
     double LateralOffsetMeters,
     double MapX,
-    double MapY);
+    double MapY,
+    int SegmentIndex = -1,
+    double ProgressMeters = 0,
+    double DistanceMeters = double.PositiveInfinity,
+    double ElevationErrorMeters = double.PositiveInfinity,
+    bool IsAmbiguous = false)
+{
+    public bool IsValid => SegmentIndex >= 0 &&
+                           double.IsFinite(DistanceMeters) &&
+                           double.IsFinite(ProgressMeters);
+}
 
 internal readonly record struct EstatePitRouteProjection(
     double DistanceMeters,
@@ -22,41 +32,162 @@ internal static class EstateRaceGeometry
         if (track.Points.Count < 2 || track.LengthMeters <= 0)
             return new EstateRaceProjection(0, 0, 0.5, 0.5);
 
-        var bestDistanceSquared = double.MaxValue;
-        var bestProgress = 0d;
-        var bestSignedOffset = 0d;
+        var best = ProjectionCandidate.Invalid;
         for (var index = 0; index < track.Points.Count - 1; index++)
         {
-            var start = track.Points[index];
-            var end = track.Points[index + 1];
-            var dx = end.X - start.X;
-            var dz = end.Z - start.Z;
-            var lengthSquared = dx * dx + dz * dz;
-            if (lengthSquared < 0.0001) continue;
-            var t = Math.Clamp(
-                ((position.X - start.X) * dx + (position.Z - start.Z) * dz) /
-                lengthSquared,
-                0,
-                1);
-            var projectedX = start.X + dx * t;
-            var projectedZ = start.Z + dz * t;
-            var offsetX = position.X - projectedX;
-            var offsetZ = position.Z - projectedZ;
-            var distanceSquared = offsetX * offsetX + offsetZ * offsetZ;
-            if (distanceSquared >= bestDistanceSquared) continue;
-            bestDistanceSquared = distanceSquared;
-            bestProgress = start.S + (end.S - start.S) * t;
-            var cross = dx * offsetZ - dz * offsetX;
-            bestSignedOffset = Math.Sqrt(distanceSquared) * Math.Sign(cross);
+            var candidate = ProjectSegment(track.Points, position, index, score: 0);
+            if (candidate.IsValid && (!best.IsValid || candidate.DistanceMeters < best.DistanceMeters))
+                best = candidate;
         }
+
+        return CreateProjection(track, position, best, isAmbiguous: false);
+    }
+
+    public static EstateRaceProjection ProjectContinuous(
+        TrackTemplate track,
+        Vector3F position,
+        EstateRaceProjection previous,
+        double expectedAdvanceMeters)
+    {
+        if (!previous.IsValid || track.Points.Count < 2 || track.LengthMeters <= 0)
+            return Project(track, position);
+
+        var expectedAdvance = Math.Clamp(expectedAdvanceMeters, 0, 250);
+        var slack = Math.Max(8, expectedAdvance * 1.75 + 4);
+        var best = ProjectionCandidate.Invalid;
+        for (var index = 0; index < track.Points.Count - 1; index++)
+        {
+            var candidate = ProjectSegment(track.Points, position, index, score: 0);
+            if (!candidate.IsValid) continue;
+            var progressDelta = ContinuousProgressDelta(
+                previous.ProgressMeters,
+                candidate.ProgressMeters,
+                track.LengthMeters);
+            var continuityPenalty = progressDelta < -slack
+                ? (-progressDelta - slack) * 1.4
+                : Math.Max(0, Math.Abs(progressDelta - expectedAdvance) - slack) * 0.2;
+            var extremeAdvance = Math.Max(250, expectedAdvance * 8 + 80);
+            if (progressDelta > extremeAdvance)
+                continuityPenalty += (progressDelta - extremeAdvance) * 0.5;
+            candidate = candidate with
+            {
+                Score = candidate.DistanceMeters + candidate.ElevationErrorMeters * 0.15 + continuityPenalty
+            };
+            if (!best.IsValid || candidate.Score < best.Score) best = candidate;
+        }
+
+        if (!best.IsValid) return Project(track, position);
+        var secondScore = double.PositiveInfinity;
+        var ambiguitySeparation = Math.Max(40, track.LengthMeters * 0.035);
+        for (var index = 0; index < track.Points.Count - 1; index++)
+        {
+            var candidate = ProjectSegment(track.Points, position, index, score: 0);
+            if (!candidate.IsValid || Math.Abs(candidate.ProgressMeters - best.ProgressMeters) < ambiguitySeparation)
+                continue;
+            var progressDelta = ContinuousProgressDelta(
+                previous.ProgressMeters,
+                candidate.ProgressMeters,
+                track.LengthMeters);
+            var continuityPenalty = progressDelta < -slack
+                ? (-progressDelta - slack) * 1.4
+                : Math.Max(0, Math.Abs(progressDelta - expectedAdvance) - slack) * 0.2;
+            var extremeAdvance = Math.Max(250, expectedAdvance * 8 + 80);
+            if (progressDelta > extremeAdvance)
+                continuityPenalty += (progressDelta - extremeAdvance) * 0.5;
+            secondScore = Math.Min(
+                secondScore,
+                candidate.DistanceMeters + candidate.ElevationErrorMeters * 0.15 + continuityPenalty);
+        }
+
+        var ambiguous = secondScore - best.Score <= Math.Max(1.5, track.MatchingToleranceMeters * 0.12);
+        return CreateProjection(track, position, best, ambiguous);
+    }
+
+    private static EstateRaceProjection CreateProjection(
+        TrackTemplate track,
+        Vector3F position,
+        ProjectionCandidate candidate,
+        bool isAmbiguous)
+    {
+        if (!candidate.IsValid) return new EstateRaceProjection(0, 0, 0.5, 0.5);
 
         var width = Math.Max(1, track.MaxX - track.MinX);
         var depth = Math.Max(1, track.MaxZ - track.MinZ);
         return new EstateRaceProjection(
-            Math.Clamp(bestProgress / track.LengthMeters, 0, 1),
-            Math.Clamp(bestSignedOffset, -500, 500),
+            Math.Clamp(candidate.ProgressMeters / track.LengthMeters, 0, 1),
+            Math.Clamp(candidate.SignedOffsetMeters, -500, 500),
             Math.Clamp((position.X - track.MinX) / width, 0, 1),
-            Math.Clamp(1 - (position.Z - track.MinZ) / depth, 0, 1));
+            Math.Clamp(1 - (position.Z - track.MinZ) / depth, 0, 1),
+            candidate.SegmentIndex,
+            candidate.ProgressMeters,
+            candidate.DistanceMeters,
+            candidate.ElevationErrorMeters,
+            isAmbiguous);
+    }
+
+    private static ProjectionCandidate ProjectSegment(
+        IReadOnlyList<TrackPoint> points,
+        Vector3F position,
+        int index,
+        double score)
+    {
+        var start = points[index];
+        var end = points[index + 1];
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var dz = end.Z - start.Z;
+        var lengthSquared = dx * dx + dy * dy + dz * dz;
+        if (lengthSquared < 0.0001) return ProjectionCandidate.Invalid;
+        var amount = Math.Clamp(
+            ((position.X - start.X) * dx + (position.Y - start.Y) * dy +
+             (position.Z - start.Z) * dz) / lengthSquared,
+            0,
+            1);
+        var projectedX = start.X + dx * amount;
+        var projectedY = start.Y + dy * amount;
+        var projectedZ = start.Z + dz * amount;
+        var offsetX = position.X - projectedX;
+        var offsetY = position.Y - projectedY;
+        var offsetZ = position.Z - projectedZ;
+        var distance = Math.Sqrt(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
+        var horizontalLength = Math.Sqrt(dx * dx + dz * dz);
+        var cross = dx * offsetZ - dz * offsetX;
+        var signedOffset = horizontalLength < 0.001
+            ? 0
+            : Math.Sqrt(offsetX * offsetX + offsetZ * offsetZ) * Math.Sign(cross);
+        return new ProjectionCandidate(
+            index,
+            start.S + (end.S - start.S) * amount,
+            distance,
+            Math.Abs(offsetY),
+            signedOffset,
+            score);
+    }
+
+    private static double ContinuousProgressDelta(double previous, double current, double length)
+    {
+        var delta = current - previous;
+        if (previous >= length * 0.75 && current <= length * 0.25) delta += length;
+        else if (previous <= length * 0.25 && current >= length * 0.75) delta -= length;
+        return delta;
+    }
+
+    private readonly record struct ProjectionCandidate(
+        int SegmentIndex,
+        double ProgressMeters,
+        double DistanceMeters,
+        double ElevationErrorMeters,
+        double SignedOffsetMeters,
+        double Score)
+    {
+        public bool IsValid => SegmentIndex >= 0;
+        public static ProjectionCandidate Invalid => new(
+            -1,
+            0,
+            double.PositiveInfinity,
+            double.PositiveInfinity,
+            0,
+            double.PositiveInfinity);
     }
 
     public static IReadOnlyList<EstateRaceMapPoint> NormalizeOutline(

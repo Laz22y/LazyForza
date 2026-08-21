@@ -110,7 +110,23 @@ internal sealed record RaceTelemetryUpdate(
     double ImpactWorldVelocityY = 0,
     double ImpactWorldVelocityZ = 0,
     double ImpactSmashableVelDiff = 0,
-    double ImpactSmashableMass = 0);
+    double ImpactSmashableMass = 0,
+    RaceShortcutEvidence? ShortcutEvidence = null);
+
+internal sealed record RaceShortcutEvidence(
+    Guid Id,
+    long DetectedAtMonotonicMilliseconds,
+    double StartProgress,
+    double EndProgress,
+    double RouteDistanceMeters,
+    double WorldDistanceMeters,
+    double GainMeters,
+    double MaximumLateralOffsetMeters,
+    double ProtectedRouteMeters,
+    double TheoreticalSavingMeters,
+    int MissedCriticalGates,
+    double Confidence,
+    int Flags);
 
 internal sealed record RaceLapCompleted(
     Guid EventId,
