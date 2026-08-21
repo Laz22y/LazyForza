@@ -264,6 +264,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     public bool HasCurrentCompetitionSession => competitionActive;
     public bool HasCompetitionPageContent => competitionActive || GetRecentCompetition() is not null;
     public bool IsShowingRecentCompetition => !competitionActive && GetRecentCompetition() is not null;
+    public bool IsTrackLearningRequested => forceTrackLearning;
     public DateTimeOffset? RecentCompetitionExpiresAt => GetRecentCompetition()?.ExpiresAt;
     public static TimeSpan RecentCompetitionRetention { get; } = TimeSpan.FromMinutes(5);
     public string? IncompatibleTrackName => incompatibleTrackName;
@@ -1617,6 +1618,23 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         incompatibleTrackName = null;
         ClearRecentCompetition();
         store.SetAppSetting(selectionSettingKey, string.Empty);
+        PublishWaitingForCompetition();
+    }
+
+    public void CancelTrackLearning()
+    {
+        forceTrackLearning = false;
+        track = null;
+        trackSpatialIndex = null;
+        sectors = [];
+        sectorStartTimes = [];
+        completedSectorTimes = [];
+        capture.Clear();
+        currentSamples.Clear();
+        ResetCompetitionSession();
+        competitionActive = false;
+        ClearRecentCompetition();
+        sessionId = Guid.NewGuid();
         PublishWaitingForCompetition();
     }
 

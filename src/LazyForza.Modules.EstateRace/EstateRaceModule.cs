@@ -26,6 +26,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private static readonly TimeSpan TelemetrySendTimeout = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan CommandSendTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RecoveredLapRetryInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FingerprintRefreshInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan BackgroundFailureLogInterval = TimeSpan.FromSeconds(10);
     private readonly Func<EstateRaceTrackContext?> trackContext;
@@ -35,6 +36,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private readonly Action<EstateStrategySample>? strategySampleSaver;
     private readonly object strategySync = new();
     private readonly object telemetryStateSync = new();
+    private readonly object lapRecoverySync = new();
     private readonly EstateCollisionEvidenceDetector collisionEvidenceDetector = new();
     private readonly object trackMapCacheSync = new();
     private readonly SemaphoreSlim connectionLock = new(1, 1);
@@ -63,6 +65,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private bool connectionAuthenticated;
     private EstateRaceSession? session;
     private Guid? sentLapEventId;
+    private readonly List<PendingLapUpload> pendingLapUploads = [];
     private long sequence;
     private DateTimeOffset lastTelemetrySentAt;
     private long lastTelemetrySentMonotonicMilliseconds;
@@ -89,7 +92,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private DateTimeOffset lastSnapshotFailureAt;
     private string? lastSnapshotFailure;
     private long estimatedOneWayLatencyTicks;
+    private long estimatedRoundTripLatencyTicks;
+    private long networkJitterTicks;
     private long serverClockOffsetTicks;
+    private long lastServerResponseUtcTicks;
     private int hasServerClockEstimate;
     private EstateRaceTrackMapCacheKey? trackMapCacheKey;
     private IReadOnlyList<EstateRaceMapPoint> cachedTrackOutline = [];
@@ -314,6 +320,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             else driverResumeToken = accepted.ResumeToken;
             connectionAuthenticated = true;
             ApplySessionSnapshot(NormalizeSession(accepted.Snapshot), resetForConnection: !isReconnectAttempt);
+            MarkServerResponse();
             await RefreshOrganizerLogoAsync(accepted.Snapshot, timeout.Token).ConfigureAwait(false);
             await SaveProfileAsync(activeProfile, accepted.ResumeToken, cancellationToken).ConfigureAwait(false);
             PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
@@ -322,6 +329,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             receiveTask = Task.Run(
                 () => ReceiveLoopAsync(connectedSocket, connectedCancellation.Token),
                 CancellationToken.None);
+            await FlushPendingLapUploadsAsync(timeout.Token).ConfigureAwait(false);
             heartbeatTask = Task.Run(
                 () => HeartbeatLoopAsync(connectedCancellation.Token),
                 CancellationToken.None);
@@ -363,6 +371,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             lastQualifyingSessionNumber = 0;
             lastPracticeSessionNumber = 0;
             sentLapEventId = null;
+            ClearPendingLapUploads();
             SetRaceTimingEnabled(false);
             SetConnectionState(EstateRaceConnectionState.Disconnected, "未连接赛事服务");
         }
@@ -428,6 +437,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         lastPracticeSessionNumber = 0;
         lastValidProjection = null;
         sentLapEventId = null;
+        ClearPendingLapUploads();
         SetRaceTimingEnabled(false);
         Volatile.Write(ref snapshot, EmptySnapshot());
     }
@@ -440,7 +450,16 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         {
             try
             {
-                await ProcessTelemetryFrameAsync(frame, cancellationToken).ConfigureAwait(false);
+                const int maximumCatchUpFrames = 16;
+                var catchUp = new Queue<TelemetryFrame>(maximumCatchUpFrames);
+                catchUp.Enqueue(frame);
+                while (frames.TryRead(out var newer))
+                {
+                    if (catchUp.Count == maximumCatchUpFrames) catchUp.Dequeue();
+                    catchUp.Enqueue(newer);
+                }
+                while (catchUp.TryDequeue(out var buffered))
+                    await ProcessTelemetryFrameAsync(buffered, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception)
@@ -458,8 +477,28 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         TelemetryFrame frame,
         CancellationToken cancellationToken)
     {
-        if (socket?.State != WebSocketState.Open) return;
-        if (!connectionAuthenticated || connectionIsObserver) return;
+        var context = trackContext();
+        if (context is null) return;
+        if (socket?.State != WebSocketState.Open || !connectionAuthenticated)
+        {
+            CaptureDisconnectedLap(context);
+            return;
+        }
+        if (connectionIsObserver) return;
+        await FlushPendingLapUploadsAsync(cancellationToken).ConfigureAwait(false);
+        if (context.LastCompletedLap is { } completedLap &&
+            completedLap.EventId != sentLapEventId &&
+            !HasPendingLapUpload(completedLap.EventId))
+        {
+            var upload = CreateLapUpload(completedLap, recoveredAfterDisconnect: false);
+            if (session?.DisconnectedLapRecoveryEnabled == true)
+                QueuePendingLapUpload(upload, Math.Max(1, monotonicClock.ElapsedMilliseconds));
+            await SendAsync(
+                "lapCompleted",
+                upload,
+                cancellationToken).ConfigureAwait(false);
+            sentLapEventId = completedLap.EventId;
+        }
         var monotonicNow = monotonicClock.ElapsedMilliseconds;
         var valid = IsTelemetryValid(frame, out var pausedOrRewinding);
         var collision = collisionEvidenceDetector.Observe(frame, valid);
@@ -469,8 +508,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             return;
         lastTelemetrySentAt = frame.ArrivalTime;
         lastTelemetrySentMonotonicMilliseconds = monotonicNow;
-        var context = trackContext();
-        if (context is null) return;
         observedVehicleFingerprint = VehicleProfileFingerprint.FromFrame(frame);
         var positionReliable = valid;
         var localParticipant = session?.Participants.FirstOrDefault(candidate => candidate.Id == participantId);
@@ -545,23 +582,114 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             collision.ImpactSmashableVelDiff,
             collision.ImpactSmashableMass);
         await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
-        if (context.LastCompletedLap is { } lap && lap.EventId != sentLapEventId)
-        {
-            await SendAsync("lapCompleted", new RaceLapCompleted(
-                lap.EventId,
-                lap.LapNumber,
-                lap.LapSeconds,
-                lap.SectorSeconds,
-                lap.IsValid,
-                lap.InvalidReason,
-                monotonicClock.ElapsedMilliseconds,
-                lap.IsBestLapEligible), cancellationToken).ConfigureAwait(false);
-            sentLapEventId = lap.EventId;
-        }
         // Practice strategy processing is optional. Run it after the time-sensitive
         // telemetry and lap messages so it can never delay the current upload.
         ObserveTelemetryStrategySafely(context, pausedOrRewinding, pitService);
     }
+
+    private void CaptureDisconnectedLap(EstateRaceTrackContext context)
+    {
+        if (connectionIsObserver || context.LastCompletedLap is not { } lap || lap.EventId == sentLapEventId)
+            return;
+        if (session?.DisconnectedLapRecoveryEnabled != true)
+        {
+            sentLapEventId = lap.EventId;
+            ClearPendingLapUploads();
+            return;
+        }
+
+        lock (lapRecoverySync)
+        {
+            if (pendingLapUploads.Any(item => item.Lap.EventId == lap.EventId)) return;
+            QueuePendingLapUploadLocked(CreateLapUpload(lap, recoveredAfterDisconnect: true), 0);
+        }
+    }
+
+    private void QueuePendingLapUpload(RaceLapCompleted lap, long lastAttemptMonotonicMilliseconds)
+    {
+        lock (lapRecoverySync)
+        {
+            if (pendingLapUploads.Any(item => item.Lap.EventId == lap.EventId)) return;
+            QueuePendingLapUploadLocked(lap, lastAttemptMonotonicMilliseconds);
+        }
+    }
+
+    private void QueuePendingLapUploadLocked(RaceLapCompleted lap, long lastAttemptMonotonicMilliseconds)
+    {
+        if (pendingLapUploads.Count >= 12) pendingLapUploads.RemoveAt(0);
+        pendingLapUploads.Add(new PendingLapUpload(lap, lastAttemptMonotonicMilliseconds));
+    }
+
+    private async Task FlushPendingLapUploadsAsync(CancellationToken cancellationToken)
+    {
+        if (connectionIsObserver || session?.DisconnectedLapRecoveryEnabled != true) return;
+        while (true)
+        {
+            RaceLapCompleted? lap = null;
+            var now = monotonicClock.ElapsedMilliseconds;
+            lock (lapRecoverySync)
+            {
+                var index = pendingLapUploads.FindIndex(item =>
+                    item.LastAttemptMonotonicMilliseconds == 0 ||
+                    now - item.LastAttemptMonotonicMilliseconds >= RecoveredLapRetryInterval.TotalMilliseconds);
+                if (index >= 0)
+                {
+                    var pending = pendingLapUploads[index];
+                    lap = pending.Lap;
+                    pendingLapUploads[index] = pending with { LastAttemptMonotonicMilliseconds = now };
+                }
+            }
+            if (lap is null) return;
+            await SendAsync("lapCompleted", lap, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private void AcknowledgeLap(RaceLapAcknowledgement acknowledgement)
+    {
+        lock (lapRecoverySync)
+            pendingLapUploads.RemoveAll(item => item.Lap.EventId == acknowledgement.EventId);
+        sentLapEventId = acknowledgement.EventId;
+        if (!acknowledgement.IsAccepted && !string.IsNullOrWhiteSpace(acknowledgement.Message))
+            PublishSnapshot(EstateRaceConnectionState.Connected, acknowledgement.Message);
+    }
+
+    private bool HasPendingLapUpload(Guid eventId)
+    {
+        lock (lapRecoverySync)
+            return pendingLapUploads.Any(item => item.Lap.EventId == eventId);
+    }
+
+    private void ClearPendingLapUploads()
+    {
+        lock (lapRecoverySync) pendingLapUploads.Clear();
+    }
+
+    private void MarkPendingLapUploadsForRecovery()
+    {
+        lock (lapRecoverySync)
+            for (var index = 0; index < pendingLapUploads.Count; index++)
+            {
+                var pending = pendingLapUploads[index];
+                pendingLapUploads[index] = pending with
+                {
+                    Lap = pending.Lap with { IsRecoveredAfterDisconnect = true },
+                    LastAttemptMonotonicMilliseconds = 0
+                };
+            }
+    }
+
+    private RaceLapCompleted CreateLapUpload(
+        EstateCompletedLapEvent lap,
+        bool recoveredAfterDisconnect) => new(
+        lap.EventId,
+        lap.LapNumber,
+        lap.LapSeconds,
+        lap.SectorSeconds,
+        lap.IsValid,
+        lap.InvalidReason,
+        monotonicClock.ElapsedMilliseconds,
+        lap.IsBestLapEligible,
+        recoveredAfterDisconnect);
 
     private async Task ReceiveLoopAsync(
         ClientWebSocket activeSocket,
@@ -574,6 +702,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 try
                 {
                     var envelope = await ReceiveEnvelopeAsync(activeSocket, cancellationToken).ConfigureAwait(false);
+                    MarkServerResponse();
                     if (envelope.ProtocolVersion != EstateRaceWireProtocol.Version) continue;
                     if (envelope.Type == "snapshot")
                     {
@@ -590,6 +719,12 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                     {
                         var pong = envelope.Payload.Deserialize<RaceClockPong>(EstateRaceWireProtocol.JsonOptions);
                         if (pong is not null) UpdateNetworkTiming(pong);
+                    }
+                    else if (envelope.Type == "lapAcknowledged")
+                    {
+                        var acknowledgement = envelope.Payload.Deserialize<RaceLapAcknowledgement>(
+                            EstateRaceWireProtocol.JsonOptions);
+                        if (acknowledgement is not null) AcknowledgeLap(acknowledgement);
                     }
                     else if (envelope.Type == "error")
                     {
@@ -653,11 +788,14 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         var roundTripMilliseconds = receivedMonotonic - pong.ClientMonotonicMilliseconds;
         if (roundTripMilliseconds is < 0 or > 30_000) return;
         var oneWay = TimeSpan.FromMilliseconds(roundTripMilliseconds / 2d);
+        var roundTrip = TimeSpan.FromMilliseconds(roundTripMilliseconds);
         var estimatedServerAtReceive = DateTimeOffset
             .FromUnixTimeMilliseconds(pong.ServerUnixMilliseconds)
             .Add(oneWay);
         var offset = estimatedServerAtReceive - DateTimeOffset.UtcNow;
         var priorLatency = Interlocked.Read(ref estimatedOneWayLatencyTicks);
+        var priorRoundTrip = Interlocked.Read(ref estimatedRoundTripLatencyTicks);
+        var priorJitter = Interlocked.Read(ref networkJitterTicks);
         var priorOffset = Interlocked.Read(ref serverClockOffsetTicks);
         var latencyTicks = priorLatency == 0
             ? oneWay.Ticks
@@ -665,10 +803,23 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         var offsetTicks = Volatile.Read(ref hasServerClockEstimate) == 0
             ? offset.Ticks
             : (long)Math.Round(priorOffset * 0.8 + offset.Ticks * 0.2);
+        var roundTripTicks = priorRoundTrip == 0
+            ? roundTrip.Ticks
+            : (long)Math.Round(priorRoundTrip * 0.8 + roundTrip.Ticks * 0.2);
+        var jitterSampleTicks = priorRoundTrip == 0 ? 0 : Math.Abs(roundTrip.Ticks - priorRoundTrip);
+        var jitterTicks = priorJitter == 0
+            ? jitterSampleTicks
+            : (long)Math.Round(priorJitter * 0.8 + jitterSampleTicks * 0.2);
         Interlocked.Exchange(ref estimatedOneWayLatencyTicks, latencyTicks);
+        Interlocked.Exchange(ref estimatedRoundTripLatencyTicks, roundTripTicks);
+        Interlocked.Exchange(ref networkJitterTicks, jitterTicks);
         Interlocked.Exchange(ref serverClockOffsetTicks, offsetTicks);
         Volatile.Write(ref hasServerClockEstimate, 1);
+        PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
     }
+
+    private void MarkServerResponse() =>
+        Interlocked.Exchange(ref lastServerResponseUtcTicks, DateTimeOffset.UtcNow.UtcDateTime.Ticks);
 
     private void ScheduleReconnect()
     {
@@ -793,6 +944,13 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private void HandleConnectionInterrupted(Exception exception)
     {
         if (intentionalDisconnect) return;
+        if (session?.DisconnectedLapRecoveryEnabled != true)
+        {
+            sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
+            ClearPendingLapUploads();
+        }
+        else
+            MarkPendingLapUploadsForRecovery();
         SetConnectionState(EstateRaceConnectionState.Reconnecting, "连接中断，正在尝试恢复赛事连接…");
         LogIfInitialized($"Estate race WebSocket disconnected: {exception.Message}");
         ScheduleReconnect();
@@ -950,7 +1108,12 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             TimeSpan.FromTicks(Math.Max(0, Interlocked.Read(ref estimatedOneWayLatencyTicks))),
             Volatile.Read(ref hasServerClockEstimate) == 0
                 ? null
-                : TimeSpan.FromTicks(Interlocked.Read(ref serverClockOffsetTicks))));
+                : TimeSpan.FromTicks(Interlocked.Read(ref serverClockOffsetTicks)),
+            TimeSpan.FromTicks(Math.Max(0, Interlocked.Read(ref estimatedRoundTripLatencyTicks))),
+            TimeSpan.FromTicks(Math.Max(0, Interlocked.Read(ref networkJitterTicks))),
+            Interlocked.Read(ref lastServerResponseUtcTicks) is var responseTicks && responseTicks > 0
+                ? new DateTimeOffset(responseTicks, TimeSpan.Zero)
+                : null));
     }
 
     private EstateRaceTrackMapSnapshot TrackMapSnapshot(EstateRaceTrackContext? context)
@@ -1201,6 +1364,12 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 if (resetForConnection) lastValidProjection = null;
             }
             sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
+            ClearPendingLapUploads();
+        }
+        if (!value.DisconnectedLapRecoveryEnabled)
+        {
+            sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
+            ClearPendingLapUploads();
         }
         lastSessionPhase = value.Phase;
         lastQualifyingSessionNumber = value.Phase == RaceSessionPhase.Qualifying
@@ -1449,6 +1618,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     {
         public static EstateRaceTrackMapSnapshot Empty { get; } = new([], [], null, []);
     }
+
+    private sealed record PendingLapUpload(
+        RaceLapCompleted Lap,
+        long LastAttemptMonotonicMilliseconds);
 
     [GeneratedRegex("^#[0-9A-Fa-f]{6}$", RegexOptions.CultureInvariant)]
     private static partial Regex ThemeColorPattern();

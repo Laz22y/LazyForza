@@ -12,6 +12,28 @@ public sealed class LapAnalysisBehaviorTests
     private const int MaximumExpectedCoarseCandidates = 12;
 
     [TestMethod]
+    public void ManualTrackLearningCanBeCancelledBeforeTheNextCompetition()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-cancel-track-learning-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+
+            module.ResetTrackLearning();
+            Assert.IsTrue(module.IsTrackLearningRequested);
+
+            module.CancelTrackLearning();
+            Assert.IsFalse(module.IsTrackLearningRequested);
+            Assert.IsNull(module.CurrentTrack);
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
     public void StartsWithNoSelectedTrackAndAllowsManualSelectionToBeCleared()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-empty-track-selection-{Guid.NewGuid():N}.db");

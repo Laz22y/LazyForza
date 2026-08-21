@@ -12,6 +12,129 @@ namespace LazyForza.IntegrationTests;
 public sealed class EstateCircuitModuleTests
 {
     [TestMethod]
+    public async Task EnrollmentDraftPreservesCompletedTraceAndResumesAtSafeStep()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-draft-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var feed = new TestFeed();
+            var module = new EstateCircuitModule(store, TelemetrySourceKind.Live);
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                module.BeginEnrollment(new EstateEnrollmentRequest("暂存测试", "作者", "code", "rev-3", 4));
+                module.StartLineTrace();
+                PublishLineTrace(feed, 10_000, reverse: false, zOffset: 0.02);
+                await WaitUntilAsync(() => module.State.FirstTraceSamples >= 25, TimeSpan.FromSeconds(2), () => module.State.ToString());
+                module.StopLineTrace();
+                var samples = module.State.FirstTraceSamples;
+
+                var draft = module.PauseEnrollmentForDraft();
+                Assert.IsFalse(module.State.IsEnrollmentActive);
+                Assert.AreEqual(EstateCircuitPhase.Idle, draft.ResumePhase);
+                Assert.HasCount(samples, draft.FirstTrace);
+
+                module.ResumeEnrollment(draft);
+                Assert.IsTrue(module.State.IsEnrollmentActive);
+                Assert.AreEqual(EstateCircuitPhase.Idle, module.State.Phase);
+                Assert.AreEqual(samples, module.State.FirstTraceSamples);
+                Assert.AreEqual("暂存测试", module.State.MapName);
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task StartFinishRevisionUpdatesOnlyTheGateAndKeepsTrackIdentity()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-start-revision-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var route = Enumerable.Range(0, 361)
+                .Select(index =>
+                {
+                    var angle = index * Math.PI * 2 / 360;
+                    return new TrackPoint(100 - 100 * Math.Cos(angle), 2, 100 * Math.Sin(angle), 0, 0, 0);
+                })
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("起终点线修订", route) with
+            {
+                Source = TelemetryDataPartition.TrackSource(TelemetrySourceKind.Live),
+                TimingKind = TrackTimingKind.EstateGeometry,
+                Category = "地产环道",
+                CaptureLapCount = 2
+            };
+            var originalGate = new EstateTimingGate(
+                new EstateGatePoint(-7, 2, 0.2), new EstateGatePoint(7, 2, 0.2), 0, 1, 0.1, 0.1, 0.1);
+            var definition = new EstateTrackDefinition(
+                track.Id, track.Name, "test", "start", "4", originalGate,
+                EstateTrackAlgorithms.CreateCheckpoints(track, 4), null, 60, 61, 1,
+                DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+            var sectors = TrackAlgorithms.CreateSectors(track, requestedCount: 4);
+            store.SaveTrack(track, sectors, definition);
+            store.SaveLap(new LapRecord(
+                Guid.NewGuid(), track.Id, track.Direction, TrackAlgorithms.SectorSchemaVersion, Guid.NewGuid(),
+                new VehicleProfileFingerprint(1, 5, 850, 2, 6, 8_000, "g", "c"),
+                DateTimeOffset.UnixEpoch, 60, true, null,
+                sectors.Select(sector => new LapSegment(sector.Index, 60d / sectors.Count, true)).ToArray(),
+                []));
+
+            var feed = new TestFeed();
+            var module = new EstateCircuitModule(store, TelemetrySourceKind.Live);
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                module.BeginStartFinishRevision(track.Id);
+                module.StartLineTrace();
+                PublishLineTrace(feed, 10_000, reverse: false, zOffset: 0.03);
+                await WaitUntilAsync(() => module.State.FirstTraceSamples >= 25, TimeSpan.FromSeconds(2), () => module.State.ToString());
+                module.StopLineTrace();
+                module.StartLineTrace();
+                PublishLineTrace(feed, 20_000, reverse: true, zOffset: -0.02);
+                await WaitUntilAsync(() => module.State.SecondTraceSamples >= 25, TimeSpan.FromSeconds(2), () => module.State.ToString());
+                module.StopLineTrace();
+                module.StartDirectionCapture();
+                PublishDirectionTrace(feed, 30_000);
+                await Task.Delay(100);
+                module.StopDirectionCapture();
+                Assert.AreEqual(EstateCircuitPhase.StartFinishReadyToSave, module.State.Phase);
+
+                module.SaveStartFinishRevision();
+                var storedTrack = store.LoadTrack(track.Id)!.Value.Track;
+                var storedDefinition = store.LoadEstateTrackDefinition(track.Id)!;
+                Assert.AreEqual(track.Id, storedTrack.Id);
+                Assert.AreEqual("4", storedDefinition.MapRevision);
+                Assert.AreNotEqual(originalGate, storedDefinition.StartFinishGate);
+                Assert.AreEqual(track.Points.Count, storedTrack.Points.Count);
+                Assert.AreEqual(EstateCircuitPhase.Ready, module.State.Phase);
+                Assert.AreEqual(0, store.CountLaps(track.Id),
+                    "起终点线变化后不应继续沿用旧几何下的圈速。");
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
     public async Task EnrollmentFitsGateRecordsReferenceAndRequiresValidationLap()
     {
         var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-enrollment-{Guid.NewGuid():N}.db");
@@ -736,6 +859,155 @@ public sealed class EstateCircuitModuleTests
                 Assert.HasCount(4, stored.ServiceZoneBoundary!);
                 Assert.AreEqual(80, stored.SpeedLimitKph, 0.001);
                 Assert.AreEqual(3, stored.MinimumServiceSeconds, 0.001);
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public void PitSettingsEditPreservesEveryGeometryComponent()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-pit-settings-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var route = Enumerable.Range(0, 121)
+                .Select(index =>
+                {
+                    var angle = index * Math.PI * 2 / 120;
+                    return new TrackPoint(80 * Math.Cos(angle), 2, 80 * Math.Sin(angle), 0, 0, 0);
+                })
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("维修区规则编辑", route) with
+            {
+                Source = TelemetryDataPartition.TrackSource(TelemetrySourceKind.Live),
+                TimingKind = TrackTimingKind.EstateGeometry,
+                Category = "地产环道",
+                CaptureLapCount = 2
+            };
+            var gate = new EstateTimingGate(
+                new EstateGatePoint(-8, 2, 0), new EstateGatePoint(8, 2, 0), 0, 1, 0, 0, 0);
+            var lane = Enumerable.Range(0, 41)
+                .Select(index => new EstateGatePoint(20, 2, -20 + index))
+                .ToArray();
+            var entry = new EstateTimingGate(
+                new EstateGatePoint(16, 2, -18), new EstateGatePoint(24, 2, -18), 0, 1, 0, 0, 0);
+            var exit = new EstateTimingGate(
+                new EstateGatePoint(16, 2, 18), new EstateGatePoint(24, 2, 18), 0, 1, 0, 0, 0);
+            var boundary = new[]
+            {
+                new EstateGatePoint(16, 2, -2), new EstateGatePoint(24, 2, -2),
+                new EstateGatePoint(24, 2, 2), new EstateGatePoint(16, 2, 2)
+            };
+            var pit = new EstatePitDefinition(
+                entry, exit, lane, new EstateGatePoint(20, 2, 0), 4.5, 80, 3, 4, boundary,
+                new EstateTimingGate(new EstateGatePoint(16, 2, 0), new EstateGatePoint(24, 2, 0), 0, 1, 0, 0, 0));
+            var definition = new EstateTrackDefinition(
+                track.Id, track.Name, "test", "settings", "2", gate,
+                EstateTrackAlgorithms.CreateCheckpoints(track, 4), pit, 60, 61, 1,
+                DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+            var sectors = TrackAlgorithms.CreateSectors(track);
+            store.SaveTrack(track, sectors, definition);
+
+            var module = new EstateCircuitModule(store, TelemetrySourceKind.Live);
+            module.BeginPitEnrollment(new EstatePitEnrollmentRequest(
+                track.Id, 4, 100, 5, EstatePitEditScope.Settings));
+            Assert.AreEqual(EstatePitCapturePhase.ReadyToSave, module.PitState.Phase);
+            var updated = module.SavePitEnrollment();
+
+            CollectionAssert.AreEqual(lane, updated.CenterLine.ToArray());
+            CollectionAssert.AreEqual(boundary, updated.ServiceZoneBoundary!.ToArray());
+            Assert.AreEqual(entry.Left, updated.EntryGate.Left);
+            Assert.AreEqual(exit.Right, updated.ExitGate.Right);
+            Assert.AreEqual(100, updated.SpeedLimitKph, 0.001);
+            Assert.AreEqual(5, updated.MinimumServiceSeconds, 0.001);
+            Assert.AreEqual("2", store.LoadEstateTrackDefinition(track.Id)?.MapRevision,
+                "修改 LazyForza 维修区参数不应伪造 FH6 地图修订号。");
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task PitEntryEditPreservesUnselectedGeometryAndRules()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-pit-entry-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var route = Enumerable.Range(0, 121)
+                .Select(index =>
+                {
+                    var angle = index * Math.PI * 2 / 120;
+                    return new TrackPoint(80 * Math.Cos(angle), 2, 80 * Math.Sin(angle), 0, 0, 0);
+                })
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("维修区入口编辑", route) with
+            {
+                Source = TelemetryDataPartition.TrackSource(TelemetrySourceKind.Live),
+                TimingKind = TrackTimingKind.EstateGeometry,
+                Category = "地产环道",
+                CaptureLapCount = 2
+            };
+            var mainGate = new EstateTimingGate(
+                new EstateGatePoint(-8, 2, 0), new EstateGatePoint(8, 2, 0), 0, 1, 0, 0, 0);
+            var lane = Enumerable.Range(0, 41)
+                .Select(index => new EstateGatePoint(20, 2, -20 + index))
+                .ToArray();
+            var originalEntry = new EstateTimingGate(
+                new EstateGatePoint(16, 2, -18), new EstateGatePoint(24, 2, -18), 0, 1, 0, 0, 0);
+            var originalExit = new EstateTimingGate(
+                new EstateGatePoint(16, 2, 18), new EstateGatePoint(24, 2, 18), 0, 1, 0, 0, 0);
+            var boundary = new[]
+            {
+                new EstateGatePoint(16, 2, -2), new EstateGatePoint(24, 2, -2),
+                new EstateGatePoint(24, 2, 2), new EstateGatePoint(16, 2, 2)
+            };
+            var pitStartFinish = new EstateTimingGate(
+                new EstateGatePoint(16, 2, 0), new EstateGatePoint(24, 2, 0), 0, 1, 0, 0, 0);
+            var pit = new EstatePitDefinition(
+                originalEntry, originalExit, lane, new EstateGatePoint(20, 2, 0), 4.5,
+                80, 3, 4, boundary, pitStartFinish);
+            var definition = new EstateTrackDefinition(
+                track.Id, track.Name, "test", "entry", "2", mainGate,
+                EstateTrackAlgorithms.CreateCheckpoints(track, 4), pit, 60, 61, 1,
+                DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+            store.SaveTrack(track, TrackAlgorithms.CreateSectors(track), definition);
+
+            var feed = new TestFeed();
+            var module = new EstateCircuitModule(store, TelemetrySourceKind.Live);
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                module.BeginPitEnrollment(new EstatePitEnrollmentRequest(
+                    track.Id, 9, 200, 30, EstatePitEditScope.EntryGate));
+                var arrival = DateTimeOffset.UtcNow;
+                for (var sample = 0; sample < 8; sample++)
+                    PublishPosition(feed, (uint)(40_000 + sample), 20, 2, -12, 0,
+                        arrival.AddMilliseconds(sample * 15));
+                await Task.Delay(60);
+                _ = module.CapturePitEntryGate();
+                var updated = module.SavePitEnrollment();
+
+                Assert.AreNotEqual(originalEntry, updated.EntryGate);
+                Assert.AreEqual(originalExit, updated.ExitGate);
+                CollectionAssert.AreEqual(lane, updated.CenterLine.ToArray());
+                CollectionAssert.AreEqual(boundary, updated.ServiceZoneBoundary!.ToArray());
+                Assert.AreEqual(pitStartFinish, updated.StartFinishGate);
+                Assert.AreEqual(4, updated.LaneHalfWidthMeters, 0.001);
+                Assert.AreEqual(80, updated.SpeedLimitKph, 0.001);
+                Assert.AreEqual(3, updated.MinimumServiceSeconds, 0.001);
             }
             finally
             {

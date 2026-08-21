@@ -156,21 +156,61 @@ internal sealed partial class MainWindow : Window
         await Task.Delay(250);
         CaptureVisual(this, Path.Combine(directory, "estate-tracks-1440x900.png"));
 
+        var lapModule = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
+        lapModule.ResetTrackLearning();
+        RenderSelectedPage(true);
+        UpdateLayout();
+        if (content.Content is ScrollViewer waitingTrackPageScroll) waitingTrackPageScroll.ScrollToHome();
+        await Task.Delay(200);
+        CaptureVisual(this, Path.Combine(directory, "track-learning-ready-1440x900.png"));
+        lapModule.CancelTrackLearning();
+        RenderSelectedPage(true);
+
         var module = moduleManager.Modules.OfType<EstateCircuitModule>().Single();
-        var enrollment = new EstateCircuitEnrollmentWindow(module) { Owner = this };
+        var enrollment = new EstateCircuitEnrollmentWindow(
+            module,
+            new EstateEnrollmentDraftStore(directories.Root)) { Owner = this };
         enrollment.Show();
         enrollment.UpdateLayout();
         await Task.Delay(250);
-        CaptureVisual(enrollment, Path.Combine(directory, "estate-enrollment-820x720.png"));
-        if (enrollment.Content is Grid enrollmentRoot)
-        {
-            var scroll = enrollmentRoot.Children.OfType<ScrollViewer>().SingleOrDefault();
-            scroll?.ScrollToEnd();
-            enrollment.UpdateLayout();
-            await Task.Delay(150);
-            CaptureVisual(enrollment, Path.Combine(directory, "estate-enrollment-steps-820x720.png"));
-        }
+        CaptureVisual(enrollment, Path.Combine(directory, "estate-enrollment-1060x780.png"));
         enrollment.Close();
+
+        var qaTrack = store.ListTracks()
+            .First(summary => summary.TimingKind == TrackTimingKind.EstateGeometry);
+        var loaded = store.LoadTrack(qaTrack.Id)!.Value;
+        var definition = store.LoadEstateTrackDefinition(qaTrack.Id)!;
+        var editor = new EstateTrackEditorWindow(store, module, loaded.Track, loaded.Sectors, definition) { Owner = this };
+        editor.Show();
+        editor.UpdateLayout();
+        await Task.Delay(200);
+        CaptureVisual(editor, Path.Combine(directory, "estate-editor-1040x720.png"));
+        editor.Close();
+
+        var startFinish = new EstateStartFinishRevisionWindow(
+            module, loaded.Track, definition, store.CountLaps(loaded.Track.Id)) { Owner = this };
+        startFinish.Show();
+        startFinish.UpdateLayout();
+        await Task.Delay(150);
+        CaptureVisual(startFinish, Path.Combine(directory, "estate-start-finish-editor-900x660.png"));
+        module.CancelEnrollment();
+        startFinish.Close();
+
+        var pitEntry = new EstatePitEnrollmentWindow(
+            module, loaded.Track, definition, EstatePitEditScope.EntryGate) { Owner = this };
+        pitEntry.Show();
+        pitEntry.UpdateLayout();
+        await Task.Delay(300);
+        CaptureVisual(pitEntry, Path.Combine(directory, "estate-pit-entry-editor-940x780.png"));
+        pitEntry.Close();
+
+        var pitSettings = new EstatePitEnrollmentWindow(
+            module, loaded.Track, definition, EstatePitEditScope.Settings) { Owner = this };
+        pitSettings.Show();
+        pitSettings.UpdateLayout();
+        await Task.Delay(300);
+        CaptureVisual(pitSettings, Path.Combine(directory, "estate-pit-settings-editor-940x780.png"));
+        pitSettings.Close();
     }
 
     internal async Task CaptureEstateRacePageQaAsync(string directory)
@@ -258,7 +298,37 @@ internal sealed partial class MainWindow : Window
             "3",
             gate,
             EstateTrackAlgorithms.CreateCheckpoints(track, 8),
-            null,
+            new EstatePitDefinition(
+                new EstateTimingGate(
+                    new EstateGatePoint(114, 2, -24),
+                    new EstateGatePoint(122, 2, -24),
+                    0, 1, 0.04, 0.02, 0.08),
+                new EstateTimingGate(
+                    new EstateGatePoint(114, 2, 24),
+                    new EstateGatePoint(122, 2, 24),
+                    0, 1, 0.04, 0.02, 0.08),
+                [
+                    new EstateGatePoint(118, 2, -26),
+                    new EstateGatePoint(118, 2, -12),
+                    new EstateGatePoint(118, 2, 0),
+                    new EstateGatePoint(118, 2, 12),
+                    new EstateGatePoint(118, 2, 26)
+                ],
+                new EstateGatePoint(118, 2, 9),
+                3,
+                80,
+                3,
+                4,
+                [
+                    new EstateGatePoint(114.5, 2, 5),
+                    new EstateGatePoint(121.5, 2, 5),
+                    new EstateGatePoint(121.5, 2, 13),
+                    new EstateGatePoint(114.5, 2, 13)
+                ],
+                new EstateTimingGate(
+                    new EstateGatePoint(114, 2, 0),
+                    new EstateGatePoint(122, 2, 0),
+                    0, 1, 0.04, 0.02, 0.08)),
             72.314,
             72.502,
             0.99,
@@ -269,6 +339,8 @@ internal sealed partial class MainWindow : Window
 
     private static void CaptureVisual(FrameworkElement visual, string path)
     {
+        InvalidateVisualTree(visual);
+        visual.UpdateLayout();
         var dpi = VisualTreeHelper.GetDpi(visual);
         var width = Math.Max(1, (int)Math.Ceiling(visual.ActualWidth * dpi.DpiScaleX));
         var height = Math.Max(1, (int)Math.Ceiling(visual.ActualHeight * dpi.DpiScaleY));
@@ -278,6 +350,13 @@ internal sealed partial class MainWindow : Window
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
+    }
+
+    private static void InvalidateVisualTree(DependencyObject parent)
+    {
+        if (parent is UIElement element) element.InvalidateVisual();
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+            InvalidateVisualTree(VisualTreeHelper.GetChild(parent, index));
     }
 
     private UIElement BuildShell()
@@ -1600,10 +1679,11 @@ internal sealed partial class MainWindow : Window
 
         var add = new Button
         {
-            Content = "添加赛道",
+            Content = lapModule.IsTrackLearningRequested ? "等待下一场比赛" : "添加赛道",
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
-            Padding = new Thickness(16, 8, 16, 8)
+            Padding = new Thickness(16, 8, 16, 8),
+            IsEnabled = !lapModule.IsTrackLearningRequested
         };
         add.Click += (_, _) =>
         {
@@ -1619,6 +1699,39 @@ internal sealed partial class MainWindow : Window
         header.Children.Add(add);
         content.Children.Add(header);
 
+        if (lapModule.IsTrackLearningRequested)
+        {
+            var waiting = new Grid();
+            waiting.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            waiting.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var waitingCopy = new StackPanel();
+            waitingCopy.Children.Add(Label("已准备录入下一场比赛", 15, FontWeights.SemiBold, "AccentBrush"));
+            waitingCopy.Children.Add(Label(
+                "进入目标赛事并正常起步。环道完整跑一圈后保存；定点赛道在完赛后保存。",
+                12,
+                FontWeights.Normal,
+                "MutedBrush"));
+            waiting.Children.Add(waitingCopy);
+            var cancelLearning = new Button
+            {
+                Content = "取消录入",
+                MinWidth = 92,
+                Padding = new Thickness(14, 7, 14, 7),
+                Margin = new Thickness(16, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            cancelLearning.Click += (_, _) =>
+            {
+                lapModule.CancelTrackLearning();
+                RenderSelectedPage();
+            };
+            Grid.SetColumn(cancelLearning, 1);
+            waiting.Children.Add(cancelLearning);
+            var waitingCard = Card(waiting);
+            waitingCard.Margin = new Thickness(0, 14, 0, 12);
+            content.Children.Add(waitingCard);
+        }
+
         var guidance = new Border
         {
             Background = Brush("PanelBrush"),
@@ -1626,7 +1739,7 @@ internal sealed partial class MainWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(13, 10, 13, 10),
-            Margin = new Thickness(0, 14, 0, 16),
+            Margin = new Thickness(0, lapModule.IsTrackLearningRequested ? 0 : 14, 0, 16),
             Child = Label(
                 "进入比赛并完整跑完路线。环道再次过线后保存，定点赛道在完赛后保存。",
                 12,

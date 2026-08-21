@@ -61,14 +61,24 @@ public static class EstateRaceLeaderboardFormatter
         if (qualifying)
         {
             if (participant.BestLapSeconds is not double bestLap) return "NO TIME";
-            if (localParticipant is null)
-                return participant.Position == 1
+            if (localParticipant?.BestLapSeconds is double localBestLap)
+                return local
                     ? FormatLapTime(bestLap)
-                    : FormatDelta(participant.GapToLeaderSeconds);
-            if (local) return FormatLapTime(bestLap);
-            return localParticipant?.BestLapSeconds is double localBestLap
-                ? FormatDelta(bestLap - localBestLap)
-                : "—";
+                    : FormatDelta(bestLap - localBestLap);
+
+            var leader = leaderParticipant?.BestLapSeconds is double
+                ? leaderParticipant
+                : participant.Position == 1
+                    ? participant
+                    : null;
+            if (leader?.BestLapSeconds is double leaderBestLap)
+                return participant.Id == leader.Id
+                    ? FormatLapTime(bestLap)
+                    : FormatDelta(bestLap - leaderBestLap);
+
+            return participant.Position == 1
+                ? FormatLapTime(bestLap)
+                : FormatDelta(participant.GapToLeaderSeconds);
         }
 
         if (local) return "REFERENCE";

@@ -901,6 +901,59 @@ public sealed class StorageTests
     }
 
     [TestMethod]
+    public void EstateTrackIdentityUsesStableTrackIdRevisionAndCompetitionGeometryOnly()
+    {
+        var databasePath = TempDatabasePath();
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            var (track, sectors, definition) = EstatePackageFixture("fh6_udp_live");
+            store.SaveTrack(track, sectors, definition);
+            var service = new EstateTrackPackageService(store, "test-version");
+            var original = service.Identify(track.Id);
+
+            store.SaveTrack(track with { Name = "本地显示名" }, sectors, definition with
+            {
+                MapName = "本地显示名",
+                Creator = "另一位作者",
+                ShareCode = "LOCAL-NOTE"
+            });
+            var renamed = service.Identify(track.Id);
+            Assert.AreEqual(original.TrackId, renamed.TrackId);
+            Assert.AreEqual(original.TrackFingerprintSha256, renamed.TrackFingerprintSha256,
+                "显示名称、作者和分享代码不应制造新的比赛几何标识。");
+
+            store.SaveLap(new LapRecord(
+                Guid.NewGuid(), track.Id, track.Direction, TrackAlgorithms.SectorSchemaVersion, Guid.NewGuid(),
+                new VehicleProfileFingerprint(1, 5, 850, 2, 6, 8_000, "g", "c"),
+                DateTimeOffset.UnixEpoch, 72.1, true, null,
+                sectors.Select(sector => new LapSegment(sector.Index, 72.1 / sectors.Count, true)).ToArray(),
+                []));
+            Assert.AreEqual(1, store.CountLaps(track.Id));
+
+            store.SaveTrack(track with { Name = "本地显示名" }, sectors, definition with
+            {
+                MapName = "本地显示名",
+                Creator = "另一位作者",
+                ShareCode = "LOCAL-NOTE",
+                MapRevision = "2"
+            }, clearExistingLaps: true);
+            var revised = service.Identify(track.Id);
+            Assert.AreEqual(original.TrackId, revised.TrackId,
+                "同一地图的新修订应保留稳定赛道标识。");
+            Assert.AreEqual("2", revised.MapRevision);
+            Assert.AreNotEqual(original.TrackFingerprintSha256, revised.TrackFingerprintSha256,
+                "修订号必须参与赛事赛道特征，避免不同地图修订被视为同一版本。");
+            Assert.AreEqual(0, store.CountLaps(track.Id),
+                "地图修订变化后不能继续沿用旧修订的本地圈速。");
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
     public void EstateTrackPackageRejectsPayloadWhoseDigestChanged()
     {
         var databasePath = TempDatabasePath();

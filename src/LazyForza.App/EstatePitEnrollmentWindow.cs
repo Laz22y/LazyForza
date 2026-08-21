@@ -12,7 +12,10 @@ internal sealed class EstatePitEnrollmentWindow : Window
 {
     private static readonly FontFamily UiFont = new("Microsoft YaHei UI");
     private readonly EstateCircuitModule module;
+    private readonly TrackTemplate track;
+    private readonly EstateTrackDefinition definition;
     private readonly Guid trackId;
+    private readonly EstatePitEditScope editScope;
     private readonly DispatcherTimer refreshTimer;
     private readonly TextBox laneWidth = Input("3.5");
     private readonly TextBox speedLimit = Input("80");
@@ -28,16 +31,22 @@ internal sealed class EstatePitEnrollmentWindow : Window
     private readonly Button corner = ActionButton("5  记录当前角点");
     private readonly Button clearCorners = ActionButton("清空角点");
     private readonly Button save = ActionButton("6  保存维修区");
+    private readonly EstateGeometryPreview preview = new();
+    private ScrollViewer? contentScroll;
     private bool acceptedClose;
 
     public EstatePitEnrollmentWindow(
         EstateCircuitModule module,
         TrackTemplate track,
-        EstateTrackDefinition definition)
+        EstateTrackDefinition definition,
+        EstatePitEditScope editScope = EstatePitEditScope.All)
     {
         this.module = module;
+        this.track = track;
+        this.definition = definition;
         trackId = track.Id;
-        Title = $"配置维修区 · {track.Name}";
+        this.editScope = editScope;
+        Title = $"{ScopeTitle(editScope, definition.Pit is null)} · {track.Name}";
         Width = 940;
         Height = 780;
         MinWidth = 820;
@@ -46,7 +55,14 @@ internal sealed class EstatePitEnrollmentWindow : Window
         Background = Brush("WindowBrush");
         Foreground = Brush("TextBrush");
         FontFamily = UiFont;
+        if (definition.Pit is { } existing)
+        {
+            laneWidth.Text = existing.LaneHalfWidthMeters.ToString("0.##");
+            speedLimit.Text = existing.SpeedLimitKph.ToString("0.##");
+            serviceSeconds.Text = existing.MinimumServiceSeconds.ToString("0.##");
+        }
         Content = BuildContent(track, definition);
+        ConfigureButtonLabels();
 
         prepare.Click += (_, _) => PrepareEnrollment();
         lane.Click += (_, _) => ToggleLaneCapture();
@@ -61,6 +77,11 @@ internal sealed class EstatePitEnrollmentWindow : Window
             (_, _) => Refresh(),
             Dispatcher);
         refreshTimer.Start();
+        Loaded += (_, _) =>
+        {
+            prepare.Focus();
+            contentScroll?.ScrollToHome();
+        };
         Closing += OnClosing;
         Closed += (_, _) => refreshTimer.Stop();
         Refresh();
@@ -72,18 +93,25 @@ internal sealed class EstatePitEnrollmentWindow : Window
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var stack = new StackPanel();
-        stack.Children.Add(Text("维修区确定性录入", 30, FontWeights.SemiBold));
+        stack.Children.Add(Text(ScopeTitle(editScope, definition.Pit is null), 28, FontWeights.SemiBold));
         stack.Children.Add(Text(
-            "软件会用实际行驶轨迹建立维修区通道。通道录完后，你再把车停到希望设置的入口线和出口线中心分别确认；门线会贴合该处弯道的局部方向，不再由整段轨迹的首尾位置推测。维修停留区由停车记录的边界点围成。",
+            ScopeDescription(editScope),
             14, "MutedBrush"));
 
         var trackCard = new StackPanel();
         trackCard.Children.Add(Text(track.Name, 18, FontWeights.SemiBold));
         trackCard.Children.Add(Text(
             $"地产修订 {definition.MapRevision} · {track.LengthMeters / 1000:0.00} km · " +
-            (definition.Pit is null ? "尚未配置维修区" : $"已有 {definition.Pit.CenterLine.Count} 个通道点，将被本次录入替换"),
+            (definition.Pit is null ? "尚未配置维修区" : $"已有 {definition.Pit.CenterLine.Count} 个通道点 · 未选择的组件保持不变"),
             13, "MutedBrush"));
         stack.Children.Add(Card(trackCard));
+
+        if (editScope != EstatePitEditScope.Settings)
+        {
+            preview.MinHeight = 280;
+            preview.Update(track, definition);
+            stack.Children.Add(Card(preview));
+        }
 
         var parameters = new Grid { Margin = new Thickness(0, 10, 0, 0) };
         for (var index = 0; index < 3; index++)
@@ -91,7 +119,11 @@ internal sealed class EstatePitEnrollmentWindow : Window
         AddField(parameters, 0, "通道半宽（米）", "从中心线向左右各扩出的范围，通常 3–5 米。", laneWidth);
         AddField(parameters, 1, "维修区限速（km/h）", "用于赛事规则与超速提示，不是游戏内强制限速。", speedLimit);
         AddField(parameters, 2, "最短服务时间（秒）", "车辆在换胎区以不高于 5 km/h 连续停留达到此时间，软件才记为一次维修停留。", serviceSeconds);
-        stack.Children.Add(Card(parameters));
+        var settingsEditable = editScope.HasFlag(EstatePitEditScope.Settings);
+        laneWidth.IsEnabled = settingsEditable;
+        speedLimit.IsEnabled = settingsEditable;
+        serviceSeconds.IsEnabled = settingsEditable;
+        if (settingsEditable) stack.Children.Add(Card(parameters));
 
         var live = new StackPanel();
         live.Children.Add(phase);
@@ -106,35 +138,46 @@ internal sealed class EstatePitEnrollmentWindow : Window
         var steps = new StackPanel();
         steps.Children.Add(Text("实机步骤", 18, FontWeights.SemiBold));
         steps.Children.Add(Text(
-            "1. 把车停在维修区入口前，确认车头朝正常进站方向。点击“准备录入”，再点击“开始通道录入”。\n" +
-            "2. 以 2–25 km/h 沿通道中心完整驶到出口后。弯道要放慢并尽量贴着中心走；录入会保留约 0.75 米一级的折线细节。不要倒车、横穿或抄近路。驶出维修区后停车，再结束通道录入。\n" +
-            "3. 回到想设为入口线的位置，把车停在通道中心约 1 秒，点击“确认入口线”；再到出口线位置用同样方法确认出口线。入口可以设在弯道上，软件会按附近通道的实际切线生成门线。\n" +
-            "4. 回到换胎区，把车依次停在边界的四个角。每个位置停稳约 1 秒，再点“记录当前角点”。按顺时针或逆时针连续记录；不规则区域最多可记 8 个点。\n" +
-            "5. 保存时会检查入口在出口之前、两条线间距以及通道是否正向穿过起终点平面。通过后，所有维修区几何会随 .lfzestate 文件导出。",
+            ScopeSteps(editScope),
             14));
         steps.Children.Add(Text(
-            "“正在维修区服务”只说明车辆位于换胎区；“维修停留完成”只说明连续低速停车达到设置时长。FH6 UDP 不提供轮胎磨损、车损或换胎完成字段，LazyForza 不会把这两个状态写成已验证换胎。",
-            14, FontWeights.SemiBold, "WarningBrush"));
+            "LazyForza 记录车辆进入换胎区并完成设定停留；具体维修操作仍以游戏内实际操作为准。",
+            13, FontWeights.Normal, "MutedBrush"));
         stack.Children.Add(Card(steps));
 
-        var scroll = new ScrollViewer
+        contentScroll = new ScrollViewer
         {
             Content = stack,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
         };
-        root.Children.Add(scroll);
+        root.Children.Add(contentScroll);
 
-        var buttons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
-        foreach (var button in new[] { prepare, lane, entryGate, exitGate, corner, clearCorners, save })
+        var buttons = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
+        lane.Visibility = editScope.HasFlag(EstatePitEditScope.Lane) ? Visibility.Visible : Visibility.Collapsed;
+        entryGate.Visibility = editScope.HasFlag(EstatePitEditScope.EntryGate) ? Visibility.Visible : Visibility.Collapsed;
+        exitGate.Visibility = editScope.HasFlag(EstatePitEditScope.ExitGate) ? Visibility.Visible : Visibility.Collapsed;
+        corner.Visibility = editScope.HasFlag(EstatePitEditScope.ServiceZone) ? Visibility.Visible : Visibility.Collapsed;
+        clearCorners.Visibility = corner.Visibility;
+        var firstRow = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+        var secondRow = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+        var splitRows = editScope == EstatePitEditScope.All;
+        foreach (var button in new[] { prepare, lane, entryGate, exitGate })
         {
             button.Margin = new Thickness(8, 0, 0, 0);
-            buttons.Children.Add(button);
+            firstRow.Children.Add(button);
+        }
+        foreach (var button in new[] { corner, clearCorners, save })
+        {
+            button.Margin = new Thickness(8, splitRows ? 8 : 0, 0, 0);
+            (splitRows ? secondRow : firstRow).Children.Add(button);
         }
         var close = ActionButton("关闭");
-        close.Margin = new Thickness(16, 0, 0, 0);
+        close.Margin = new Thickness(16, splitRows ? 8 : 0, 0, 0);
         close.Click += (_, _) => Close();
-        buttons.Children.Add(close);
+        (splitRows ? secondRow : firstRow).Children.Add(close);
+        buttons.Children.Add(firstRow);
+        if (splitRows) buttons.Children.Add(secondRow);
         Grid.SetRow(buttons, 1);
         root.Children.Add(buttons);
         return root;
@@ -150,7 +193,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
             MessageBox.Show(this, "请输入有效的通道半宽、限速和最短服务时间。", "参数无效", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        Run(() => module.BeginPitEnrollment(new EstatePitEnrollmentRequest(trackId, width, limit, seconds)), "无法开始维修区录入");
+        Run(() => module.BeginPitEnrollment(new EstatePitEnrollmentRequest(trackId, width, limit, seconds, editScope)), "无法开始维修区录入");
     }
 
     private void ToggleLaneCapture()
@@ -182,6 +225,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
         {
             _ = module.SavePitEnrollment();
             acceptedClose = true;
+            Close();
         }, "无法保存维修区");
     }
 
@@ -198,32 +242,68 @@ internal sealed class EstatePitEnrollmentWindow : Window
     private void Refresh()
     {
         var state = module.PitState;
-        phase.Text = state.Phase switch
+        if (state.IsActive) preview.Update(track, definition, module.PitEnrollmentPreview);
+        if (!state.IsActive)
         {
-            EstatePitCapturePhase.CapturingLane => "当前阶段：维修区通道录入",
-            EstatePitCapturePhase.AwaitingServiceCorners => "当前阶段：换胎区边界录入",
-            EstatePitCapturePhase.ReadyToSave => "当前阶段：可以保存",
-            EstatePitCapturePhase.Saved => "维修区录入完成",
-            _ => "当前阶段：准备"
-        };
-        status.Text = state.Status;
-        instruction.Text = state.Instruction;
-        counts.Text = $"通道样本 {state.LaneSamples} · " +
-                      $"入口线{(state.EntryLineCaptured ? "已确认" : "未确认")} · " +
-                      $"出口线{(state.ExitLineCaptured ? "已确认" : "未确认")} · " +
-                      $"换胎区边界点 {state.ServiceCorners}";
+            phase.Text = "当前阶段：准备";
+            status.Text = editScope == EstatePitEditScope.Settings
+                ? "已载入当前维修区设置。"
+                : "点击“准备录入”后开始本次修改。";
+            instruction.Text = editScope == EstatePitEditScope.Settings
+                ? "确认参数后准备保存。"
+                : ScopeSteps(editScope).Split('\n')[0];
+            counts.Text = CountSummary(state);
+        }
+        else
+        {
+            phase.Text = state.Phase switch
+            {
+                EstatePitCapturePhase.CapturingLane => "当前阶段：维修区通道录入",
+                EstatePitCapturePhase.AwaitingServiceCorners => "当前阶段：换胎区边界录入",
+                EstatePitCapturePhase.ReadyToSave => "当前阶段：可以保存",
+                EstatePitCapturePhase.Saved => "维修区录入完成",
+                _ => "当前阶段：准备"
+            };
+            status.Text = state.Status;
+            instruction.Text = state.Instruction;
+            counts.Text = CountSummary(state);
+        }
         prepare.IsEnabled = !state.IsActive || state.Phase == EstatePitCapturePhase.Idle;
-        lane.IsEnabled = state.IsActive && state.Phase is EstatePitCapturePhase.Idle or EstatePitCapturePhase.CapturingLane or EstatePitCapturePhase.AwaitingServiceCorners;
+        lane.IsEnabled = editScope.HasFlag(EstatePitEditScope.Lane) && state.IsActive && state.Phase is EstatePitCapturePhase.Idle or EstatePitCapturePhase.CapturingLane or EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
         lane.Content = state.Phase == EstatePitCapturePhase.CapturingLane ? "2  结束通道录入" : "2  开始通道录入";
-        entryGate.IsEnabled = state.Phase is EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
-        exitGate.IsEnabled = entryGate.IsEnabled;
-        entryGate.Content = state.EntryLineCaptured ? "3  重设入口线" : "3  确认入口线";
-        exitGate.Content = state.ExitLineCaptured ? "4  重设出口线" : "4  确认出口线";
-        corner.IsEnabled = state.Phase is EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
-        clearCorners.IsEnabled = state.ServiceCorners > 0;
+        entryGate.IsEnabled = editScope.HasFlag(EstatePitEditScope.EntryGate) && state.Phase is EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
+        exitGate.IsEnabled = editScope.HasFlag(EstatePitEditScope.ExitGate) && state.Phase is EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
+        var entryStep = editScope == EstatePitEditScope.All ? 3 : 2;
+        var exitStep = editScope == EstatePitEditScope.All ? 4 : 2;
+        entryGate.Content = state.EntryLineCaptured ? $"{entryStep}  重设入口线" : $"{entryStep}  确认入口线";
+        exitGate.Content = state.ExitLineCaptured ? $"{exitStep}  重设出口线" : $"{exitStep}  确认出口线";
+        corner.IsEnabled = editScope.HasFlag(EstatePitEditScope.ServiceZone) && state.Phase is EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
+        clearCorners.IsEnabled = editScope.HasFlag(EstatePitEditScope.ServiceZone) && state.ServiceCorners > 0;
         save.IsEnabled = state.Phase == EstatePitCapturePhase.ReadyToSave &&
                          state.EntryLineCaptured && state.ExitLineCaptured;
     }
+
+    private void ConfigureButtonLabels()
+    {
+        if (editScope == EstatePitEditScope.All) return;
+        prepare.Content = editScope == EstatePitEditScope.Settings ? "1  准备保存" : "1  准备录入";
+        lane.Content = "2  开始通道录入";
+        corner.Content = "2  记录当前角点";
+        save.Content = editScope == EstatePitEditScope.Settings ? "2  保存规则" : "3  保存";
+    }
+
+    private string CountSummary(EstatePitEnrollmentState state) => editScope switch
+    {
+        EstatePitEditScope.Lane => $"通道样本 {state.LaneSamples}",
+        EstatePitEditScope.EntryGate => $"入口线{(state.EntryLineCaptured ? "已确认" : "待确认")}",
+        EstatePitEditScope.ExitGate => $"出口线{(state.ExitLineCaptured ? "已确认" : "待确认")}",
+        EstatePitEditScope.ServiceZone => $"换胎区边界点 {state.ServiceCorners}",
+        EstatePitEditScope.Settings => "几何数据保持不变",
+        _ => $"通道样本 {state.LaneSamples} · " +
+             $"入口线{(state.EntryLineCaptured ? "已确认" : "未确认")} · " +
+             $"出口线{(state.ExitLineCaptured ? "已确认" : "未确认")} · " +
+             $"换胎区边界点 {state.ServiceCorners}"
+    };
 
     private void OnClosing(object? sender, CancelEventArgs eventArgs)
     {
@@ -292,6 +372,44 @@ internal sealed class EstatePitEnrollmentWindow : Window
 
     private static TextBlock Text(string value, double size, string brush) =>
         Text(value, size, null, brush);
+
+    private static string ScopeTitle(EstatePitEditScope scope, bool isNew) => isNew || scope == EstatePitEditScope.All
+        ? "完整录入维修区"
+        : scope switch
+        {
+            EstatePitEditScope.Lane => "重录维修区通道",
+            EstatePitEditScope.EntryGate => "重设维修区入口线",
+            EstatePitEditScope.ExitGate => "重设维修区出口线",
+            EstatePitEditScope.ServiceZone => "重录换胎区",
+            EstatePitEditScope.Settings => "修改维修区规则",
+            _ => "编辑维修区"
+        };
+
+    private static string ScopeDescription(EstatePitEditScope scope) => scope switch
+    {
+        EstatePitEditScope.Lane => "只重新采集维修区中心通道。原入口线、出口线、换胎区和规则参数会保留，并在保存时重新校验。",
+        EstatePitEditScope.EntryGate => "只重设入口线。把车停在新入口线中心约 1 秒后确认；其他维修区数据保持不变。",
+        EstatePitEditScope.ExitGate => "只重设出口线。把车停在新出口线中心约 1 秒后确认；其他维修区数据保持不变。",
+        EstatePitEditScope.ServiceZone => "只重录换胎区边界。依次在边界角点停车确认；通道、出入口和规则参数保持不变。",
+        EstatePitEditScope.Settings => "只修改限速、通道宽度和最短服务时间，不需要重新驾驶录入。几何数据保持不变。",
+        _ => "按比赛方向录入维修区通道，再分别确认入口线、出口线和换胎区边界。"
+    };
+
+    private static string ScopeSteps(EstatePitEditScope scope) => scope switch
+    {
+        EstatePitEditScope.Lane =>
+            "点击准备后，从赛道分流点前开始，以 2–25 km/h 沿通道中心驶到并道点后。停车并结束录入，检查预览后保存。",
+        EstatePitEditScope.EntryGate =>
+            "点击准备，把车停在新入口线的通道中心约 1 秒，确认入口线。软件按通道局部方向生成门线；检查预览后保存。",
+        EstatePitEditScope.ExitGate =>
+            "点击准备，把车停在新出口线的通道中心约 1 秒，确认出口线。出口必须位于入口之后；检查预览后保存。",
+        EstatePitEditScope.ServiceZone =>
+            "点击准备，按顺时针或逆时针依次停在换胎区边界角点。每点停稳约 1 秒后记录，至少 4 点、最多 8 点；检查预览后保存。",
+        EstatePitEditScope.Settings =>
+            "修改参数后点击准备，再直接保存。限速是 LazyForza 赛事规则，不会改变游戏内车辆限速。",
+        _ =>
+            "1. 从分流点前开始，沿通道中心完整驶到并道点后。\n2. 在入口线和出口线中心分别停车确认。\n3. 按同一方向记录换胎区边界角点。\n4. 检查预览后保存。"
+    };
 
     private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];
 }
