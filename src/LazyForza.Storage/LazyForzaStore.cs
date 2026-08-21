@@ -269,7 +269,8 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
     public void SaveTrack(
         TrackTemplate track,
         IReadOnlyList<SectorDefinition> sectors,
-        EstateTrackDefinition? estate = null)
+        EstateTrackDefinition? estate = null,
+        bool clearExistingLaps = false)
     {
         if (track.TimingKind == TrackTimingKind.EstateGeometry && estate is null)
             throw new ArgumentException("地产几何赛道必须同时保存地产定义。", nameof(estate));
@@ -277,7 +278,10 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
             throw new ArgumentException("地产定义与赛道 ID 不一致。", nameof(estate));
         var trackId = Quote(track.Id.ToString());
         var sql = new StringBuilder(32_768)
-            .Append("BEGIN IMMEDIATE;\n")
+            .Append("BEGIN IMMEDIATE;\n");
+        if (clearExistingLaps)
+            sql.Append("DELETE FROM Laps WHERE TrackId=").Append(trackId).Append(";\n");
+        sql
             .Append("INSERT INTO TrackTemplates(Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind) VALUES(")
             .Append(trackId).Append(',').Append(Quote(track.Name)).Append(',').Append(track.Direction).Append(',')
             .Append(Quote(track.Source)).Append(',').Append(Quote(track.GameBuild)).Append(',')

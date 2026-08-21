@@ -15,6 +15,7 @@ internal sealed partial class MainWindow
     {
         var initialState = estateModule.State;
         var packageService = new EstateTrackPackageService(store, CurrentApplicationVersion());
+        var draftStore = new EstateEnrollmentDraftStore(directories.Root);
         var timingButtons = new List<(Guid TrackId, Button Button)>();
         var exportButtons = new List<Button>();
         var deleteButtons = new List<(Guid TrackId, Button Button)>();
@@ -28,7 +29,7 @@ internal sealed partial class MainWindow
         var heading = new StackPanel();
         heading.Children.Add(Label("地产环道", 20, FontWeights.SemiBold));
         heading.Children.Add(Label(
-            "手动选择地图后才启用；使用终点门几何和 LazyForza 本地时钟，不冒充游戏官方计时。",
+            "手动选择地图后启用，按已录入的起终点线记录圈速。",
             12,
             FontWeights.Normal,
             "MutedBrush"));
@@ -107,7 +108,7 @@ internal sealed partial class MainWindow
 
         var add = new Button
         {
-            Content = "添加地产环道",
+            Content = draftStore.Exists ? "继续录入" : "添加地产环道",
             Margin = new Thickness(8, 0, 0, 0),
             Padding = new Thickness(16, 8, 16, 8),
             IsEnabled = !initialState.IsTimingActive && !initialState.IsEnrollmentActive
@@ -124,7 +125,7 @@ internal sealed partial class MainWindow
                     MessageBoxImage.Information);
                 return;
             }
-            var window = new EstateCircuitEnrollmentWindow(estateModule) { Owner = this };
+            var window = new EstateCircuitEnrollmentWindow(estateModule, draftStore) { Owner = this };
             window.ShowDialog();
             trackPreviewCache.Clear();
             RenderSelectedPage();
@@ -135,7 +136,7 @@ internal sealed partial class MainWindow
         content.Children.Add(header);
 
         var guidance = Label(
-            "录入顺序：沿棋盘格横线低速往返各描摹一次 → 确认正常比赛方向 → 完成参考圈 → 连续完成验证圈。暂停、倒带或传送会取消当前圈；地产模式只支持环道。",
+            "新赛道：沿起终点横线往返描摹 → 直穿终点线确认方向 → 参考圈 → 验证圈。录入可暂存；已保存赛道可单独重设起终点线、维修区通道、出入口、换胎区和规则参数。",
             12,
             FontWeights.Normal,
             "MutedBrush");
@@ -172,7 +173,7 @@ internal sealed partial class MainWindow
         if (tracks.Count == 0)
         {
             content.Children.Add(Label(
-                "还没有已验证的地产环道。录入不会自动识别地图，也不会在大世界自行触发。",
+                "还没有地产环道。录入后需手动选择地图并开始计时。",
                 13,
                 FontWeights.Normal,
                 "MutedBrush"));
@@ -200,7 +201,7 @@ internal sealed partial class MainWindow
             }.Where(value => value is not null));
             description.Children.Add(Label(identity, 11, FontWeights.Normal, "MutedBrush"));
             description.Children.Add(Label(
-                $"终点拟合 RMS {definition.StartFinishGate.FitRmsMeters:0.00} m · 验证路线有效率 {definition.ValidationProjectionRatio:P0}",
+                $"起终点宽 {GateWidth(definition.StartFinishGate):0.0} m · 参考圈 {definition.ReferenceLapSeconds:0.000} s",
                 11,
                 FontWeights.Normal,
                 "MutedBrush"));
@@ -270,27 +271,34 @@ internal sealed partial class MainWindow
             rowActions.Children.Add(export);
             exportButtons.Add(export);
 
-            var configurePit = new Button
+            var edit = new Button
             {
-                Content = definition.Pit is null ? "配置维修区" : "重录维修区",
-                MinWidth = 96,
+                Content = "编辑",
+                MinWidth = 74,
                 Margin = new Thickness(0, 0, 8, 0),
                 IsEnabled = !estateModule.State.IsEnrollmentActive && !estateModule.State.IsTimingActive
             };
-            configurePit.Click += (_, _) =>
+            edit.Click += (_, _) =>
             {
                 var loadedTrack = store.LoadTrack(track.Id);
                 var currentDefinition = store.LoadEstateTrackDefinition(track.Id);
                 if (loadedTrack is null || currentDefinition is null)
                 {
-                    MessageBox.Show(this, "赛道定义已经不存在，请刷新列表。", "无法配置维修区", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(this, "赛道定义已经不存在，请刷新列表。", "无法编辑地产环道", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
-                var window = new EstatePitEnrollmentWindow(estateModule, loadedTrack.Value.Track, currentDefinition) { Owner = this };
+                var window = new EstateTrackEditorWindow(
+                    store,
+                    estateModule,
+                    loadedTrack.Value.Track,
+                    loadedTrack.Value.Sectors,
+                    currentDefinition) { Owner = this };
                 window.ShowDialog();
+                moduleManager.Modules.OfType<LapAnalysisModule>().Single().RefreshSelectedTrackHistory();
+                trackPreviewCache.Clear();
                 RenderSelectedPage(true);
             };
-            rowActions.Children.Add(configurePit);
+            rowActions.Children.Add(edit);
 
             var delete = new Button
             {
@@ -434,5 +442,12 @@ internal sealed partial class MainWindow
         static string TimingSummary(EstateCircuitState value) =>
             $"当前 {value.CurrentLapSeconds:0.0} s · 上一圈 " +
             $"{(value.LastLapSeconds is double last ? $"{last:0.000} s" : "—")} · 已完成 {value.CompletedLaps} 圈";
+
+        static double GateWidth(EstateTimingGate gate)
+        {
+            var dx = gate.Right.X - gate.Left.X;
+            var dz = gate.Right.Z - gate.Left.Z;
+            return Math.Sqrt(dx * dx + dz * dz);
+        }
     }
 }

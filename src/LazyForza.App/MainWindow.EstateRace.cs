@@ -83,13 +83,6 @@ internal sealed partial class MainWindow
             Padding = new Thickness(14, 7, 14, 7),
             Visibility = Visibility.Collapsed
         };
-        var ready = new Button
-        {
-            Content = "标记已准备",
-            Padding = new Thickness(16, 8, 16, 8),
-            Margin = new Thickness(0, 14, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Left
-        };
         var statusActions = new StackPanel
         {
             Margin = new Thickness(28, 0, 0, 0),
@@ -98,8 +91,6 @@ internal sealed partial class MainWindow
         };
         enterRoom.HorizontalAlignment = HorizontalAlignment.Stretch;
         statusActions.Children.Add(enterRoom);
-        ready.HorizontalAlignment = HorizontalAlignment.Stretch;
-        statusActions.Children.Add(ready);
         Grid.SetColumn(statusActions, 1);
         statusCard.Children.Add(statusActions);
         stack.Children.Add(Card(statusCard));
@@ -175,18 +166,6 @@ internal sealed partial class MainWindow
             {
                 enterRoom.IsEnabled = true;
                 UpdateRacePageState();
-            }
-        };
-        ready.Click += async (_, _) =>
-        {
-            try
-            {
-                var local = module.State.Session?.Participants.FirstOrDefault(item => item.Id == module.State.LocalParticipantId);
-                await module.SetReadyAsync(!(local?.IsReady ?? false), lifetimeCancellation.Token);
-            }
-            catch (Exception exception)
-            {
-                MessageBox.Show(this, exception.Message, "无法更新准备状态", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         };
         exportResult.Click += (_, _) =>
@@ -391,9 +370,6 @@ internal sealed partial class MainWindow
                     ? $"{profile.DisplayName} · OB 转播 · {profile.ServerAddress}"
                     : $"{profile.DisplayName} · {profile.TeamName ?? "个人参赛"} · {profile.ServerAddress}"
                 : "进入房间时会读取服务端指定的赛道，并自动启用本机相同的地产环道。";
-            ready.IsEnabled = state.IsConnected && !state.IsObserver &&
-                              state.Session?.Phase is RaceSessionPhase.Lobby or RaceSessionPhase.Grid;
-            ready.Visibility = state.IsConnected && !state.IsObserver ? Visibility.Visible : Visibility.Collapsed;
             connectedContent.Visibility = roomAttached ? Visibility.Visible : Visibility.Collapsed;
             hostingGuide.Visibility = roomAttached ? Visibility.Collapsed : Visibility.Visible;
             var session = state.Session;

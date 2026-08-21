@@ -102,6 +102,7 @@ internal sealed class EstateTrackIdentityWindow : Window
     private string AllText() =>
         $"赛道名称：{identity.TrackName}\r\n" +
         $"赛道标识：{identity.TrackId:D}\r\n" +
+        $"地图修订：{identity.MapRevision}\r\n" +
         $"赛道特征 SHA-256：{identity.TrackFingerprintSha256}";
 
     private void Copy(string value, string success)

@@ -107,6 +107,55 @@ public sealed class EstateRaceClientModuleTests
     }
 
     [TestMethod]
+    public void TimedLapLeaderboardUsesLeaderUntilLocalDriverSetsATime()
+    {
+        var now = DateTimeOffset.Parse("2026-08-21T12:00:00Z");
+        var leader = Participant(Guid.NewGuid()) with
+        {
+            Position = 1,
+            BestLapSeconds = 67.600,
+            GapToLeaderSeconds = 0
+        };
+        var trailing = Participant(Guid.NewGuid()) with
+        {
+            Position = 2,
+            BestLapSeconds = 69.072,
+            GapToLeaderSeconds = 1.472
+        };
+        var localWithoutTime = Participant(Guid.NewGuid()) with
+        {
+            Position = 3,
+            BestLapSeconds = null,
+            GapToLeaderSeconds = null
+        };
+        var participants = new[] { leader, trailing, localWithoutTime };
+        var cache = new EstateRaceLeaderboardRefreshCache();
+
+        Assert.AreEqual("1:07.600",
+            cache.Format(leader, localWithoutTime, timedLap: true, race: false, participants, now));
+        Assert.AreEqual("+1.472",
+            cache.Format(trailing, localWithoutTime, timedLap: true, race: false, participants, now));
+        Assert.AreEqual("NO TIME",
+            cache.Format(localWithoutTime, localWithoutTime, timedLap: true, race: false, participants, now));
+
+        var localWithTime = localWithoutTime with
+        {
+            Position = 2,
+            BestLapSeconds = 68.432,
+            GapToLeaderSeconds = .832
+        };
+        var trailingAfterLocal = trailing with { Position = 3 };
+        var refreshed = new[] { leader, localWithTime, trailingAfterLocal };
+
+        Assert.AreEqual("-0.832",
+            cache.Format(leader, localWithTime, timedLap: true, race: false, refreshed, now));
+        Assert.AreEqual("1:08.432",
+            cache.Format(localWithTime, localWithTime, timedLap: true, race: false, refreshed, now));
+        Assert.AreEqual("+0.640",
+            cache.Format(trailingAfterLocal, localWithTime, timedLap: true, race: false, refreshed, now));
+    }
+
+    [TestMethod]
     public void RaceLeaderboardOnlyUsesLapTextAfterACompleteLapHasBeenLost()
     {
         var leader = Participant(Guid.NewGuid()) with
@@ -255,6 +304,49 @@ public sealed class EstateRaceClientModuleTests
         Assert.AreEqual(RaceHeaderSignal.None,
             HudSurface.SelectRaceHeaderSignal(session, localId),
             "区间黄旗只应在本机正行驶的分段进入排行榜顶栏；赛道图仍显示所有黄旗分段。");
+    }
+
+    [TestMethod]
+    public void LeaderboardNetworkWarningUsesMeasuredConnectionStateAndKeepsFlagsInPriority()
+    {
+        var now = DateTimeOffset.Parse("2026-08-21T12:00:00Z");
+        var state = OverlayLayoutPreviewState.EstateRace(now) with
+        {
+            ConnectionState = EstateRaceConnectionState.Connected,
+            LastServerResponseAt = now,
+            EstimatedRoundTripLatency = TimeSpan.FromMilliseconds(220),
+            NetworkJitter = TimeSpan.FromMilliseconds(20)
+        };
+        Assert.AreEqual(EstateRaceNetworkQuality.HighLatency,
+            HudSurface.SelectRaceNetworkQuality(state, now));
+
+        state = state with
+        {
+            EstimatedRoundTripLatency = TimeSpan.FromMilliseconds(90),
+            NetworkJitter = TimeSpan.FromMilliseconds(160)
+        };
+        Assert.AreEqual(EstateRaceNetworkQuality.Unstable,
+            HudSurface.SelectRaceNetworkQuality(state, now));
+        Assert.AreEqual(EstateRaceNetworkQuality.Unstable,
+            HudSurface.SelectRaceNetworkQuality(state with
+            {
+                NetworkJitter = TimeSpan.Zero,
+                LastServerResponseAt = now.AddSeconds(-10)
+            }, now));
+        Assert.AreEqual(EstateRaceNetworkQuality.Reconnecting,
+            HudSurface.SelectRaceNetworkQuality(state with
+            {
+                ConnectionState = EstateRaceConnectionState.Reconnecting
+            }, now));
+
+        var session = EmptySession() with { Flag = RaceControlFlag.Red };
+        Assert.AreEqual(RaceHeaderSignal.Red,
+            HudSurface.SelectRaceHeaderSignal(session, null, EstateRaceNetworkQuality.Unstable));
+        Assert.AreEqual(RaceHeaderSignal.HighLatency,
+            HudSurface.SelectRaceHeaderSignal(
+                session with { Flag = RaceControlFlag.Green },
+                null,
+                EstateRaceNetworkQuality.HighLatency));
     }
 
     [TestMethod]
@@ -848,6 +940,236 @@ public sealed class EstateRaceClientModuleTests
                     TimeSpan.FromSeconds(6));
                 Assert.AreEqual("resume-reconnect-token", resumedWith);
                 Assert.AreEqual(participantId, module.State.LocalParticipantId);
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            await app.StopAsync();
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task ReconnectUploadsLocallyCompletedLapWhenServerRecoveryIsEnabled()
+    {
+        var participantId = Guid.NewGuid();
+        var connectionCount = 0;
+        var secondConnectionReady = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowSecondLogin = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var recoveredLapReceived = new TaskCompletionSource<RaceLapCompleted>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var snapshot = EmptySession() with
+        {
+            Phase = RaceSessionPhase.Race,
+            DisconnectedLapRecoveryEnabled = true
+        };
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        app.UseWebSockets();
+        app.Map("/ws", async context =>
+        {
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            var number = Interlocked.Increment(ref connectionCount);
+            _ = await ReceiveAsync(socket, context.RequestAborted);
+            if (number > 1)
+            {
+                secondConnectionReady.TrySetResult();
+                await allowSecondLogin.Task.WaitAsync(context.RequestAborted);
+            }
+            await socket.SendAsync(
+                EstateRaceWireProtocol.Serialize(
+                    "loginAccepted",
+                    number,
+                    new RaceLoginAccepted(
+                        participantId,
+                        "resume-lap-recovery-token",
+                        snapshot,
+                        DateTimeOffset.UtcNow)),
+                WebSocketMessageType.Text,
+                true,
+                context.RequestAborted);
+            if (number == 1)
+            {
+                await socket.CloseOutputAsync(
+                    WebSocketCloseStatus.EndpointUnavailable,
+                    "test drop",
+                    context.RequestAborted);
+                return;
+            }
+            try
+            {
+                while (socket.State == WebSocketState.Open)
+                {
+                    var envelope = await ReceiveAsync(socket, context.RequestAborted);
+                    if (envelope.Type != "lapCompleted") continue;
+                    var lap = envelope.Payload.Deserialize<RaceLapCompleted>(EstateRaceWireProtocol.JsonOptions)!;
+                    recoveredLapReceived.TrySetResult(lap);
+                    await socket.SendAsync(
+                        EstateRaceWireProtocol.Serialize(
+                            "lapAcknowledged",
+                            number + 10,
+                            new RaceLapAcknowledgement(lap.EventId, true)),
+                        WebSocketMessageType.Text,
+                        true,
+                        context.RequestAborted);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (WebSocketException) { }
+        });
+        await app.StartAsync();
+        var address = app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-race-lap-recovery-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var feed = new TestFeed();
+            var track = CreateTrack();
+            var definition = CreateDefinition(track);
+            EstateCompletedLapEvent? completedLap = null;
+            var module = new EstateRaceModule(() => new EstateRaceTrackContext(
+                track, definition, 0, 0, 0, true, completedLap));
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                await module.ConnectAsync(new EstateRaceConnectionProfile(
+                    address, "secret-race-password", "补传车手", "#42D7E8", null), CancellationToken.None);
+                await WaitUntilAsync(
+                    () => module.State.ConnectionState == EstateRaceConnectionState.Reconnecting,
+                    TimeSpan.FromSeconds(3));
+                await secondConnectionReady.Task.WaitAsync(TimeSpan.FromSeconds(4));
+
+                completedLap = new EstateCompletedLapEvent(
+                    Guid.NewGuid(), 2, 61.425, [20.1, 20.4, 20.925], true, null);
+                feed.Publish(Frame(20, 20_000, 25, 0, 0));
+                await Task.Delay(150);
+                allowSecondLogin.TrySetResult();
+
+                var recovered = await recoveredLapReceived.Task.WaitAsync(TimeSpan.FromSeconds(4));
+                Assert.AreEqual(completedLap.EventId, recovered.EventId);
+                Assert.AreEqual(2, recovered.LapNumber);
+                Assert.AreEqual(61.425, recovered.LapSeconds, 0.000001);
+                Assert.IsTrue(recovered.IsRecoveredAfterDisconnect);
+            }
+            finally
+            {
+                allowSecondLogin.TrySetResult();
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            await app.StopAsync();
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task ReconnectRetriesSentLapWhenServerAcknowledgementWasLost()
+    {
+        var participantId = Guid.NewGuid();
+        var connectionCount = 0;
+        var firstUploadReceived = new TaskCompletionSource<RaceLapCompleted>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var recoveredUploadReceived = new TaskCompletionSource<RaceLapCompleted>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var snapshot = EmptySession() with
+        {
+            Phase = RaceSessionPhase.Race,
+            DisconnectedLapRecoveryEnabled = true
+        };
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        app.UseWebSockets();
+        app.Map("/ws", async context =>
+        {
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            var number = Interlocked.Increment(ref connectionCount);
+            _ = await ReceiveAsync(socket, context.RequestAborted);
+            await socket.SendAsync(
+                EstateRaceWireProtocol.Serialize(
+                    "loginAccepted",
+                    number,
+                    new RaceLoginAccepted(
+                        participantId,
+                        "resume-unacknowledged-lap-token",
+                        snapshot,
+                        DateTimeOffset.UtcNow)),
+                WebSocketMessageType.Text,
+                true,
+                context.RequestAborted);
+            try
+            {
+                while (socket.State == WebSocketState.Open)
+                {
+                    var envelope = await ReceiveAsync(socket, context.RequestAborted);
+                    if (envelope.Type != "lapCompleted") continue;
+                    var lap = envelope.Payload.Deserialize<RaceLapCompleted>(EstateRaceWireProtocol.JsonOptions)!;
+                    if (number == 1)
+                    {
+                        firstUploadReceived.TrySetResult(lap);
+                        await socket.CloseOutputAsync(
+                            WebSocketCloseStatus.EndpointUnavailable,
+                            "ack lost",
+                            context.RequestAborted);
+                        return;
+                    }
+                    recoveredUploadReceived.TrySetResult(lap);
+                    await socket.SendAsync(
+                        EstateRaceWireProtocol.Serialize(
+                            "lapAcknowledged",
+                            number + 10,
+                            new RaceLapAcknowledgement(lap.EventId, true)),
+                        WebSocketMessageType.Text,
+                        true,
+                        context.RequestAborted);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (WebSocketException) { }
+        });
+        await app.StartAsync();
+        var address = app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-race-unacknowledged-lap-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var feed = new TestFeed();
+            var track = CreateTrack();
+            var definition = CreateDefinition(track);
+            EstateCompletedLapEvent? completedLap = null;
+            var module = new EstateRaceModule(() => new EstateRaceTrackContext(
+                track, definition, 0, 0, 0, true, completedLap));
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                await module.ConnectAsync(new EstateRaceConnectionProfile(
+                    address, "secret-race-password", "确认丢失车手", "#42D7E8", null), CancellationToken.None);
+                completedLap = new EstateCompletedLapEvent(
+                    Guid.NewGuid(), 3, 60.875, [20, 20.2, 20.675], true, null);
+                feed.Publish(Frame(30, 30_000, 30, 0, 0));
+
+                var first = await firstUploadReceived.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                Assert.IsFalse(first.IsRecoveredAfterDisconnect);
+                var recovered = await recoveredUploadReceived.Task.WaitAsync(TimeSpan.FromSeconds(6));
+                Assert.AreEqual(first.EventId, recovered.EventId);
+                Assert.IsTrue(recovered.IsRecoveredAfterDisconnect);
             }
             finally
             {

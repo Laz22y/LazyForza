@@ -120,6 +120,12 @@ internal sealed record RaceLapCompleted(
     bool IsValid,
     string? InvalidReason,
     long ClientMonotonicMilliseconds,
-    bool IsBestLapEligible = true);
+    bool IsBestLapEligible = true,
+    bool IsRecoveredAfterDisconnect = false);
+
+internal sealed record RaceLapAcknowledgement(
+    Guid EventId,
+    bool IsAccepted,
+    string? Message = null);
 
 internal sealed record RaceProtocolError(string Code, string Message);

@@ -18,6 +18,14 @@ public enum EstateRaceConnectionRole
     Observer
 }
 
+public enum EstateRaceNetworkQuality
+{
+    Normal,
+    HighLatency,
+    Unstable,
+    Reconnecting
+}
+
 public enum RaceSessionPhase
 {
     Lobby,
@@ -347,7 +355,8 @@ public sealed record EstateRaceSession(
     int PracticeSessionCount = 1,
     IReadOnlyList<int>? PracticeSessionMinutes = null,
     IReadOnlyList<EstateRaceObserver>? Observers = null,
-    int MinimumRequiredPitStops = 1);
+    int MinimumRequiredPitStops = 1,
+    bool DisconnectedLapRecoveryEnabled = false);
 
 public sealed record EstateRaceOrganizerLogo(
     string Sha256,
@@ -489,7 +498,10 @@ public sealed record EstateRaceHudState(
     EstatePitStrategyPrediction? PitStrategy = null,
     EstatePracticeTestPanelState? PracticeTests = null,
     TimeSpan EstimatedOneWayLatency = default,
-    TimeSpan? ServerClockOffset = null)
+    TimeSpan? ServerClockOffset = null,
+    TimeSpan EstimatedRoundTripLatency = default,
+    TimeSpan NetworkJitter = default,
+    DateTimeOffset? LastServerResponseAt = null)
 {
     public bool IsConnected => ConnectionState == EstateRaceConnectionState.Connected;
 }

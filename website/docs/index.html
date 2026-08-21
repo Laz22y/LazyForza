@@ -40,8 +40,8 @@
         </nav>
         <div class="version-card">
           <span>当前文档</span>
-          <strong>Client 1.4.7</strong>
-          <strong>Server 0.4.0</strong>
+          <strong>Client 1.4.8</strong>
+          <strong>Server 0.4.1</strong>
         </div>
       </aside>
 
@@ -52,8 +52,8 @@
             <h1>用户与开发者文档</h1>
             <p class="doc-lead">从第一次接收 FH6 遥测，到部署赛事服务端、阅读架构和提交代码。只保留需要的信息。</p>
             <div class="doc-status">
-              <div><span>客户端</span><strong>1.4.7</strong><small>Windows 10 / 11 x64</small></div>
-              <div><span>RaceServer</span><strong>0.4.0</strong><small>Native / Cloudflare</small></div>
+              <div><span>客户端</span><strong>1.4.8</strong><small>Windows 10 / 11 x64</small></div>
+              <div><span>RaceServer</span><strong>0.4.1</strong><small>Native / Cloudflare</small></div>
               <div><span>数据入口</span><strong>UDP 2299</strong><small>FH6 Official Data Out</small></div>
             </div>
             <div class="callout callout-info"><strong>项目边界</strong><p>不读取游戏内存，不注入 DLL，不修改游戏进程。官方 UDP 没有提供的数据不会被包装成官方数据。</p></div>
@@ -91,7 +91,7 @@
               <div><span>VEHICLE</span><h3>车辆与换挡学习</h3><p>按车型、性能等级和可观测调校特征保存结果。车辆名称映射使用 HDR 提供的 Car Ordinals 文档内置快照。</p></div>
               <div><span>RECORDING</span><h3>录制与回放</h3><p>自动录制默认关闭。可保留赛前 15 秒与赛后 10 秒；回放工作台联动时间轴、驾驶输入、走线和动态遥测。</p></div>
               <div><span>DRIFT</span><h3>实验性漂移 HUD</h3><p>用本车 UDP 推导侧滑角和控车趋势，优先降低 Spin 风险。换挡箭头不是最佳换挡点，积分趋势不复刻游戏分数。</p></div>
-              <div><span>ESTATE RACE</span><h3>地产环道与赛事</h3><p>支持本地计时、赛道交换、维修区、地图和赛事 HUD；连接 RaceServer 后接入练习、排位、正赛、旗语与处罚。</p></div>
+              <div><span>ESTATE RACE</span><h3>地产环道与赛事</h3><p>录入支持暂存、地图预览和分项修订；赛事 HUD 提示弱网状态，服务端可选开启断线计圈恢复。</p></div>
             </div>
           </section>
 
@@ -140,7 +140,7 @@
             <h3>提供什么</h3>
             <ul>
               <li>1–3 节练习与排位、正赛、五盏红灯和方格旗；</li>
-              <li>车队、维修区、旗语、处罚、碰撞调查和 OB；</li>
+              <li>车队、维修区、旗语、处罚、碰撞调查、OB 和可选断线计圈恢复；</li>
               <li>阶段赛果归档，返回大厅后仍可回看并导出 PNG/CSV；</li>
               <li>适配电脑宽屏和 Pad 触控的浏览器总控。</li>
             </ul>
@@ -172,7 +172,7 @@ chmod +x ./LazyForza.RaceServer.Web
             <p>车手需要服务端域名或 IP、房间密码、匹配的地产赛道、显示名和可选车队。OB 只接收赛事快照，不上传遥测、不参与排名和处罚。</p>
 
             <h3>兼容性</h3>
-            <p>RaceServer <code>0.4.0</code> 支持 LazyForza <code>1.4.2–1.4.7</code> 的协议 v2 主要流程。客户端 <code>1.4.7</code> 才会上报完整增强碰撞证据；旧版仍可连接，但不会拥有后续新增的全部能力。</p>
+            <p>RaceServer <code>0.4.1</code> 支持 LazyForza <code>1.4.2–1.4.8</code> 的协议 v2 主要流程。增强碰撞证据需要客户端 <code>1.4.7</code> 或更高版本；断线计圈恢复需要客户端 <code>1.4.8</code>，并由服务端总控开启。</p>
           </section>
 
           <section class="doc-section" id="troubleshooting">

@@ -223,7 +223,10 @@ internal enum RaceHeaderSignal
     DoubleYellow,
     Red,
     Blue,
-    Chequered
+    Chequered,
+    HighLatency,
+    NetworkUnstable,
+    Reconnecting
 }
 
 internal enum QualifyingEliminationVisualState
@@ -631,8 +634,10 @@ internal sealed class HudSurface : FrameworkElement
         }
         if (state?.Session is not { } session ||
             state.ConnectionState is not (EstateRaceConnectionState.Connected or
-                EstateRaceConnectionState.Reconnecting) ||
-            now - state.UpdatedAt > (state.ConnectionState == EstateRaceConnectionState.Reconnecting
+                EstateRaceConnectionState.Reconnecting))
+            return;
+        var networkQuality = SelectRaceNetworkQuality(state, now);
+        if (now - state.UpdatedAt > (networkQuality != EstateRaceNetworkQuality.Normal
                 ? TimeSpan.FromSeconds(30)
                 : TimeSpan.FromSeconds(Math.Max(2, layout.LiveHudStaleSeconds * 4))))
             return;
@@ -643,7 +648,7 @@ internal sealed class HudSurface : FrameworkElement
         var widgets = layout.EstateRaceWidgets ?? EstateRaceHudLayoutSettings.Default;
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.Leaderboard,
             widgets.Get(EstateRaceHudWidgetKind.Leaderboard),
-            widgetDc => DrawRaceLeaderboard(widgetDc, state, session, estimatedServerNow));
+            widgetDc => DrawRaceLeaderboard(widgetDc, state, session, estimatedServerNow, networkQuality));
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.TrackMap,
             widgets.Get(EstateRaceHudWidgetKind.TrackMap),
             widgetDc => DrawRaceTrackMap(widgetDc, state, session));
@@ -947,7 +952,8 @@ internal sealed class HudSurface : FrameworkElement
         DrawingContext dc,
         EstateRaceHudState state,
         EstateRaceSession session,
-        DateTimeOffset estimatedServerNow)
+        DateTimeOffset estimatedServerNow,
+        EstateRaceNetworkQuality networkQuality)
     {
         var width = ActualWidth * 0.235;
         var participants = session.Participants.Take(12).ToArray();
@@ -967,7 +973,7 @@ internal sealed class HudSurface : FrameworkElement
         var finished = session.Phase == RaceSessionPhase.Finished;
         var targetSignal = finished
             ? RaceHeaderSignal.None
-            : SelectRaceHeaderSignal(session, state.LocalParticipantId);
+            : SelectRaceHeaderSignal(session, state.LocalParticipantId, networkQuality);
         var chequeredHeader = targetSignal == RaceHeaderSignal.Chequered;
         var premiumFinishHeader = chequeredHeader || finished;
         var topHeaderHeight = ActualHeight * (premiumFinishHeader ? 0.047 : 0.053);
@@ -1391,12 +1397,56 @@ internal sealed class HudSurface : FrameworkElement
             : RaceHeaderSignal.None;
     }
 
+    internal static EstateRaceNetworkQuality SelectRaceNetworkQuality(
+        EstateRaceHudState state,
+        DateTimeOffset now)
+    {
+        if (state.ConnectionState == EstateRaceConnectionState.Reconnecting)
+            return EstateRaceNetworkQuality.Reconnecting;
+        if (state.ConnectionState != EstateRaceConnectionState.Connected)
+            return EstateRaceNetworkQuality.Normal;
+
+        var responseAge = state.LastServerResponseAt is DateTimeOffset lastResponse
+            ? now - lastResponse
+            : TimeSpan.Zero;
+        if (responseAge >= TimeSpan.FromSeconds(9) ||
+            state.EstimatedRoundTripLatency >= TimeSpan.FromMilliseconds(450) ||
+            state.NetworkJitter >= TimeSpan.FromMilliseconds(140))
+            return EstateRaceNetworkQuality.Unstable;
+        if (state.EstimatedRoundTripLatency >= TimeSpan.FromMilliseconds(180) ||
+            state.NetworkJitter >= TimeSpan.FromMilliseconds(70))
+            return EstateRaceNetworkQuality.HighLatency;
+        return EstateRaceNetworkQuality.Normal;
+    }
+
+    internal static RaceHeaderSignal SelectRaceHeaderSignal(
+        EstateRaceSession session,
+        Guid? localParticipantId,
+        EstateRaceNetworkQuality networkQuality)
+    {
+        var controlSignal = SelectRaceHeaderSignal(session, localParticipantId);
+        return controlSignal == RaceHeaderSignal.None
+            ? NetworkHeaderSignal(networkQuality)
+            : controlSignal;
+    }
+
+    private static RaceHeaderSignal NetworkHeaderSignal(EstateRaceNetworkQuality quality) => quality switch
+    {
+        EstateRaceNetworkQuality.HighLatency => RaceHeaderSignal.HighLatency,
+        EstateRaceNetworkQuality.Unstable => RaceHeaderSignal.NetworkUnstable,
+        EstateRaceNetworkQuality.Reconnecting => RaceHeaderSignal.Reconnecting,
+        _ => RaceHeaderSignal.None
+    };
+
     internal static string RaceHeaderSignalText(RaceHeaderSignal signal) => signal switch
     {
         RaceHeaderSignal.Yellow or RaceHeaderSignal.DoubleYellow => "YELLOW FLAG",
         RaceHeaderSignal.Red => "RED FLAG",
         RaceHeaderSignal.Blue => "BLUE FLAG",
         RaceHeaderSignal.Chequered => "CHEQUERED FLAG",
+        RaceHeaderSignal.HighLatency => "HIGH LATENCY",
+        RaceHeaderSignal.NetworkUnstable => "NETWORK UNSTABLE",
+        RaceHeaderSignal.Reconnecting => "RECONNECTING",
         _ => string.Empty
     };
 
@@ -1472,6 +1522,8 @@ internal sealed class HudSurface : FrameworkElement
         RaceHeaderSignal.Yellow or RaceHeaderSignal.DoubleYellow => BrushOf(0xFF, 0xCF, 0x18),
         RaceHeaderSignal.Red => BrushOf(0xFF, 0x2E, 0x43),
         RaceHeaderSignal.Blue => BrushOf(0x24, 0x7B, 0xFF),
+        RaceHeaderSignal.HighLatency => BrushOf(0xFF, 0xB2, 0x24),
+        RaceHeaderSignal.NetworkUnstable or RaceHeaderSignal.Reconnecting => BrushOf(0xFF, 0x79, 0x2E),
         _ => White
     };
 

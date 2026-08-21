@@ -17,6 +17,7 @@ public enum EstateCircuitPhase
     CapturingReferenceLap,
     ValidatingLap,
     ValidationFailed,
+    StartFinishReadyToSave,
     Ready,
     WaitingForTimingStart,
     TimingLap,
@@ -52,6 +53,30 @@ public sealed record EstateEnrollmentRequest(
     string MapRevision,
     int SectorCount = 4);
 
+public sealed record EstateEnrollmentDraft(
+    int FormatVersion,
+    DateTimeOffset SavedAt,
+    EstateEnrollmentRequest Enrollment,
+    EstateCircuitPhase ResumePhase,
+    IReadOnlyList<EstateGatePoint> FirstTrace,
+    IReadOnlyList<EstateGatePoint> SecondTrace,
+    IReadOnlyList<EstateGatePoint> DirectionTrace,
+    EstateTimingGate? FittedGate,
+    TrackTemplate? ActiveTrack,
+    IReadOnlyList<SectorDefinition> ActiveSectors,
+    EstateTrackDefinition? ActiveDefinition,
+    double ReferenceLapSeconds);
+
+public sealed record EstateEnrollmentPreview(
+    IReadOnlyList<EstateGatePoint> FirstTrace,
+    IReadOnlyList<EstateGatePoint> SecondTrace,
+    IReadOnlyList<EstateGatePoint> DirectionTrace,
+    IReadOnlyList<TrackPoint> ReferenceRoute,
+    IReadOnlyList<TrackPoint> CaptureRoute,
+    EstateTimingGate? Gate,
+    IReadOnlyList<EstateCheckpoint> Checkpoints,
+    EstateGatePoint? CurrentPosition);
+
 public sealed record EstateCircuitCompletedLap(
     Guid EventId,
     int LapNumber,
@@ -68,6 +93,18 @@ public enum EstatePitCapturePhase
     AwaitingServiceCorners,
     ReadyToSave,
     Saved
+}
+
+[Flags]
+public enum EstatePitEditScope
+{
+    None = 0,
+    Lane = 1,
+    EntryGate = 2,
+    ExitGate = 4,
+    ServiceZone = 8,
+    Settings = 16,
+    All = Lane | EntryGate | ExitGate | ServiceZone | Settings
 }
 
 public sealed record EstatePitEnrollmentState(
@@ -87,7 +124,15 @@ public sealed record EstatePitEnrollmentRequest(
     Guid TrackId,
     double LaneHalfWidthMeters = 3.5,
     double SpeedLimitKph = 80,
-    double MinimumServiceSeconds = 3);
+    double MinimumServiceSeconds = 3,
+    EstatePitEditScope EditScope = EstatePitEditScope.All);
+
+public sealed record EstatePitEnrollmentPreview(
+    IReadOnlyList<EstateGatePoint> CenterLine,
+    EstateTimingGate? EntryGate,
+    EstateTimingGate? ExitGate,
+    IReadOnlyList<EstateGatePoint> ServiceZoneBoundary,
+    EstateGatePoint? CurrentPosition);
 
 /// <summary>
 /// Explicit, user-selected estate circuit timing. It never consumes FH6 race
@@ -165,6 +210,12 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private bool invalidateCurrentLapOnDriverIntervention = true;
     private DateTimeOffset? invalidProjectionStartedAt;
     private bool trackDeviationDetected;
+    private Guid? startFinishEditTrackId;
+    private TrackTemplate? startFinishEditTrack;
+    private EstateTrackDefinition? startFinishEditDefinition;
+    private IReadOnlyList<SectorDefinition> startFinishEditSectors = [];
+    private EstatePitDefinition? originalPitDefinition;
+    private EstatePitEditScope pitEditScope = EstatePitEditScope.All;
 
     public EstateCircuitModule(
         LazyForzaStore store,
@@ -199,6 +250,31 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         get { lock (stateGate) return activeDefinition; }
     }
 
+    public EstateEnrollmentPreview EnrollmentPreview
+    {
+        get
+        {
+            lock (stateGate)
+            {
+                var current = lastFrame is null
+                    ? (EstateGatePoint?)null
+                    : new EstateGatePoint(
+                        lastFrame.Raw.Position.X,
+                        lastFrame.Raw.Position.Y,
+                        lastFrame.Raw.Position.Z);
+                return new EstateEnrollmentPreview(
+                    firstTrace.ToArray(),
+                    secondTrace.ToArray(),
+                    directionTrace.ToArray(),
+                    activeTrack?.Points.ToArray() ?? [],
+                    routeCapture.ToArray(),
+                    fittedGate ?? activeDefinition?.StartFinishGate,
+                    activeDefinition?.Checkpoints.ToArray() ?? [],
+                    current);
+            }
+        }
+    }
+
     public int ActiveSectorCount
     {
         get { lock (stateGate) return activeSectors.Count; }
@@ -220,6 +296,32 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     }
 
     public EstatePitEnrollmentState PitState => Volatile.Read(ref pitState);
+    public EstatePitEditScope PitEditScope
+    {
+        get { lock (stateGate) return pitEditScope; }
+    }
+
+    public EstatePitEnrollmentPreview PitEnrollmentPreview
+    {
+        get
+        {
+            lock (stateGate)
+            {
+                var current = lastFrame is null
+                    ? (EstateGatePoint?)null
+                    : new EstateGatePoint(
+                        lastFrame.Raw.Position.X,
+                        lastFrame.Raw.Position.Y,
+                        lastFrame.Raw.Position.Z);
+                return new EstatePitEnrollmentPreview(
+                    pitLaneCapture.ToArray(),
+                    pitEntryGate,
+                    pitExitGate,
+                    pitServiceCorners.ToArray(),
+                    current);
+            }
+        }
+    }
 
     public void BeginPitEnrollment(EstatePitEnrollmentRequest request)
     {
@@ -233,22 +335,56 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                              throw new InvalidOperationException("所选赛道缺少地产计时定义。");
             if (loaded.Track.TimingKind != TrackTimingKind.EstateGeometry)
                 throw new InvalidOperationException("只能为地产环道配置维修区。");
+            var scope = request.EditScope & EstatePitEditScope.All;
+            if (scope == EstatePitEditScope.None) scope = EstatePitEditScope.Settings;
+            if (definition.Pit is null && scope != EstatePitEditScope.All)
+                throw new InvalidOperationException("这条赛道还没有维修区，请先完成一次完整录入。");
+            var laneHalfWidth = Math.Clamp(request.LaneHalfWidthMeters, 1.5, 10);
+            var speedLimit = Math.Clamp(request.SpeedLimitKph, 10, 300);
+            var minimumServiceSeconds = Math.Clamp(request.MinimumServiceSeconds, 1, 60);
+            if (definition.Pit is { } retainedSettings && !scope.HasFlag(EstatePitEditScope.Settings))
+            {
+                laneHalfWidth = retainedSettings.LaneHalfWidthMeters;
+                speedLimit = retainedSettings.SpeedLimitKph;
+                minimumServiceSeconds = retainedSettings.MinimumServiceSeconds;
+            }
             pitEnrollment = request with
             {
-                LaneHalfWidthMeters = Math.Clamp(request.LaneHalfWidthMeters, 1.5, 10),
-                SpeedLimitKph = Math.Clamp(request.SpeedLimitKph, 10, 300),
-                MinimumServiceSeconds = Math.Clamp(request.MinimumServiceSeconds, 1, 60)
+                LaneHalfWidthMeters = laneHalfWidth,
+                SpeedLimitKph = speedLimit,
+                MinimumServiceSeconds = minimumServiceSeconds,
+                EditScope = scope
             };
+            pitEditScope = scope;
+            originalPitDefinition = definition.Pit;
             pitLaneCapture.Clear();
             pitServiceCorners.Clear();
-            pitEntryGate = null;
-            pitExitGate = null;
+            if (definition.Pit is { } existing)
+            {
+                if (!scope.HasFlag(EstatePitEditScope.Lane))
+                    pitLaneCapture.AddRange(existing.CenterLine);
+                if (!scope.HasFlag(EstatePitEditScope.ServiceZone) && existing.ServiceZoneBoundary is { Count: >= 3 } boundary)
+                    pitServiceCorners.AddRange(boundary);
+            }
+            pitEntryGate = scope.HasFlag(EstatePitEditScope.EntryGate) ? null : definition.Pit?.EntryGate;
+            pitExitGate = scope.HasFlag(EstatePitEditScope.ExitGate) ? null : definition.Pit?.ExitGate;
             pitEntryProgressMeters = null;
             pitExitProgressMeters = null;
             recentPitSamples.Clear();
-            SetPitState(EstatePitCapturePhase.Idle, request.TrackId, loaded.Track.Name,
-                definition.Pit is null ? "维修区录入已准备。" : "将重新录入这条赛道的维修区。",
-                "按比赛方向，从赛道分流点前开始，沿实际维修路线驶过维修区，并到并道点后再结束。", true);
+            if (pitLaneCapture.Count >= 2)
+                RefreshPitGateProgress();
+            var readyWithoutCapture = !scope.HasFlag(EstatePitEditScope.Lane) &&
+                                      !scope.HasFlag(EstatePitEditScope.EntryGate) &&
+                                      !scope.HasFlag(EstatePitEditScope.ExitGate) &&
+                                      !scope.HasFlag(EstatePitEditScope.ServiceZone);
+            SetPitState(
+                readyWithoutCapture ? EstatePitCapturePhase.ReadyToSave :
+                pitLaneCapture.Count >= 2 ? EstatePitCapturePhase.AwaitingServiceCorners : EstatePitCapturePhase.Idle,
+                request.TrackId,
+                loaded.Track.Name,
+                definition.Pit is null ? "维修区录入已准备。" : $"已载入维修区，仅重设：{PitScopeText(scope)}。",
+                NextPitInstruction(scope),
+                true);
         }
     }
 
@@ -257,12 +393,11 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lock (stateGate)
         {
             EnsurePitEnrollment();
+            if (!pitEditScope.HasFlag(EstatePitEditScope.Lane))
+                throw new InvalidOperationException("本次没有选择重录维修区通道。");
             if (pitState.Phase is not (EstatePitCapturePhase.Idle or EstatePitCapturePhase.AwaitingServiceCorners))
                 throw new InvalidOperationException("当前步骤不能开始维修区通道录入。");
             pitLaneCapture.Clear();
-            pitServiceCorners.Clear();
-            pitEntryGate = null;
-            pitExitGate = null;
             pitEntryProgressMeters = null;
             pitExitProgressMeters = null;
             ArmAfterLatestTelemetryFrame();
@@ -284,9 +419,10 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             var simplified = ResamplePitLane(pitLaneCapture, 0.75);
             pitLaneCapture.Clear();
             pitLaneCapture.AddRange(simplified);
-            SetPitState(EstatePitCapturePhase.AwaitingServiceCorners, pitEnrollment!.TrackId, pitState.TrackName,
+            RefreshPitGateProgress();
+            SetPitState(PitCapturePhaseForCurrent(), pitEnrollment!.TrackId, pitState.TrackName,
                 $"维修区通道已录入：{PolylineLength(pitLaneCapture):0} 米。",
-                "先把车停在希望设置的入口线和出口线中心分别确认，再录入换胎区边界。弯道上的门线会按通道局部方向建立。", true);
+                NextPitInstruction(pitEditScope), true);
         }
     }
 
@@ -299,6 +435,9 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lock (stateGate)
         {
             EnsurePitEnrollment();
+            var requiredScope = entry ? EstatePitEditScope.EntryGate : EstatePitEditScope.ExitGate;
+            if (!pitEditScope.HasFlag(requiredScope))
+                throw new InvalidOperationException(entry ? "本次没有选择重设入口线。" : "本次没有选择重设出口线。");
             if (pitState.Phase is not (EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave))
                 throw new InvalidOperationException("请先完成维修区通道录入。");
             var position = StablePitPosition("请把车停在需要设置的门线中心约 1 秒后再确认。");
@@ -321,11 +460,11 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                 pitExitProgressMeters = captured.ProgressMeters;
             }
             SetPitState(
-                pitState.Phase,
+                PitCapturePhaseForCurrent(),
                 pitEnrollment.TrackId,
                 pitState.TrackName,
                 entry ? "维修区入口线已确认。" : "维修区出口线已确认。",
-                "入口和出口都确认后，继续记录换胎区边界点。",
+                NextPitInstruction(pitEditScope),
                 true);
             return captured.Gate;
         }
@@ -336,6 +475,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lock (stateGate)
         {
             EnsurePitEnrollment();
+            if (!pitEditScope.HasFlag(EstatePitEditScope.ServiceZone))
+                throw new InvalidOperationException("本次没有选择重录换胎区。");
             if (pitState.Phase is not (EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave))
                 throw new InvalidOperationException("请先完成维修区通道录入。");
             if (pitServiceCorners.Count >= 8)
@@ -344,7 +485,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             if (pitServiceCorners.Any(existing => DistanceSquared(existing, point) < 1))
                 throw new InvalidOperationException("这个角点与已记录角点过近，请移动到换胎区的下一个角。");
             pitServiceCorners.Add(point);
-            var ready = pitServiceCorners.Count >= 4 && PolygonArea(pitServiceCorners) >= 4;
+            var ready = PitCapturePhaseForCurrent() == EstatePitCapturePhase.ReadyToSave;
             SetPitState(ready ? EstatePitCapturePhase.ReadyToSave : EstatePitCapturePhase.AwaitingServiceCorners,
                 pitEnrollment!.TrackId, pitState.TrackName,
                 $"已记录 {pitServiceCorners.Count} 个换胎区边界点。",
@@ -361,6 +502,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lock (stateGate)
         {
             EnsurePitEnrollment();
+            if (!pitEditScope.HasFlag(EstatePitEditScope.ServiceZone))
+                throw new InvalidOperationException("本次没有选择重录换胎区。");
             pitServiceCorners.Clear();
             SetPitState(EstatePitCapturePhase.AwaitingServiceCorners, pitEnrollment!.TrackId, pitState.TrackName,
                 "换胎区角点已清空。", "停车后按顺时针或逆时针重新记录至少 4 个角点。", true);
@@ -372,27 +515,57 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lock (stateGate)
         {
             EnsurePitEnrollment();
+            var serviceZoneEdited = pitEditScope.HasFlag(EstatePitEditScope.ServiceZone);
             if (pitLaneCapture.Count < 2 || pitEntryGate is null || pitExitGate is null ||
-                pitServiceCorners.Count < 4 || PolygonArea(pitServiceCorners) < 4)
+                (serviceZoneEdited && (pitServiceCorners.Count < 4 || PolygonArea(pitServiceCorners) < 4)) ||
+                (!serviceZoneEdited && originalPitDefinition is null))
                 throw new InvalidOperationException("维修区通道、入口线、出口线或换胎区边界尚未完成，不能保存。");
             var loaded = store.LoadTrack(pitEnrollment!.TrackId) ??
                          throw new InvalidOperationException("赛道已不存在。");
             var definition = store.LoadEstateTrackDefinition(pitEnrollment.TrackId) ??
                              throw new InvalidOperationException("地产赛道定义已不存在。");
-            var entry = pitEntryGate!;
-            var exit = pitExitGate!;
-            if (!EstateTrackAlgorithms.TryCreatePitStartFinishGate(
-                    definition.StartFinishGate,
-                    pitLaneCapture,
-                    pitEnrollment.LaneHalfWidthMeters,
-                    out var pitStartFinishGate))
-                throw new InvalidOperationException(
-                    "录入的维修区通道没有沿比赛方向穿过起终点所在平面。请从入口前开始，完整驶过维修区并在出口后停止录入。");
-            var center = new EstateGatePoint(
-                pitServiceCorners.Average(point => point.X),
-                pitServiceCorners.Average(point => point.Y),
-                pitServiceCorners.Average(point => point.Z));
-            var radius = pitServiceCorners.Max(point => Math.Sqrt(DistanceSquared(point, center)));
+            var entryCapture = CreatePitGateAtPoint(
+                pitLaneCapture,
+                GateCenter(pitEntryGate!),
+                pitEnrollment.LaneHalfWidthMeters);
+            var exitCapture = CreatePitGateAtPoint(
+                pitLaneCapture,
+                GateCenter(pitExitGate!),
+                pitEnrollment.LaneHalfWidthMeters);
+            if (entryCapture.ProgressMeters >= exitCapture.ProgressMeters - 2)
+                throw new InvalidOperationException("维修区入口线必须位于出口线之前，且两条线至少间隔 2 米。");
+            var laneEdited = pitEditScope.HasFlag(EstatePitEditScope.Lane) || originalPitDefinition is null;
+            var widthChanged = originalPitDefinition is null ||
+                               Math.Abs(pitEnrollment.LaneHalfWidthMeters - originalPitDefinition.LaneHalfWidthMeters) > 0.001;
+            var entry = pitEditScope.HasFlag(EstatePitEditScope.EntryGate) || laneEdited || widthChanged
+                ? entryCapture.Gate
+                : originalPitDefinition!.EntryGate;
+            var exit = pitEditScope.HasFlag(EstatePitEditScope.ExitGate) || laneEdited || widthChanged
+                ? exitCapture.Gate
+                : originalPitDefinition!.ExitGate;
+            var pitStartFinishGate = originalPitDefinition?.StartFinishGate;
+            if (laneEdited || widthChanged || pitStartFinishGate is null)
+            {
+                if (!EstateTrackAlgorithms.TryCreatePitStartFinishGate(
+                        definition.StartFinishGate,
+                        pitLaneCapture,
+                        pitEnrollment.LaneHalfWidthMeters,
+                        out pitStartFinishGate))
+                    throw new InvalidOperationException(
+                        "录入的维修区通道没有沿比赛方向穿过起终点所在平面。请从入口前开始，完整驶过维修区并在出口后停止录入。");
+            }
+            var center = serviceZoneEdited
+                ? new EstateGatePoint(
+                    pitServiceCorners.Average(point => point.X),
+                    pitServiceCorners.Average(point => point.Y),
+                    pitServiceCorners.Average(point => point.Z))
+                : originalPitDefinition!.ServiceCenter;
+            var radius = serviceZoneEdited
+                ? pitServiceCorners.Max(point => Math.Sqrt(DistanceSquared(point, center)))
+                : originalPitDefinition!.ServiceRadiusMeters;
+            var boundary = serviceZoneEdited
+                ? pitServiceCorners.ToArray()
+                : originalPitDefinition!.ServiceZoneBoundary;
             var pit = new EstatePitDefinition(
                 entry,
                 exit,
@@ -402,7 +575,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                 pitEnrollment.SpeedLimitKph,
                 pitEnrollment.MinimumServiceSeconds,
                 pitEnrollment.LaneHalfWidthMeters,
-                pitServiceCorners.ToArray(),
+                boundary,
                 pitStartFinishGate);
             store.SaveTrack(loaded.Track, loaded.Sectors, definition with
             {
@@ -428,6 +601,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             pitExitGate = null;
             pitEntryProgressMeters = null;
             pitExitProgressMeters = null;
+            originalPitDefinition = null;
+            pitEditScope = EstatePitEditScope.All;
             recentPitSamples.Clear();
             Volatile.Write(ref pitState, EmptyPitState() with { UpdatedAt = DateTimeOffset.UtcNow, Status = "已取消维修区录入。" });
         }
@@ -459,25 +634,109 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
 
     public void BeginEnrollment(EstateEnrollmentRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.MapName))
-            throw new ArgumentException("请填写地产地图名称。", nameof(request));
-        if (request.SectorCount is < TrackAlgorithms.MinimumSectorCount or > TrackAlgorithms.MaximumSectorCount)
-            throw new ArgumentOutOfRangeException(
-                nameof(request),
-                $"分段数必须在 {TrackAlgorithms.MinimumSectorCount} 到 {TrackAlgorithms.MaximumSectorCount} 之间。");
+        var normalized = NormalizeEnrollment(request);
         lock (stateGate)
         {
             if (pitState.IsActive)
                 throw new InvalidOperationException("请先完成或取消维修区录入。");
             ResetWorkingState();
-            enrollment = request with
-            {
-                MapName = request.MapName.Trim(),
-                Creator = NullIfWhiteSpace(request.Creator),
-                ShareCode = NullIfWhiteSpace(request.ShareCode),
-                MapRevision = string.IsNullOrWhiteSpace(request.MapRevision) ? "1" : request.MapRevision.Trim()
-            };
+            enrollment = normalized;
             SetState(EstateCircuitPhase.Idle, "地产环道录入已准备。", "开始第一次终点线描摹。", enrollmentActive: true);
+        }
+    }
+
+    public void BeginStartFinishRevision(Guid trackId)
+    {
+        lock (stateGate)
+        {
+            if (state.IsTimingActive || state.IsEnrollmentActive || pitState.IsActive)
+                throw new InvalidOperationException("请先结束当前地产流程，再重设起终点线。");
+            var loaded = store.LoadTrack(trackId) ??
+                         throw new InvalidOperationException("没有找到要修改的地产环道。");
+            var definition = store.LoadEstateTrackDefinition(trackId) ??
+                             throw new InvalidOperationException("所选赛道缺少地产环道定义。");
+            ResetWorkingState();
+            startFinishEditTrackId = trackId;
+            startFinishEditTrack = loaded.Track;
+            startFinishEditSectors = loaded.Sectors;
+            startFinishEditDefinition = definition;
+            enrollment = new EstateEnrollmentRequest(
+                definition.MapName,
+                definition.Creator,
+                definition.ShareCode,
+                definition.MapRevision,
+                Math.Clamp(loaded.Sectors.Count, TrackAlgorithms.MinimumSectorCount, TrackAlgorithms.MaximumSectorCount));
+            activeTrack = loaded.Track;
+            activeSectors = loaded.Sectors;
+            activeDefinition = definition;
+            fittedGate = null;
+            SetState(
+                EstateCircuitPhase.Idle,
+                "起终点线重设已准备。",
+                "先完成两次横向描摹，再采集正常比赛方向。原定义会在确认保存前保持不变。",
+                enrollmentActive: true);
+        }
+    }
+
+    public void SaveStartFinishRevision()
+    {
+        lock (stateGate)
+        {
+            if (state.Phase != EstateCircuitPhase.StartFinishReadyToSave ||
+                startFinishEditTrackId is null || startFinishEditTrack is null ||
+                startFinishEditDefinition is null || fittedGate is null)
+                throw new InvalidOperationException("请先完成两次终点线描摹和比赛方向采样。");
+            var center = GateCenter(fittedGate);
+            var projection = TrackAlgorithms.ProjectRange(
+                startFinishEditTrack.Points,
+                center.X,
+                center.Y,
+                center.Z,
+                0,
+                startFinishEditTrack.Points.Count - 2);
+            var originalCenter = GateCenter(startFinishEditDefinition.StartFinishGate);
+            var originalProjection = TrackAlgorithms.ProjectRange(
+                startFinishEditTrack.Points,
+                originalCenter.X,
+                originalCenter.Y,
+                originalCenter.Z,
+                0,
+                startFinishEditTrack.Points.Count - 2);
+            var progressDifference = Math.Abs(projection.S - originalProjection.S);
+            progressDifference = Math.Min(progressDifference, startFinishEditTrack.LengthMeters - progressDifference);
+            if (!projection.IsValid || !originalProjection.IsValid || projection.DistanceMeters > 10 || progressDifference > 10)
+                throw new InvalidOperationException("新起终点线必须位于原起终点位置 10 米范围内。若地图起点已明显移动，请重新录入整条赛道。");
+
+            var pit = startFinishEditDefinition.Pit;
+            if (pit is not null)
+            {
+                if (!EstateTrackAlgorithms.TryCreatePitStartFinishGate(
+                        fittedGate,
+                        pit.CenterLine,
+                        pit.LaneHalfWidthMeters,
+                        out var pitStartFinishGate))
+                    throw new InvalidOperationException("新起终点线与现有维修区通道不再相交。请先重设维修区通道，或重新录入整条赛道。");
+                pit = pit with { StartFinishGate = pitStartFinishGate };
+            }
+
+            var updated = startFinishEditDefinition with
+            {
+                StartFinishGate = fittedGate,
+                Pit = pit,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            store.SaveTrack(startFinishEditTrack, startFinishEditSectors, updated, clearExistingLaps: true);
+            activeDefinition = updated;
+            SetState(
+                EstateCircuitPhase.Ready,
+                "起终点线已更新。",
+                "赛道标识保持不变；导出文件的赛道特征值会反映新的起终点线。",
+                enrollmentActive: false);
+            startFinishEditTrackId = null;
+            startFinishEditTrack = null;
+            startFinishEditDefinition = null;
+            startFinishEditSectors = [];
+            enrollment = null;
         }
     }
 
@@ -567,8 +826,16 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                     out var explanation))
                 throw new InvalidOperationException(explanation);
             fittedGate = directed;
-            SetState(EstateCircuitPhase.AwaitingReferenceLap, "终点门和比赛方向已确认。",
-                "开始参考圈录入；首次正向过线开始，下一次正向过线结束。", enrollmentActive: true);
+            if (startFinishEditTrackId is not null)
+            {
+                SetState(EstateCircuitPhase.StartFinishReadyToSave, "新起终点线和比赛方向已确认。",
+                    "检查预览后保存；保存前原赛道不会改变。", enrollmentActive: true);
+            }
+            else
+            {
+                SetState(EstateCircuitPhase.AwaitingReferenceLap, "终点门和比赛方向已确认。",
+                    "开始参考圈录入；首次正向过线开始，下一次正向过线结束。", enrollmentActive: true);
+            }
         }
     }
 
@@ -603,6 +870,92 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             lastCrossingTimestamp = long.MinValue;
             SetState(EstateCircuitPhase.WaitingForReferenceStart, "等待验证圈起点。",
                 "正向过线后完成一圈，必须依次通过所有检查点。", enrollmentActive: true);
+        }
+    }
+
+    public EstateEnrollmentDraft PauseEnrollmentForDraft()
+    {
+        lock (stateGate)
+        {
+            EnsureEnrollment();
+            var resumePhase = state.Phase;
+            switch (state.Phase)
+            {
+                case EstateCircuitPhase.CapturingFirstTrace:
+                    firstTrace.Clear();
+                    resumePhase = EstateCircuitPhase.Idle;
+                    break;
+                case EstateCircuitPhase.CapturingSecondTrace:
+                    secondTrace.Clear();
+                    resumePhase = EstateCircuitPhase.Idle;
+                    break;
+                case EstateCircuitPhase.CapturingDirection:
+                    directionTrace.Clear();
+                    resumePhase = EstateCircuitPhase.AwaitingDirection;
+                    break;
+                case EstateCircuitPhase.WaitingForReferenceStart:
+                case EstateCircuitPhase.CapturingReferenceLap:
+                    ResetLapTracking();
+                    routeCapture.Clear();
+                    resumePhase = EstateCircuitPhase.AwaitingReferenceLap;
+                    break;
+                case EstateCircuitPhase.ValidatingLap:
+                    ResetLapTracking();
+                    resumePhase = EstateCircuitPhase.ValidationFailed;
+                    break;
+                case EstateCircuitPhase.Ready:
+                    throw new InvalidOperationException("录入已经完成，不需要暂存。");
+            }
+
+            var draft = new EstateEnrollmentDraft(
+                1,
+                DateTimeOffset.UtcNow,
+                enrollment!,
+                resumePhase,
+                firstTrace.ToArray(),
+                secondTrace.ToArray(),
+                directionTrace.ToArray(),
+                fittedGate,
+                activeTrack,
+                activeSectors.ToArray(),
+                activeDefinition,
+                referenceLapSeconds);
+            ResetAll("地产环道录入已暂存。");
+            return draft;
+        }
+    }
+
+    public void ResumeEnrollment(EstateEnrollmentDraft draft)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        if (draft.FormatVersion != 1)
+            throw new InvalidDataException("暂存文件版本不受支持。");
+        var normalized = NormalizeEnrollment(draft.Enrollment);
+        lock (stateGate)
+        {
+            if (state.IsTimingActive || state.IsEnrollmentActive || pitState.IsActive)
+                throw new InvalidOperationException("请先结束当前地产流程，再恢复暂存。");
+            if (!IsSafeDraftPhase(draft.ResumePhase))
+                throw new InvalidDataException("暂存文件中的恢复阶段无效。");
+            if (draft.ActiveTrack is not null && draft.ActiveDefinition?.TrackId != draft.ActiveTrack.Id)
+                throw new InvalidDataException("暂存文件中的候选路线标识不一致。");
+
+            ResetWorkingState();
+            enrollment = normalized;
+            firstTrace.AddRange(draft.FirstTrace ?? []);
+            secondTrace.AddRange(draft.SecondTrace ?? []);
+            directionTrace.AddRange(draft.DirectionTrace ?? []);
+            fittedGate = draft.FittedGate;
+            activeTrack = draft.ActiveTrack;
+            activeSectors = draft.ActiveSectors?.ToArray() ?? [];
+            activeDefinition = draft.ActiveDefinition;
+            referenceLapSeconds = draft.ReferenceLapSeconds;
+            ArmAfterLatestTelemetryFrame();
+            SetState(
+                draft.ResumePhase,
+                $"已恢复 {draft.SavedAt.ToLocalTime():MM-dd HH:mm} 的录入暂存。",
+                ResumeInstruction(draft.ResumePhase),
+                enrollmentActive: true);
         }
     }
 
@@ -1718,6 +2071,10 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lastFrame = null;
         timestampUnwrapper.Reset();
         ResetLapTracking();
+        startFinishEditTrackId = null;
+        startFinishEditTrack = null;
+        startFinishEditDefinition = null;
+        startFinishEditSectors = [];
     }
 
     private void ObservePitEnrollment(TelemetryFrame frame, EstateTimedPosition position)
@@ -1941,6 +2298,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         pitExitGate = null;
         pitEntryProgressMeters = null;
         pitExitProgressMeters = null;
+        originalPitDefinition = null;
+        pitEditScope = EstatePitEditScope.All;
         recentPitSamples.Clear();
         Volatile.Write(ref pitState, EmptyPitState());
         Volatile.Write(ref hudSnapshot, null);
@@ -1950,6 +2309,104 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private void EnsureEnrollment()
     {
         if (enrollment is null) throw new InvalidOperationException("请先填写地图信息并开始录入。");
+    }
+
+    private static EstateEnrollmentRequest NormalizeEnrollment(EstateEnrollmentRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.MapName))
+            throw new ArgumentException("请填写地产地图名称。", nameof(request));
+        if (request.MapName.Trim().Length > 80)
+            throw new ArgumentException("地产地图名称不能超过 80 个字符。", nameof(request));
+        if (request.SectorCount is < TrackAlgorithms.MinimumSectorCount or > TrackAlgorithms.MaximumSectorCount)
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                $"分段数必须在 {TrackAlgorithms.MinimumSectorCount} 到 {TrackAlgorithms.MaximumSectorCount} 之间。");
+        var revision = string.IsNullOrWhiteSpace(request.MapRevision) ? "1" : request.MapRevision.Trim();
+        if (revision.Length > 32)
+            throw new ArgumentException("地图修订号不能超过 32 个字符。", nameof(request));
+        var creator = NullIfWhiteSpace(request.Creator);
+        var shareCode = NullIfWhiteSpace(request.ShareCode);
+        if (creator?.Length > 80) throw new ArgumentException("作者名称不能超过 80 个字符。", nameof(request));
+        if (shareCode?.Length > 80) throw new ArgumentException("分享代码或地图标识不能超过 80 个字符。", nameof(request));
+        return request with
+        {
+            MapName = request.MapName.Trim(),
+            Creator = creator,
+            ShareCode = shareCode,
+            MapRevision = revision
+        };
+    }
+
+    private static bool IsSafeDraftPhase(EstateCircuitPhase phase) => phase is
+        EstateCircuitPhase.Idle or
+        EstateCircuitPhase.AwaitingDirection or
+        EstateCircuitPhase.AwaitingReferenceLap or
+        EstateCircuitPhase.ValidationFailed;
+
+    private static string ResumeInstruction(EstateCircuitPhase phase) => phase switch
+    {
+        EstateCircuitPhase.Idle => "继续终点线描摹。正在采集但未完成的单次描摹已丢弃。",
+        EstateCircuitPhase.AwaitingDirection => "终点线已保留；继续采集正常比赛方向。",
+        EstateCircuitPhase.AwaitingReferenceLap => "终点线和比赛方向已保留；重新开始完整参考圈。",
+        EstateCircuitPhase.ValidationFailed => "参考路线已保留；重新开始完整验证圈。",
+        _ => "继续完成当前录入。"
+    };
+
+    private EstatePitCapturePhase PitCapturePhaseForCurrent()
+    {
+        if (pitLaneCapture.Count < 2) return EstatePitCapturePhase.Idle;
+        var serviceReady = pitEditScope.HasFlag(EstatePitEditScope.ServiceZone)
+            ? pitServiceCorners.Count >= 4 && PolygonArea(pitServiceCorners) >= 4
+            : originalPitDefinition is not null;
+        return pitEntryGate is not null && pitExitGate is not null && serviceReady
+            ? EstatePitCapturePhase.ReadyToSave
+            : EstatePitCapturePhase.AwaitingServiceCorners;
+    }
+
+    private void RefreshPitGateProgress()
+    {
+        pitEntryProgressMeters = pitEntryGate is null
+            ? null
+            : CreatePitGateAtPoint(
+                pitLaneCapture,
+                GateCenter(pitEntryGate),
+                pitEnrollment!.LaneHalfWidthMeters).ProgressMeters;
+        pitExitProgressMeters = pitExitGate is null
+            ? null
+            : CreatePitGateAtPoint(
+                pitLaneCapture,
+                GateCenter(pitExitGate),
+                pitEnrollment!.LaneHalfWidthMeters).ProgressMeters;
+    }
+
+    private static EstateGatePoint GateCenter(EstateTimingGate gate) => new(
+        (gate.Left.X + gate.Right.X) / 2,
+        (gate.Left.Y + gate.Right.Y) / 2,
+        (gate.Left.Z + gate.Right.Z) / 2);
+
+    private static string PitScopeText(EstatePitEditScope scope)
+    {
+        var parts = new List<string>();
+        if (scope.HasFlag(EstatePitEditScope.Lane)) parts.Add("通道");
+        if (scope.HasFlag(EstatePitEditScope.EntryGate)) parts.Add("入口线");
+        if (scope.HasFlag(EstatePitEditScope.ExitGate)) parts.Add("出口线");
+        if (scope.HasFlag(EstatePitEditScope.ServiceZone)) parts.Add("换胎区");
+        if (scope.HasFlag(EstatePitEditScope.Settings)) parts.Add("规则参数");
+        return parts.Count == 0 ? "规则参数" : string.Join("、", parts);
+    }
+
+    private string NextPitInstruction(EstatePitEditScope scope)
+    {
+        if (scope.HasFlag(EstatePitEditScope.Lane) && pitLaneCapture.Count < 2)
+            return "按比赛方向，从分流点前开始完整录入通道，到并道点后再结束。";
+        if (scope.HasFlag(EstatePitEditScope.EntryGate) && pitEntryGate is null)
+            return "把车停在入口线中心约 1 秒，然后确认入口线。";
+        if (scope.HasFlag(EstatePitEditScope.ExitGate) && pitExitGate is null)
+            return "把车停在出口线中心约 1 秒，然后确认出口线。";
+        if (scope.HasFlag(EstatePitEditScope.ServiceZone) &&
+            (pitServiceCorners.Count < 4 || PolygonArea(pitServiceCorners) < 4))
+            return "按同一绕行方向记录换胎区边界，至少 4 个点。";
+        return "所选项目已完成，可以保存。未选择的维修区数据会原样保留。";
     }
 
     private static EstateCircuitState EmptyState() => new(
