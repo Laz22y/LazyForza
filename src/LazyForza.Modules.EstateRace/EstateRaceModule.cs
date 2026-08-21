@@ -38,6 +38,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private readonly object telemetryStateSync = new();
     private readonly object lapRecoverySync = new();
     private readonly EstateCollisionEvidenceDetector collisionEvidenceDetector = new();
+    private readonly EstateShortcutDetector shortcutDetector = new();
     private readonly object trackMapCacheSync = new();
     private readonly SemaphoreSlim connectionLock = new(1, 1);
     private readonly SemaphoreSlim sendLock = new(1, 1);
@@ -246,6 +247,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 throw new InvalidOperationException("请先启用地产赛事模块。");
             ValidateProfile(profile);
             await DisconnectCoreAsync(preserveSessionState: isReconnectAttempt).ConfigureAwait(false);
+            if (!isReconnectAttempt)
+            {
+                lock (telemetryStateSync) shortcutDetector.Reset();
+            }
             intentionalDisconnect = false;
             connectionAuthenticated = false;
             activeProfile = profile with
@@ -479,12 +484,22 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     {
         var context = trackContext();
         if (context is null) return;
+        if (connectionIsObserver) return;
+        var monotonicNow = monotonicClock.ElapsedMilliseconds;
+        var valid = IsTelemetryValid(frame, out var pausedOrRewinding);
+        EstateShortcutObservation shortcutObservation;
+        lock (telemetryStateSync)
+            shortcutObservation = shortcutDetector.Observe(
+                frame,
+                context.Track,
+                context.Definition.Pit,
+                valid,
+                monotonicNow);
         if (socket?.State != WebSocketState.Open || !connectionAuthenticated)
         {
             CaptureDisconnectedLap(context);
             return;
         }
-        if (connectionIsObserver) return;
         await FlushPendingLapUploadsAsync(cancellationToken).ConfigureAwait(false);
         if (context.LastCompletedLap is { } completedLap &&
             completedLap.EventId != sentLapEventId &&
@@ -499,8 +514,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 cancellationToken).ConfigureAwait(false);
             sentLapEventId = completedLap.EventId;
         }
-        var monotonicNow = monotonicClock.ElapsedMilliseconds;
-        var valid = IsTelemetryValid(frame, out var pausedOrRewinding);
         var collision = collisionEvidenceDetector.Observe(frame, valid);
         if (lastTelemetrySentAt != default &&
             frame.ArrivalTime - lastTelemetrySentAt < TelemetryInterval &&
@@ -526,8 +539,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 context.Definition.Pit,
                 positionReliable,
                 serviceBlocked);
-            projection = positionReliable
-                ? EstateRaceGeometry.Project(context.Track, frame.Raw.Position)
+            projection = positionReliable && shortcutObservation.Projection.IsValid
+                ? shortcutObservation.Projection
                 : lastValidProjection ?? new EstateRaceProjection(0, 0, 0.5, 0.5);
             if (positionReliable) lastValidProjection = projection;
             gripCondition = gripEstimator.Current;
@@ -580,7 +593,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             collision.ImpactWorldVelocity.Y,
             collision.ImpactWorldVelocity.Z,
             collision.ImpactSmashableVelDiff,
-            collision.ImpactSmashableMass);
+            collision.ImpactSmashableMass,
+            shortcutObservation.Evidence);
         await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
         // Practice strategy processing is optional. Run it after the time-sensitive
         // telemetry and lap messages so it can never delay the current upload.
