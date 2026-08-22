@@ -20,7 +20,7 @@ public sealed class DriftDashboardModule : LazyForzaModuleBase, IHudContribution
         : base(new ModuleDescriptor(
             ModuleId,
             "漂移仪表盘（实验性）",
-            "实验性功能：以防止 Spin 为优先，显示图形化方向/换挡建议、侧滑角和积分速度趋势；辅助能力有限，开启时暂停圈速分析。",
+            "显示方向与换挡建议、侧滑角和积分速度趋势，优先提示失控风险。",
             [],
             null,
             null,

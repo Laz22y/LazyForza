@@ -27,7 +27,7 @@ internal sealed partial class MainWindow
         var heading = new StackPanel();
         heading.Children.Add(Label("地产赛事", 28, FontWeights.SemiBold));
         var description = Label(
-            "连接自托管赛事房间，以参赛车手或 OB 身份加入。房间支持 1–12 名车手；OB 不参赛，只接收实时赛事数据用于观赛和转播。",
+            "连接赛事房间，以参赛车手或 OB 身份加入。",
             14, FontWeights.Normal, "MutedBrush");
         description.Margin = new Thickness(0, 5, 24, 0);
         heading.Children.Add(description);
@@ -608,7 +608,7 @@ internal sealed partial class MainWindow
         var panel = new StackPanel();
         panel.Children.Add(Label("自己开一个赛事房间", 20, FontWeights.SemiBold));
         panel.Children.Add(Label(
-            "服务端不需要一直在线。比赛前启动，比赛结束后关掉即可；房间最多 12 人，普通家用电脑、小型云主机或 Cloudflare Workers 都够用。",
+            "选择 Cloudflare 一键部署或自行部署。",
             13, FontWeights.Normal, "MutedBrush"));
 
         var methods = new Grid { Margin = new Thickness(0, 16, 0, 0) };
@@ -618,22 +618,19 @@ internal sealed partial class MainWindow
 
         var cloudflare = HostingMethod(
             "Cloudflare 一键部署",
-            "适合没有服务器的房主。登录自己的 Cloudflare 账号，打开部署页并确认创建 Worker 与 Durable Object。部署完成后，先访问分配到的域名，在网页里设置房间密码和总控密码，再把域名发给车手。",
+            "登录 Cloudflare 账号并确认创建 Worker 与 Durable Object。部署后打开分配的域名，完成房间和总控密码设置。",
             "打开一键部署页",
             () => OpenExternal("https://deploy.workers.cloudflare.com/?url=https://github.com/Laz22y/LazyForza.RaceServer/tree/main/cloudflare"));
         methods.Children.Add(cloudflare);
 
         var standalone = HostingMethod(
             "Windows / Linux / macOS 自行部署",
-            "下载对应系统的服务端包并运行。浏览器打开 http://服务器地址:24876，首次进入时完成密码设置。局域网直接使用 IP 即可；放到公网时，请用 Caddy 或 Nginx 配置 HTTPS，并放行 24876/TCP 或反向代理端口。",
+            "下载对应系统的服务端包并运行，浏览器访问 http://服务器地址:24876 完成首次设置。公网部署需配置 HTTPS，并开放或反向代理服务端端口。",
             "查看服务端说明",
             () => OpenExternal("https://github.com/Laz22y/LazyForza.RaceServer"));
         Grid.SetColumn(standalone, 2);
         methods.Children.Add(standalone);
         panel.Children.Add(methods);
-        panel.Children.Add(Label(
-            "房主把网页总控地址留给自己，把服务端域名或 IP、房间密码发给车手。总控密码不要与房间密码相同，也不要发给参赛车手。",
-            12, FontWeights.SemiBold, "WarningBrush"));
         return Card(panel);
     }
 
@@ -682,7 +679,7 @@ internal sealed partial class MainWindow
         var panel = new StackPanel();
         panel.Children.Add(Label("地产赛事 HUD", 18, FontWeights.SemiBold));
         panel.Children.Add(Label(
-            "排行榜、赛道一览、抓地提示、赛事横幅和五盏起跑灯已经接入统一的 Overlay 设置。五个部件使用独立于主仪表盘的全屏画布，可以分别开关、拖动、缩放和调整透明度。",
+            "可分别开关排行榜、赛道一览、抓地提示、赛事横幅和起跑灯，并调整位置、缩放和透明度。",
             12, FontWeights.Normal, "MutedBrush"));
         var openSettings = new Button
         {
