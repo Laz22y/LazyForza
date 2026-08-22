@@ -71,7 +71,7 @@ internal sealed partial class MainWindow
     {
         var stack = PageStack(
             "模块",
-            "管理需要手动开关的功能。地产环道与地产赛事仅在用户主动操作时工作，因此保持常驻且不在这里显示。");
+            "管理需要手动开关的功能。");
         foreach (var module in moduleManager.Modules.Where(module =>
                      module is not EstateCircuitModule and not EstateRaceModule))
         {
@@ -86,7 +86,7 @@ internal sealed partial class MainWindow
             if (module is DriftDashboardModule)
             {
                 var protection = Label(
-                    "开启期间圈速分析保持关闭，接下来的圈速不会写入数据库；关闭后按原偏好恢复。",
+                    "开启后暂停圈速分析和圈速写入；关闭后恢复原设置。",
                     11,
                     FontWeights.Normal,
                     "MutedBrush");
