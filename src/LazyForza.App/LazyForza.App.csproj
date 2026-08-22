@@ -16,6 +16,7 @@
   <ItemGroup>
     <Resource Include="Assets\LazyForza.png" />
     <Resource Include="Assets\LazyForzaWordmark.png" />
+    <EmbeddedResource Include="Localization\*.json" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LazyForza.Domain\LazyForza.Domain.csproj" />
