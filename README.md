@@ -21,7 +21,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 | 圈速分析 | 分段、实时 Delta、速度与驾驶输入、走线和距离游标联动 |
 | 车辆学习 | 按车型、性能等级和可观测调校特征学习换挡目标，离线识别车辆名称 |
 | 录制与回放 | 可选自动录制、容量保护、`.lfztelemetry` 导入导出和联动回放 |
-| 地产赛事 | 可暂存和局部修订的环道录入、维修区、赛事 HUD、弱网提醒，并可连接独立 RaceServer |
+| 地产赛事 | 可暂存和局部修订的环道录入、维修区轨迹校验、路线收益切弯证据、赛事 HUD 与弱网提醒，并可连接独立 RaceServer |
 | 数据与更新 | 本地数据库、备份、诊断；GitCode/GitHub 更新回退及双层完整性校验 |
 
 实验性漂移 HUD 默认关闭。它只根据本车 UDP 推导侧滑和控车趋势，不复刻游戏评分，也不代替玩家判断。
@@ -46,7 +46,7 @@ LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 [LazyForza.RaceServer](https://github.com/Laz22y/LazyForza.RaceServer) 是独立的地产赛事服务端，提供：
 
 - 1–12 名车手和额外 OB 席位；
-- 练习、多节排位、正赛、旗语、处罚、调查和可选断线计圈恢复；
+- 练习、多节排位、正赛、稳定秒差、旗语、处罚、碰撞调查和可选断线计圈恢复；
 - 维修区、车队、赛道文件托管与阶段赛果归档；
 - Windows、Linux、macOS 自托管包和 Cloudflare Durable Objects 版本。
 
