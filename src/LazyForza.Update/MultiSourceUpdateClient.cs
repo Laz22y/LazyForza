@@ -84,10 +84,23 @@ public sealed class MultiSourceUpdateClient : IDisposable
         }
     }
 
+    public Task<PreparedUpdate> DownloadAndPrepareAsync(
+        UpdateReleaseInfo release,
+        string updatesRoot,
+        IProgress<UpdateProgress>? progress,
+        CancellationToken cancellationToken) =>
+        DownloadAndPrepareAsync(
+            release,
+            updatesRoot,
+            progress,
+            UpdatePackageKind.Portable,
+            cancellationToken);
+
     public async Task<PreparedUpdate> DownloadAndPrepareAsync(
         UpdateReleaseInfo release,
         string updatesRoot,
         IProgress<UpdateProgress>? progress,
+        UpdatePackageKind packageKind,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(release);
@@ -110,6 +123,7 @@ public sealed class MultiSourceUpdateClient : IDisposable
                 release,
                 updatesRoot,
                 progress,
+                packageKind,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -152,6 +166,7 @@ public sealed class MultiSourceUpdateClient : IDisposable
                 fallbackRelease,
                 updatesRoot,
                 progress,
+                packageKind,
                 cancellationToken).ConfigureAwait(false);
         }
     }

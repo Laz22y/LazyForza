@@ -60,6 +60,56 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
+    public async Task InstalledUpdateDownloadsVerifiedSetupWithoutExtractingPortablePackage()
+    {
+        var root = CreateTempDirectory("lazyforza-installed-update");
+        try
+        {
+            var packageBytes = Encoding.UTF8.GetBytes("portable-package");
+            var installerBytes = Encoding.UTF8.GetBytes("signed-installer-placeholder");
+            var json = ReleaseJsonWithInstaller("v1.2.3", packageBytes, installerBytes);
+            var installerName = "LazyForza-1.2.3-win-x64-setup.exe";
+            var installerUri = new Uri(
+                $"https://github.com/Laz22y/LazyForza/releases/download/v1.2.3/{installerName}");
+            using var http = new HttpClient(new FakeHttpHandler(request =>
+            {
+                if (request.RequestUri == GitHubReleaseClient.LatestReleaseApi)
+                    return JsonResponse(json);
+                if (request.RequestUri == installerUri)
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new ByteArrayContent(installerBytes)
+                    };
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }));
+            using var client = new GitHubReleaseClient(http);
+            var release = await client.CheckForUpdateAsync(
+                new Version(1, 2, 2),
+                CancellationToken.None);
+
+            Assert.IsNotNull(release);
+            Assert.IsNotNull(release.Installer);
+            Assert.AreEqual(installerName, release.Installer.Name);
+            var prepared = await client.DownloadAndPrepareAsync(
+                release,
+                root,
+                new Progress<UpdateProgress>(),
+                UpdatePackageKind.Installer,
+                CancellationToken.None);
+
+            Assert.AreEqual(UpdatePackageKind.Installer, prepared.Kind);
+            Assert.AreEqual(string.Empty, prepared.PackageRoot);
+            CollectionAssert.AreEqual(
+                installerBytes,
+                await File.ReadAllBytesAsync(prepared.ArchivePath));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
     public async Task GitCodeReleaseParsesExplicitFeatureUpdateType()
     {
         var json = GitCodeReleaseJson(
@@ -706,6 +756,44 @@ public sealed class UpdatePipelineTests
                     size = packageSize,
                     digest,
                     browser_download_url = $"https://github.com/Laz22y/LazyForza/releases/download/{tag}/{name}"
+                }
+            }
+        });
+    }
+
+    private static string ReleaseJsonWithInstaller(
+        string tag,
+        byte[] package,
+        byte[] installer)
+    {
+        var version = tag.TrimStart('v');
+        var packageName = $"LazyForza-{version}-win-x64.zip";
+        var installerName = $"LazyForza-{version}-win-x64-setup.exe";
+        return JsonSerializer.Serialize(new
+        {
+            tag_name = tag,
+            name = $"LazyForza {version}",
+            body = "Stable",
+            html_url = $"https://github.com/Laz22y/LazyForza/releases/tag/{tag}",
+            draft = false,
+            prerelease = false,
+            assets = new object[]
+            {
+                new
+                {
+                    name = packageName,
+                    state = "uploaded",
+                    size = package.Length,
+                    digest = $"sha256:{Convert.ToHexString(SHA256.HashData(package)).ToLowerInvariant()}",
+                    browser_download_url = $"https://github.com/Laz22y/LazyForza/releases/download/{tag}/{packageName}"
+                },
+                new
+                {
+                    name = installerName,
+                    state = "uploaded",
+                    size = installer.Length,
+                    digest = $"sha256:{Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant()}",
+                    browser_download_url = $"https://github.com/Laz22y/LazyForza/releases/download/{tag}/{installerName}"
                 }
             }
         });

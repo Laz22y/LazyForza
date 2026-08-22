@@ -28,6 +28,8 @@ public partial class App : Application
     private SingleInstanceCoordinator? singleInstance;
     private TrayIconService? trayIcon;
     private StartupProfileStore? startupProfileStore;
+    private InitializationStateStore? initializationStateStore;
+    private ApplicationDistribution distribution = ApplicationDistribution.Detect(AppContext.BaseDirectory);
     private StartupProfile startupProfile = StartupProfile.CreateDefault();
     private bool exitRequested;
     private bool minimizedNoticeShown;
@@ -48,8 +50,20 @@ public partial class App : Application
         }
         try
         {
-            startupProfileStore = new StartupProfileStore();
-            startupProfile = startupProfileStore.Load();
+            distribution = ApplicationDistribution.Detect(AppContext.BaseDirectory);
+            startupProfileStore = new StartupProfileStore(distribution.ProfilePath);
+            initializationStateStore = new InitializationStateStore(
+                distribution.InitializationStatePath);
+            var profileLoad = startupProfileStore.LoadWithMigration();
+            startupProfile = profileLoad.Profile;
+            var initializationState = initializationStateStore.Load();
+            if (!initializationState.Exists && profileLoad.LegacyInitializationCompleted)
+            {
+                initializationStateStore.MarkCompleted(
+                    profileLoad.LegacyInitializationCompletedAt);
+                startupProfileStore.Save(startupProfile);
+                initializationState = initializationStateStore.Load();
+            }
             var explicitDataRoot = DataRoot(e.Args);
             AppLocalization.UseLanguage(LanguageOverride(e.Args) ?? startupProfile.Language);
             EnsureWindowLocalization();
@@ -67,7 +81,7 @@ public partial class App : Application
                 return;
             }
             InitializationResult? initialization = null;
-            if (!startupProfile.InitializationCompleted && !SkipInitialization(e.Args))
+            if (!initializationState.Completed && !SkipInitialization(e.Args))
             {
                 var initializationWindow = new InitializationWindow(startupProfile, explicitDataRoot);
                 MainWindow = initializationWindow;
@@ -130,6 +144,7 @@ public partial class App : Application
                     "telemetry.port",
                     initialization.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 startupProfileStore.Save(startupProfile);
+                initializationStateStore.MarkCompleted();
             }
             if (e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase))
                 await EnsureDemoVehicleProfilesAsync(store);
@@ -160,7 +175,11 @@ public partial class App : Application
                 directories.Root,
                 message => log.Write(message));
             await diagnosticCapture.StartAsync(CancellationToken.None);
-            updateManager = new ApplicationUpdateManager(store, directories, message => log.Write(message));
+            updateManager = new ApplicationUpdateManager(
+                store,
+                directories,
+                distribution,
+                message => log.Write(message));
             var context = new ModuleContext(
                 telemetry,
                 overlay,

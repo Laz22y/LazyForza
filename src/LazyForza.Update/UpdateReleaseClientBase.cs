@@ -32,10 +32,23 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
         Version currentVersion,
         CancellationToken cancellationToken);
 
+    public Task<PreparedUpdate> DownloadAndPrepareAsync(
+        UpdateReleaseInfo release,
+        string updatesRoot,
+        IProgress<UpdateProgress>? progress,
+        CancellationToken cancellationToken) =>
+        DownloadAndPrepareAsync(
+            release,
+            updatesRoot,
+            progress,
+            UpdatePackageKind.Portable,
+            cancellationToken);
+
     public async Task<PreparedUpdate> DownloadAndPrepareAsync(
         UpdateReleaseInfo release,
         string updatesRoot,
         IProgress<UpdateProgress>? progress,
+        UpdatePackageKind packageKind,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(release);
@@ -44,12 +57,21 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
             throw new UpdateException(
                 $"发行版来源为 {release.SourceName}，不能交给 {SourceName} 下载器处理。");
 
-        var expectedName = $"LazyForza-{release.Version.ToString(3)}-win-x64.zip";
-        if (!string.Equals(release.Package.Name, expectedName, StringComparison.OrdinalIgnoreCase) ||
-            release.Package.Size is <= 0 or > MaxArchiveBytes)
+        var artifact = packageKind == UpdatePackageKind.Installer
+            ? release.Installer ?? throw new UpdateException(
+                $"{SourceName} 发行版缺少安装版升级程序。")
+            : release.Package;
+        var checksum = packageKind == UpdatePackageKind.Installer
+            ? release.InstallerChecksum
+            : release.Checksum;
+        var expectedName = packageKind == UpdatePackageKind.Installer
+            ? $"LazyForza-{release.Version.ToString(3)}-win-x64-setup.exe"
+            : $"LazyForza-{release.Version.ToString(3)}-win-x64.zip";
+        if (!string.Equals(artifact.Name, expectedName, StringComparison.OrdinalIgnoreCase) ||
+            artifact.Size is <= 0 or > MaxArchiveBytes)
             throw new UpdateException("待下载的发行版文件与版本信息不匹配。");
-        ValidateReleaseDownloadUri(release.Package.DownloadUri);
-        if (release.Checksum is not null) ValidateReleaseDownloadUri(release.Checksum.DownloadUri);
+        ValidateReleaseDownloadUri(artifact.DownloadUri);
+        if (checksum is not null) ValidateReleaseDownloadUri(checksum.DownloadUri);
 
         Directory.CreateDirectory(updatesRoot);
         var workDirectory = Path.Combine(
@@ -58,26 +80,40 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
         Directory.CreateDirectory(workDirectory);
         try
         {
-            var archivePath = Path.Combine(workDirectory, release.Package.Name);
+            var archivePath = Path.Combine(workDirectory, artifact.Name);
             progress?.Report(new UpdateProgress(
                 $"正在从 {SourceName} 下载更新…",
                 0,
-                release.Package.Size));
+                artifact.Size));
             await DownloadFileAsync(
-                release.Package.DownloadUri,
+                artifact.DownloadUri,
                 archivePath,
-                release.Package.Size,
+                artifact.Size,
                 progress,
                 cancellationToken).ConfigureAwait(false);
 
             progress?.Report(new UpdateProgress("正在校验下载文件…"));
-            var expectedHash = await ResolveExpectedHashAsync(release, cancellationToken)
+            var expectedHash = await ResolveExpectedHashAsync(
+                    artifact,
+                    checksum,
+                    cancellationToken)
                 .ConfigureAwait(false);
             var actualHash = await ComputeSha256Async(archivePath, cancellationToken)
                 .ConfigureAwait(false);
             if (!CryptographicOperations.FixedTimeEquals(expectedHash, actualHash))
                 throw new UpdateException(
                     $"{SourceName} 更新包 SHA-256 校验失败，文件可能不完整或已被篡改。");
+
+            if (packageKind == UpdatePackageKind.Installer)
+            {
+                progress?.Report(new UpdateProgress("安装程序已准备好。", 1, 1));
+                return new PreparedUpdate(
+                    release.Version,
+                    workDirectory,
+                    string.Empty,
+                    archivePath,
+                    UpdatePackageKind.Installer);
+            }
 
             var extractionRoot = Path.Combine(workDirectory, "package");
             progress?.Report(new UpdateProgress("正在验证更新包…"));
@@ -86,7 +122,12 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
                 extractionRoot,
                 cancellationToken).ConfigureAwait(false);
             progress?.Report(new UpdateProgress("更新已准备好。", 1, 1));
-            return new PreparedUpdate(release.Version, workDirectory, packageRoot, archivePath);
+            return new PreparedUpdate(
+                release.Version,
+                workDirectory,
+                packageRoot,
+                archivePath,
+                UpdatePackageKind.Portable);
         }
         catch
         {
@@ -246,18 +287,19 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
     }
 
     private async Task<byte[]> ResolveExpectedHashAsync(
-        UpdateReleaseInfo release,
+        UpdateReleaseAsset artifact,
+        UpdateReleaseAsset? checksum,
         CancellationToken cancellationToken)
     {
-        if (TryParseSha256Digest(release.Package.Digest, out var digest)) return digest;
-        if (release.Checksum is null)
+        if (TryParseSha256Digest(artifact.Digest, out var digest)) return digest;
+        if (checksum is null)
             throw new UpdateException($"{SourceName} 发行版缺少 SHA-256 校验信息。");
-        if (release.Checksum.Size is > 4096)
+        if (checksum.Size is > 4096)
             throw new UpdateException("更新包校验和文件大小异常。");
 
         try
         {
-            using var request = CreateRequest(HttpMethod.Get, release.Checksum.DownloadUri);
+            using var request = CreateRequest(HttpMethod.Get, checksum.DownloadUri);
             using var response = await HttpClient.SendAsync(request, cancellationToken)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
@@ -278,7 +320,7 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
                 if (parts.Length < 2 ||
                     !string.Equals(
                         parts[^1].TrimStart('*'),
-                        release.Package.Name,
+                        artifact.Name,
                         StringComparison.OrdinalIgnoreCase))
                     continue;
                 if (TryParseSha256Digest(parts[0], out var hash)) return hash;

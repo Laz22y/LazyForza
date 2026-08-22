@@ -759,11 +759,9 @@ internal sealed class InitializationWindow : Window
         var profile = sourceProfile with
         {
             SchemaVersion = StartupProfile.CurrentSchemaVersion,
-            InitializationCompleted = true,
             Language = language,
             DataDirectory = Path.GetFullPath(dataDirectory),
-            CloseBehavior = closeBehavior,
-            InitializationCompletedAt = DateTimeOffset.UtcNow
+            CloseBehavior = closeBehavior
         };
         Result = new InitializationResult(
             profile.Normalize(),

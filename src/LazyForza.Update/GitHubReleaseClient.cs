@@ -92,6 +92,45 @@ public sealed class GitHubReleaseClient : UpdateReleaseClientBase
                 throw new UpdateException(
                     "发行版既没有 GitHub SHA-256 摘要，也没有校验和文件。");
 
+            var installerName = $"LazyForza-{version.ToString(3)}-win-x64-setup.exe";
+            var installerCandidates = release.Assets.Where(asset =>
+                string.Equals(asset.Name, installerName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(asset.State, "uploaded", StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (installerCandidates.Length > 1)
+                throw new UpdateException("发行版包含重复的安装版升级程序。");
+            var installerDto = installerCandidates.SingleOrDefault();
+            if (installerDto?.Size is <= 0 or > MaxArchiveBytes)
+                throw new UpdateException(
+                    $"安装版升级程序大小异常：{installerDto.Size:N0} 字节。");
+            var installer = installerDto is null
+                ? null
+                : ToAsset(
+                    installerDto.Name,
+                    installerDto.BrowserDownloadUrl,
+                    installerDto.Size,
+                    installerDto.Digest);
+            if (installer is not null) ValidateReleaseDownloadUri(installer.DownloadUri);
+
+            var installerChecksumCandidates = release.Assets.Where(asset =>
+                string.Equals(asset.Name, $"{installerName}.sha256", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(asset.State, "uploaded", StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (installerChecksumCandidates.Length > 1)
+                throw new UpdateException("发行版包含重复的安装版校验和文件。");
+            var installerChecksumDto = installerChecksumCandidates.SingleOrDefault();
+            var installerChecksum = installerChecksumDto is null
+                ? null
+                : ToAsset(
+                    installerChecksumDto.Name,
+                    installerChecksumDto.BrowserDownloadUrl,
+                    installerChecksumDto.Size,
+                    installerChecksumDto.Digest);
+            if (installerChecksum is not null)
+                ValidateReleaseDownloadUri(installerChecksum.DownloadUri);
+            if (installer is not null &&
+                !TryParseSha256Digest(installer.Digest, out _) &&
+                installerChecksum is null)
+                throw new UpdateException("安装版升级程序缺少 SHA-256 校验信息。");
+
             if (!Uri.TryCreate(release.HtmlUrl, UriKind.Absolute, out var pageUri) ||
                 pageUri.Scheme != Uri.UriSchemeHttps ||
                 !string.Equals(pageUri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
@@ -110,7 +149,9 @@ public sealed class GitHubReleaseClient : UpdateReleaseClientBase
                 package,
                 checksum,
                 Source,
-                metadata.Type);
+                metadata.Type,
+                installer,
+                installerChecksum);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

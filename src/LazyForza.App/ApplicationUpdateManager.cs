@@ -11,16 +11,19 @@ internal sealed class ApplicationUpdateManager : IDisposable
 
     private readonly LazyForzaStore store;
     private readonly DataDirectoryService directories;
+    private readonly ApplicationDistribution distribution;
     private readonly MultiSourceUpdateClient client;
     private readonly Action<string> log;
 
     public ApplicationUpdateManager(
         LazyForzaStore store,
         DataDirectoryService directories,
+        ApplicationDistribution distribution,
         Action<string> log)
     {
         this.store = store;
         this.directories = directories;
+        this.distribution = distribution;
         this.log = log;
         client = new MultiSourceUpdateClient(PreferredSource, log);
         WindowsUpdateLauncher.CleanupCompletedUpdates(directories.UpdatesPath);
@@ -44,10 +47,13 @@ internal sealed class ApplicationUpdateManager : IDisposable
     {
         get
         {
-            var saved = store.GetAppSetting(CheckOnStartupSetting);
-            return saved is null || !bool.TryParse(saved, out var enabled) || enabled;
+            var saved = store.GetAppSetting(ModeCheckOnStartupSetting) ??
+                        store.GetAppSetting(CheckOnStartupSetting);
+            return bool.TryParse(saved, out var enabled)
+                ? enabled
+                : distribution.DefaultUpdateCheckEnabled;
         }
-        set => store.SetAppSetting(CheckOnStartupSetting, value.ToString());
+        set => store.SetAppSetting(ModeCheckOnStartupSetting, value.ToString());
     }
 
     public UpdateSourceKind PreferredSource
@@ -74,7 +80,10 @@ internal sealed class ApplicationUpdateManager : IDisposable
 
     public string FallbackSourceName => PreferredSource == UpdateSourceKind.GitHub ? "GitCode" : "GitHub";
 
+    public ApplicationDistributionKind DistributionKind => distribution.Kind;
+
     public bool CanInstallAutomatically =>
+        !distribution.IsDevelopment &&
         WindowsUpdateLauncher.IsPackagedInstall(AppContext.BaseDirectory);
 
     public Task<UpdateReleaseInfo?> CheckAsync(CancellationToken cancellationToken) =>
@@ -84,7 +93,14 @@ internal sealed class ApplicationUpdateManager : IDisposable
         UpdateReleaseInfo release,
         IProgress<UpdateProgress> progress,
         CancellationToken cancellationToken) =>
-        client.DownloadAndPrepareAsync(release, directories.UpdatesPath, progress, cancellationToken);
+        client.DownloadAndPrepareAsync(
+            release,
+            directories.UpdatesPath,
+            progress,
+            distribution.IsInstalled
+                ? UpdatePackageKind.Installer
+                : UpdatePackageKind.Portable,
+            cancellationToken);
 
     public void InstallAndRestart(PreparedUpdate update)
     {
@@ -95,12 +111,16 @@ internal sealed class ApplicationUpdateManager : IDisposable
             .CreateAutomaticUpdateBackup(directories.BackupsPath);
         log($"Automatic pre-update data backup created: {backup}");
 
-        var process = WindowsUpdateLauncher.Launch(
-            update,
-            AppContext.BaseDirectory,
-            directories.Root,
-            Environment.ProcessId);
-        log($"Update installer started as PID {process.Id}. Preparing to exit.");
+        var process = distribution.IsInstalled
+            ? WindowsInstallerUpdateLauncher.Launch(update, AppContext.BaseDirectory)
+            : WindowsUpdateLauncher.Launch(
+                update,
+                AppContext.BaseDirectory,
+                directories.Root,
+                Environment.ProcessId);
+        log(distribution.IsInstalled
+            ? $"Installed update setup started as PID {process.Id}. Preparing to exit."
+            : $"Portable update installer started as PID {process.Id}. Preparing to exit.");
         App.RequestExit();
     }
 
@@ -108,4 +128,7 @@ internal sealed class ApplicationUpdateManager : IDisposable
         log($"{context}: {exception.GetType().Name}: {exception.Message}");
 
     public void Dispose() => client.Dispose();
+
+    private string ModeCheckOnStartupSetting =>
+        $"{CheckOnStartupSetting}.{distribution.Kind.ToString().ToLowerInvariant()}";
 }

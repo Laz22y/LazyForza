@@ -120,6 +120,67 @@ public sealed class GitCodeReleaseClient : UpdateReleaseClientBase
                 throw new UpdateException(
                     $"GitCode 发行版缺少 {expectedName}.sha256，无法安全验证下载文件。");
 
+            var installerName = $"LazyForza-{version.ToString(3)}-win-x64-setup.exe";
+            var installerCandidates = release.Assets.Where(asset =>
+                string.Equals(asset.Name, installerName, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (installerCandidates.Length > 1)
+                throw new UpdateException("GitCode 发行版包含重复的安装版升级程序。");
+            var installerDto = installerCandidates.SingleOrDefault();
+            if (installerDto?.Size is > MaxArchiveBytes)
+                throw new UpdateException(
+                    $"GitCode 安装版升级程序大小异常：{installerDto.Size:N0} 字节。");
+            var installerMetadata = installerDto is null
+                ? null
+                : ToAsset(
+                    installerDto.Name,
+                    installerDto.BrowserDownloadUrl,
+                    installerDto.Size,
+                    installerDto.Digest ?? installerDto.Sha256);
+            if (installerMetadata is not null)
+                ValidateReleaseDownloadUri(installerMetadata.DownloadUri);
+            var installer = installerMetadata is null
+                ? null
+                : installerMetadata with
+                {
+                    DownloadUri = CreateAttachmentDownloadUri(
+                        release.TagName,
+                        installerMetadata.Name)
+                };
+            if (installer is not null) ValidateReleaseDownloadUri(installer.DownloadUri);
+
+            var installerChecksumCandidates = release.Assets.Where(asset =>
+                string.Equals(
+                    asset.Name,
+                    $"{installerName}.sha256",
+                    StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (installerChecksumCandidates.Length > 1)
+                throw new UpdateException("GitCode 发行版包含重复的安装版校验和文件。");
+            var installerChecksumDto = installerChecksumCandidates.SingleOrDefault();
+            var installerChecksumMetadata = installerChecksumDto is null
+                ? null
+                : ToAsset(
+                    installerChecksumDto.Name,
+                    installerChecksumDto.BrowserDownloadUrl,
+                    installerChecksumDto.Size,
+                    installerChecksumDto.Digest ?? installerChecksumDto.Sha256);
+            if (installerChecksumMetadata is not null)
+                ValidateReleaseDownloadUri(installerChecksumMetadata.DownloadUri);
+            var installerChecksum = installerChecksumMetadata is null
+                ? null
+                : installerChecksumMetadata with
+                {
+                    DownloadUri = CreateAttachmentDownloadUri(
+                        release.TagName,
+                        installerChecksumMetadata.Name)
+                };
+            if (installerChecksum is not null)
+                ValidateReleaseDownloadUri(installerChecksum.DownloadUri);
+            if (installer is not null &&
+                !TryParseSha256Digest(installer.Digest, out _) &&
+                installerChecksum is null)
+                throw new UpdateException(
+                    $"GitCode 安装版升级程序缺少 {installerName}.sha256，无法安全验证下载文件。");
+
             var metadata = UpdateReleaseMetadata.Parse(
                 release.Body,
                 currentVersion,
@@ -133,7 +194,9 @@ public sealed class GitCodeReleaseClient : UpdateReleaseClientBase
                 package,
                 checksum,
                 Source,
-                metadata.Type);
+                metadata.Type,
+                installer,
+                installerChecksum);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

@@ -112,6 +112,7 @@ Name: "fileassoc"; Description: "{cm:AssociateLazyForzaFiles}"; GroupDescription
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "LazyForza.Installation"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "{app}\Data"; Permissions: users-modify
@@ -138,3 +139,37 @@ Root: HKA; Subkey: "Software\Classes\LazyForza.EstateTrack\shell\open\command"; 
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,LazyForza}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: IsAutomaticUpdate
+
+[Code]
+function IsAutomaticUpdate: Boolean;
+var
+  Index: Integer;
+begin
+  Result := False;
+  for Index := 1 to ParamCount do
+  begin
+    if CompareText(ParamStr(Index), '/AUTOUPDATE') = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  StateDirectory: String;
+  StatePath: String;
+begin
+  if CurUninstallStep <> usPostUninstall then
+    Exit;
+
+  StateDirectory := ExpandConstant('{localappdata}\LazyForza');
+  StatePath := StateDirectory + '\initialization-state.json';
+  if ForceDirectories(StateDirectory) then
+    SaveStringToFile(
+      StatePath,
+      '{"schemaVersion":1,"completed":false}',
+      False);
+end;

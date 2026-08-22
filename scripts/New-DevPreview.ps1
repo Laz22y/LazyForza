@@ -72,6 +72,7 @@ Copy-Item -Path (Join-Path $publishPath '*') -Destination $stagePath -Recurse
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\README.txt') -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\Start-Development.cmd') -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\Start-Isolated.cmd') -Destination $stagePath
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\LazyForza.Development') -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') `
     -Destination (Join-Path $stagePath 'THIRD_PARTY_NOTICES.txt')
 

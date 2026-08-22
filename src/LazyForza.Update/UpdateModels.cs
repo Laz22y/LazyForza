@@ -180,7 +180,9 @@ public sealed record UpdateReleaseInfo(
     UpdateReleaseAsset Package,
     UpdateReleaseAsset? Checksum,
     UpdateSourceKind Source,
-    UpdateReleaseType Type = UpdateReleaseType.Fix)
+    UpdateReleaseType Type = UpdateReleaseType.Fix,
+    UpdateReleaseAsset? Installer = null,
+    UpdateReleaseAsset? InstallerChecksum = null)
 {
     public string SourceName => Source switch
     {
@@ -200,11 +202,18 @@ public sealed record UpdateProgress(
         : null;
 }
 
+public enum UpdatePackageKind
+{
+    Portable,
+    Installer
+}
+
 public sealed record PreparedUpdate(
     Version Version,
     string WorkDirectory,
     string PackageRoot,
-    string ArchivePath);
+    string ArchivePath,
+    UpdatePackageKind Kind = UpdatePackageKind.Portable);
 
 public sealed class UpdateException : Exception
 {

@@ -6,7 +6,7 @@ namespace LazyForza.IntegrationTests;
 public sealed class StartupProfileTests
 {
     [TestMethod]
-    public void MissingProfileRequiresInitializationAndUsesLegacyDataDirectory()
+    public void MissingProfileUsesDefaultsAndInitializationStateIsSeparate()
     {
         var root = CreateTemporaryDirectory();
         try
@@ -15,12 +15,15 @@ public sealed class StartupProfileTests
 
             var profile = store.Load();
 
-            Assert.IsFalse(profile.InitializationCompleted);
             Assert.AreEqual("zh-Hans", profile.Language);
             Assert.AreEqual(
                 Path.GetFullPath(StartupProfileStore.DefaultDataDirectory),
                 profile.DataDirectory);
             Assert.AreEqual(MainWindowCloseBehavior.MinimizeToTray, profile.CloseBehavior);
+            var state = new InitializationStateStore(
+                Path.Combine(root, "initialization-state.json")).Load();
+            Assert.IsFalse(state.Exists);
+            Assert.IsFalse(state.Completed);
         }
         finally
         {
@@ -29,7 +32,7 @@ public sealed class StartupProfileTests
     }
 
     [TestMethod]
-    public void CompletedProfileSurvivesReloadAndExplicitDataDirectoryWins()
+    public void ProfileAndCompletedInitializationStateSurviveReload()
     {
         var root = CreateTemporaryDirectory();
         try
@@ -40,21 +43,133 @@ public sealed class StartupProfileTests
             var store = new StartupProfileStore(profilePath);
             store.Save(new StartupProfile(
                 StartupProfile.CurrentSchemaVersion,
-                InitializationCompleted: true,
                 "en",
                 dataPath,
-                MainWindowCloseBehavior.ExitApplication,
-                DateTimeOffset.Parse("2026-08-22T12:00:00+08:00")));
+                MainWindowCloseBehavior.ExitApplication));
+            var stateStore = new InitializationStateStore(
+                Path.Combine(root, "initialization-state.json"));
+            var completedAt = DateTimeOffset.Parse("2026-08-22T12:00:00+08:00");
+            stateStore.MarkCompleted(completedAt);
 
             var reloaded = store.Load();
+            var state = stateStore.Load();
 
-            Assert.IsTrue(reloaded.InitializationCompleted);
             Assert.AreEqual("en", reloaded.Language);
             Assert.AreEqual(Path.GetFullPath(dataPath), reloaded.DataDirectory);
             Assert.AreEqual(MainWindowCloseBehavior.ExitApplication, reloaded.CloseBehavior);
             Assert.AreEqual(
                 Path.GetFullPath(explicitPath),
                 store.ResolveDataDirectory(explicitPath, reloaded));
+            Assert.IsTrue(state.Exists);
+            Assert.IsTrue(state.Completed);
+            Assert.AreEqual(completedAt, state.CompletedAt);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void DistributionKeepsPortableStateLocalAndInstalledStatePerUser()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var applicationRoot = Path.Combine(root, "app");
+            var localRoot = Path.Combine(root, "local");
+            Directory.CreateDirectory(applicationRoot);
+            Directory.CreateDirectory(localRoot);
+
+            var portable = ApplicationDistribution.Detect(applicationRoot, localRoot);
+            Assert.AreEqual(ApplicationDistributionKind.Portable, portable.Kind);
+            Assert.AreEqual(
+                Path.Combine(applicationRoot, "LazyForza_Data", "initialization-state.json"),
+                portable.InitializationStatePath);
+            Assert.IsFalse(portable.DefaultUpdateCheckEnabled);
+
+            File.WriteAllText(
+                Path.Combine(applicationRoot, ApplicationDistribution.DevelopmentMarkerFileName),
+                "development-preview");
+            var development = ApplicationDistribution.Detect(applicationRoot, localRoot);
+            Assert.AreEqual(ApplicationDistributionKind.Development, development.Kind);
+            Assert.IsFalse(development.DefaultUpdateCheckEnabled);
+
+            File.WriteAllText(
+                Path.Combine(applicationRoot, ApplicationDistribution.InstalledMarkerFileName),
+                "installed");
+            var installed = ApplicationDistribution.Detect(applicationRoot, localRoot);
+            Assert.AreEqual(ApplicationDistributionKind.Installed, installed.Kind);
+            Assert.AreEqual(
+                Path.Combine(localRoot, "LazyForza", "initialization-state.json"),
+                installed.InitializationStatePath);
+            Assert.IsTrue(installed.DefaultUpdateCheckEnabled);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void LegacyCompletedProfileCanMigrateToIndependentState()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var profilePath = Path.Combine(root, "startup-profile.json");
+            File.WriteAllText(
+                profilePath,
+                """
+                {
+                  "schemaVersion": 1,
+                  "initializationCompleted": true,
+                  "language": "en",
+                  "dataDirectory": "C:\\LazyForzaData",
+                  "closeBehavior": 1,
+                  "initializationCompletedAt": "2026-08-22T12:00:00+08:00"
+                }
+                """);
+
+            var loaded = new StartupProfileStore(profilePath).LoadWithMigration();
+
+            Assert.IsTrue(loaded.LegacyInitializationCompleted);
+            Assert.AreEqual(
+                DateTimeOffset.Parse("2026-08-22T12:00:00+08:00"),
+                loaded.LegacyInitializationCompletedAt);
+            Assert.AreEqual(StartupProfile.CurrentSchemaVersion, loaded.Profile.SchemaVersion);
+            Assert.AreEqual("en", loaded.Profile.Language);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void ResetInitializationStatePreservesProfile()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var profilePath = Path.Combine(root, "startup-profile.json");
+            var stateStore = new InitializationStateStore(
+                Path.Combine(root, "initialization-state.json"));
+            var profileStore = new StartupProfileStore(profilePath);
+            profileStore.Save(StartupProfile.CreateDefault() with
+            {
+                Language = "en",
+                DataDirectory = Path.Combine(root, "data")
+            });
+            stateStore.MarkCompleted();
+
+            stateStore.Reset();
+
+            Assert.IsFalse(stateStore.Load().Completed);
+            Assert.AreEqual("en", profileStore.Load().Language);
+            Assert.AreEqual(
+                Path.GetFullPath(Path.Combine(root, "data")),
+                profileStore.Load().DataDirectory);
         }
         finally
         {
@@ -110,7 +225,7 @@ public sealed class StartupProfileTests
     }
 
     [TestMethod]
-    public void CompletedProfileCanSwitchLanguageBothDirections()
+    public void ProfileCanSwitchLanguageBothDirections()
     {
         var root = CreateTemporaryDirectory();
         try
@@ -118,10 +233,8 @@ public sealed class StartupProfileTests
             var store = new StartupProfileStore(Path.Combine(root, "startup-profile.json"));
             var original = StartupProfile.CreateDefault() with
             {
-                InitializationCompleted = true,
                 DataDirectory = Path.Combine(root, "data"),
-                CloseBehavior = MainWindowCloseBehavior.ExitApplication,
-                InitializationCompletedAt = DateTimeOffset.Parse("2026-08-22T12:00:00+08:00")
+                CloseBehavior = MainWindowCloseBehavior.ExitApplication
             };
 
             store.Save(original with { Language = "en" });
@@ -130,10 +243,8 @@ public sealed class StartupProfileTests
             var chinese = store.Load();
 
             Assert.AreEqual("zh-Hans", chinese.Language);
-            Assert.IsTrue(chinese.InitializationCompleted);
             Assert.AreEqual(Path.GetFullPath(original.DataDirectory), chinese.DataDirectory);
             Assert.AreEqual(original.CloseBehavior, chinese.CloseBehavior);
-            Assert.AreEqual(original.InitializationCompletedAt, chinese.InitializationCompletedAt);
         }
         finally
         {
