@@ -481,7 +481,9 @@ internal static class BuiltInModuleCatalog
         Action<DiagnosticSignal>? diagnosticSink = null)
     {
         var dashboard = new DashboardModule();
-        var estate = new EstateCircuitModule(store, sourceKind, getOverlayLayout);
+        string PlayerCode() => PlayerIdentitySettings.Normalize(
+            store.GetAppSetting(PlayerIdentitySettings.PlayerCodeSettingKey));
+        var estate = new EstateCircuitModule(store, sourceKind, getOverlayLayout, PlayerCode);
         var estatePackages = new EstateTrackPackageService(
             store,
             typeof(BuiltInModuleCatalog).Assembly.GetName().Version?.ToString(3) ?? "development");
@@ -538,11 +540,12 @@ internal static class BuiltInModuleCatalog
         },
         () => dashboard.Learning.Fingerprint,
         track => store.LoadEstateStrategySamples(track),
-        sample => store.SaveEstateStrategySample(sample));
+        sample => store.SaveEstateStrategySample(sample),
+        PlayerCode);
         return
         [
             dashboard,
-            new LapAnalysisModule(store, sourceKind, getOverlayLayout, diagnosticSink),
+            new LapAnalysisModule(store, sourceKind, getOverlayLayout, diagnosticSink, PlayerCode),
             estate,
             estateRace,
             new DriftDashboardModule()

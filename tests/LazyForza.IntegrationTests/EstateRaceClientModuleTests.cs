@@ -22,6 +22,43 @@ namespace LazyForza.IntegrationTests;
 public sealed class EstateRaceClientModuleTests
 {
     [TestMethod]
+    public async Task PlayerCodeOnlyPrefillsEstateRaceBeforeARepresentativeNameHasBeenSaved()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            $"lazyforza-estate-race-name-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            store.SetAppSetting(PlayerIdentitySettings.PlayerCodeSettingKey, "LF-27");
+            var module = new EstateRaceModule(
+                () => null,
+                defaultDisplayNameProvider: () => store.GetAppSetting(
+                    PlayerIdentitySettings.PlayerCodeSettingKey));
+            await module.InitializeAsync(new TestContext(new TestFeed(), store), CancellationToken.None);
+
+            var first = await module.LoadSavedProfileAsync(CancellationToken.None);
+            Assert.AreEqual("LF-27", first.DisplayName);
+
+            await store.SetAsync(
+                EstateRaceModule.ModuleId,
+                "displayName",
+                "上次参赛代表名",
+                CancellationToken.None);
+            var returning = await module.LoadSavedProfileAsync(CancellationToken.None);
+            Assert.AreEqual("上次参赛代表名", returning.DisplayName);
+            Assert.AreEqual(
+                "LF-27",
+                store.GetAppSetting(PlayerIdentitySettings.PlayerCodeSettingKey),
+                "地产赛事代表名必须与全局玩家代号分别保存。");
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
     public void LeaderboardTimingUsesSessionDeltaRulesForQualifyingRaceAndOtherViews()
     {
         var leader = Participant(Guid.NewGuid()) with

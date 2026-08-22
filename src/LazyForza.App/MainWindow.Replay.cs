@@ -115,7 +115,8 @@ internal sealed partial class MainWindow
                     Content =
                         $"{AnalysisTime(lap.TotalSeconds, currentTrack?.LayoutKind == TrackLayoutKind.PointToPoint)} · " +
                         $"{PerformanceClassName(lap.Vehicle.CarClass)} {lap.Vehicle.PerformanceIndex} · " +
-                        $"{lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss}",
+                        $"{lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss} · " +
+                        $"玩家 {PlayerCodeText(lap.PlayerCode)}",
                     Tag = lap.Id
                 });
             }
@@ -163,7 +164,9 @@ internal sealed partial class MainWindow
                 await SingleLapTelemetryRecordingFile.WriteAsync(
                     dialog.FileName,
                     currentSourceName,
-                    currentLap,
+                    string.IsNullOrWhiteSpace(currentLap.PlayerCode)
+                        ? currentLap with { PlayerCode = CurrentPlayerCode() }
+                        : currentLap,
                     lifetimeCancellation.Token);
                 MessageBox.Show(
                     $"已导出：\n{dialog.FileName}",
@@ -207,18 +210,25 @@ internal sealed partial class MainWindow
                     lifetimeCancellation.Token);
                 trackSelector.SelectedIndex = -1;
                 lapSelector.SelectedIndex = -1;
-                currentLap = replay.Lap;
+                currentLap = replay.Lap with
+                {
+                    PlayerCode = replay.Lap.PlayerCode ?? replay.Metadata.PlayerCode
+                };
                 currentTrack = null;
                 currentSourceName = replay.TrackName ??
                                     Path.GetFileNameWithoutExtension(replay.SourcePath);
                 elapsed = 0;
                 previousTick = DateTimeOffset.UtcNow;
                 exportRecording.IsEnabled = true;
+                var playerCode = PlayerCodeText(
+                    replay.Lap.PlayerCode ?? replay.Metadata.PlayerCode);
                 fileStatus.Text = replay.Metadata.ContentKind == TelemetryRecordingContentKind.SingleLap
                     ? $"{Path.GetFileName(replay.SourcePath)} · 单圈分析导出 · " +
-                      $"{replay.Lap.Samples.Count:N0} 样本 · {AnalysisTime(replay.Lap.TotalSeconds, false)}"
+                      $"玩家 {playerCode} · {replay.Lap.Samples.Count:N0} 样本 · " +
+                      $"{AnalysisTime(replay.Lap.TotalSeconds, false)}"
                     : $"{Path.GetFileName(replay.SourcePath)} · 原始 {replay.FrameCount:N0} 帧 · " +
-                      $"工作台 {replay.Lap.Samples.Count:N0} 样本 · {AnalysisTime(replay.Lap.TotalSeconds, false)}";
+                      $"玩家 {playerCode} · 工作台 {replay.Lap.Samples.Count:N0} 样本 · " +
+                      $"{AnalysisTime(replay.Lap.TotalSeconds, false)}";
                 RenderReplay();
             }
             catch (OperationCanceledException)

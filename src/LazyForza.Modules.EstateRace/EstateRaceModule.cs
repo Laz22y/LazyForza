@@ -34,6 +34,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private readonly Func<VehicleProfileFingerprint?>? vehicleFingerprint;
     private readonly Func<EstateStrategyTrackIdentity, IReadOnlyList<EstateStrategySample>>? strategySampleLoader;
     private readonly Action<EstateStrategySample>? strategySampleSaver;
+    private readonly Func<string?> defaultDisplayNameProvider;
     private readonly object strategySync = new();
     private readonly object telemetryStateSync = new();
     private readonly object lapRecoverySync = new();
@@ -109,7 +110,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         Action<Guid, bool, bool>? timingControl = null,
         Func<VehicleProfileFingerprint?>? vehicleFingerprint = null,
         Func<EstateStrategyTrackIdentity, IReadOnlyList<EstateStrategySample>>? strategySampleLoader = null,
-        Action<EstateStrategySample>? strategySampleSaver = null)
+        Action<EstateStrategySample>? strategySampleSaver = null,
+        Func<string?>? defaultDisplayNameProvider = null)
         : base(new ModuleDescriptor(
             ModuleId,
             "地产赛事",
@@ -125,6 +127,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         this.vehicleFingerprint = vehicleFingerprint;
         this.strategySampleLoader = strategySampleLoader;
         this.strategySampleSaver = strategySampleSaver;
+        this.defaultDisplayNameProvider = defaultDisplayNameProvider ?? (() => null);
     }
 
     public static int ProtocolVersion => EstateRaceWireProtocol.Version;
@@ -190,7 +193,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         return new EstateRaceConnectionProfile(
             address ?? "http://127.0.0.1:24876",
             string.Empty,
-            name ?? string.Empty,
+            name ?? PlayerIdentitySettings.Normalize(defaultDisplayNameProvider()),
             NormalizeColor(color),
             NullIfWhiteSpace(team),
             NullIfWhiteSpace(teamId),

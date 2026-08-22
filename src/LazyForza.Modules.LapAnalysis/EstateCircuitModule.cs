@@ -148,6 +148,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private readonly LazyForzaStore store;
     private readonly string trackSource;
     private readonly Func<OverlayLayout> getOverlayLayout;
+    private readonly Func<string?> playerCodeProvider;
     private readonly object stateGate = new();
     private readonly EstateTimestampUnwrapper timestampUnwrapper = new();
     private readonly List<EstateGatePoint> firstTrace = [];
@@ -220,7 +221,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     public EstateCircuitModule(
         LazyForzaStore store,
         TelemetrySourceKind sourceKind,
-        Func<OverlayLayout>? getOverlayLayout = null)
+        Func<OverlayLayout>? getOverlayLayout = null,
+        Func<string?>? playerCodeProvider = null)
         : base(new ModuleDescriptor(
             ModuleId,
             "地产环道",
@@ -233,6 +235,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         this.store = store;
         trackSource = TelemetryDataPartition.TrackSource(sourceKind);
         this.getOverlayLayout = getOverlayLayout ?? (() => new OverlayLayout());
+        this.playerCodeProvider = playerCodeProvider ?? (() => null);
     }
 
     public string Id => "hud.estate-lap";
@@ -1341,7 +1344,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             geometryValid,
             invalidReason,
             BuildSegments(total, samples),
-            samples);
+            samples,
+            PlayerIdentitySettings.Normalize(playerCodeProvider()));
         store.SaveLap(lap);
         lastCompletedLap = new EstateCircuitCompletedLap(
             lap.Id,

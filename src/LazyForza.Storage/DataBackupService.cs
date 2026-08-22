@@ -111,7 +111,7 @@ public sealed class DataBackupService
         new("Laps",
             ["Id", "TrackId", "Direction", "SectorSchemaVersion", "SessionId",
                 "VehicleFingerprint", "StartedAt", "TotalSeconds", "IsValid", "InvalidReason",
-                "CarClass", "PerformanceIndex"],
+                "CarClass", "PerformanceIndex", "PlayerCode"],
             ["Id"]),
         new("LapSegments",
             ["LapId", "SectorIndex", "TimeSeconds", "IsValid"],
@@ -687,6 +687,12 @@ public sealed class DataBackupService
 
     private static BackupPayload NormalizeLegacyPayload(BackupPayload payload)
     {
+        string[] legacyLapColumns =
+        [
+            "Id", "TrackId", "Direction", "SectorSchemaVersion", "SessionId",
+            "VehicleFingerprint", "StartedAt", "TotalSeconds", "IsValid", "InvalidReason",
+            "CarClass", "PerformanceIndex"
+        ];
         string[] legacyLapSampleColumns =
         [
             "LapId", "S", "ElapsedSeconds", "SpeedMps", "Rpm", "Gear", "Accel", "Brake",
@@ -694,6 +700,14 @@ public sealed class DataBackupService
         ];
         var tables = payload.Tables.Select(table =>
         {
+            if (string.Equals(table.Name, "Laps", StringComparison.Ordinal) &&
+                table.Columns.SequenceEqual(legacyLapColumns, StringComparer.Ordinal))
+                return new BackupTableData(
+                    table.Name,
+                    Spec("Laps").Columns,
+                    table.Rows
+                        .Select(row => row.Concat([null]).ToArray())
+                        .ToList());
             if (!string.Equals(table.Name, "LapSamples", StringComparison.Ordinal) ||
                 !table.Columns.SequenceEqual(legacyLapSampleColumns, StringComparer.Ordinal))
                 return table;

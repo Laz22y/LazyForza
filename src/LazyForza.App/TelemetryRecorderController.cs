@@ -118,7 +118,13 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
             CurrentPath = Path.Combine(directories.RecordingsPath, $"session-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.lfztelemetry");
             manualSubscription = await telemetry.SubscribeAsync("raw-recorder", cancellationToken);
             manualWriter = await TelemetryRecordingWriter.CreateAsync(CurrentPath,
-                new RecordingMetadata("LazyForza", 1, telemetry.Latest?.Source ?? TelemetrySourceKind.Live, DateTimeOffset.UtcNow, "Raw 324-byte Data Out packets"), cancellationToken);
+                new RecordingMetadata(
+                    "LazyForza",
+                    1,
+                    telemetry.Latest?.Source ?? TelemetrySourceKind.Live,
+                    DateTimeOffset.UtcNow,
+                    "Raw 324-byte Data Out packets",
+                    PlayerCode: CurrentPlayerCode()), cancellationToken);
             manualCancellation = new CancellationTokenSource();
             FramesWritten = 0;
             manualTask = Task.Run(() => RecordManualAsync(manualCancellation.Token), CancellationToken.None);
@@ -254,7 +260,8 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
                 1,
                 TelemetrySourceKind.Live,
                 DateTimeOffset.UtcNow,
-                $"Automatic competition recording; session={lapAnalysis.CurrentSessionId}"),
+                $"Automatic competition recording; session={lapAnalysis.CurrentSessionId}",
+                PlayerCode: CurrentPlayerCode()),
             cancellationToken);
         automaticStartedAt = preRoll.Count > 0 ? preRoll.Peek().ArrivalTime : frame.ArrivalTime;
         automaticSessionId = lapAnalysis.CurrentSessionId;
@@ -375,6 +382,13 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
         postRollCancellation?.Dispose();
         manualGate.Dispose();
         automaticGate.Dispose();
+    }
+
+    private string? CurrentPlayerCode()
+    {
+        var playerCode = PlayerIdentitySettings.Normalize(
+            store.GetAppSetting(PlayerIdentitySettings.PlayerCodeSettingKey));
+        return playerCode.Length == 0 ? null : playerCode;
     }
 }
 

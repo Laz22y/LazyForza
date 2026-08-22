@@ -244,10 +244,22 @@ internal sealed partial class MainWindow : Window
         await Task.Delay(200);
         CaptureVisual(this, Path.Combine(directory, "modules-without-estate-1440x900.png"));
 
+        navigation.SelectedIndex = 4;
+        UpdateLayout();
+        if (content.Content is ScrollViewer lapAnalysisScroll)
+            lapAnalysisScroll.ScrollToHome();
+        await Task.Delay(200);
+        CaptureVisual(this, Path.Combine(directory, "lap-analysis-exchange-1440x900.png"));
+
         navigation.SelectedIndex = 8;
         UpdateLayout();
         if (content.Content is ScrollViewer settingsScroll)
+        {
+            settingsScroll.ScrollToHome();
+            await Task.Delay(200);
+            CaptureVisual(this, Path.Combine(directory, "settings-player-1440x900.png"));
             settingsScroll.ScrollToVerticalOffset(520);
+        }
         await Task.Delay(250);
         CaptureVisual(this, Path.Combine(directory, "estate-hud-settings-1440x900.png"));
 
@@ -637,6 +649,7 @@ internal sealed partial class MainWindow : Window
     {
         var stack = PageStack("圈速分析", "选择赛道，对比已保存的圈速、分段和走线。");
         var module = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
+        stack.Children.Add(BuildLapAnalysisExchangeCard(module, out var exportSelectedLaps));
         var hud = module.Snapshot as LapHudState;
         if (hud is null)
         {
@@ -945,7 +958,7 @@ internal sealed partial class MainWindow : Window
                 ? "当前比赛"
                 : "最近一次比赛";
             var savedTable = new Grid { Margin = new Thickness(4) };
-            foreach (var width in new[] { 0.45, 0.75, 1.0, 1.15, 0.8, 0.75, 2.15, 0.6 })
+            foreach (var width in new[] { 0.45, 0.75, 1.05, 1.15, 0.8, 0.75, 2.05, 0.6 })
                 savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width, GridUnitType.Star) });
             AddSavedRow(0, null, "比赛范围", false, true);
             for (var index = 0; index < comparableLaps.Length; index++)
@@ -990,19 +1003,19 @@ internal sealed partial class MainWindow : Window
             void AddSavedRow(int row, LapSummary? selectableLap, string group, bool historicalBest, bool header)
             {
                 var cells = header
-                    ? new[] { "选择", "等级 / PI", "比赛范围", "保存时间", "圈速", "有效性", "分段", "操作" }
+                    ? new[] { "选择", "等级 / PI", "来源 / 玩家", "保存时间", "圈速", "有效性", "分段", "操作" }
                     : new[]
                     {
                         string.Empty,
                         $"{PerformanceClassName(selectableLap!.Vehicle.CarClass)} {selectableLap.Vehicle.PerformanceIndex}",
-                        group,
+                        $"{group}\n{PlayerCodeText(selectableLap.PlayerCode)}",
                         selectableLap.StartedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"),
                         AnalysisTime(selectableLap.TotalSeconds, pointToPointTimingApproximate),
                         selectableLap.IsValid ? "有效" : "无效",
                         string.Join("  ", selectableLap.Segments.Select(segment => $"S{segment.Index + 1} {AnalysisTime(segment.TimeSeconds, pointToPointTimingApproximate)}")),
                         "删除"
                     };
-                savedTable.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto, MinHeight = header ? 32 : 42 });
+                savedTable.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto, MinHeight = header ? 32 : 48 });
                 for (var column = 0; column < cells.Length; column++)
                 {
                     UIElement cell;
@@ -1033,6 +1046,7 @@ internal sealed partial class MainWindow : Window
                             }
                             if (deleteSelectedLapsButton is not null)
                                 deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
+                            exportSelectedLaps.IsEnabled = selectedLapIds.Count > 0;
                             if (displaySelectedLapsButton is not null)
                                 displaySelectedLapsButton.IsEnabled = !displayedLapIds.SetEquals(selectedLapIds);
                         };
@@ -1075,6 +1089,11 @@ internal sealed partial class MainWindow : Window
                             textCell.TextWrapping = TextWrapping.NoWrap;
                             textCell.TextTrimming = TextTrimming.CharacterEllipsis;
                             if (!header) textCell.ToolTip = cells[column];
+                        }
+                        if (!header && column == 2)
+                        {
+                            textCell.TextWrapping = TextWrapping.Wrap;
+                            textCell.ToolTip = $"{group} · 玩家代号：{PlayerCodeText(selectableLap!.PlayerCode)}";
                         }
                         cell = textCell;
                     }
@@ -2831,6 +2850,48 @@ internal sealed partial class MainWindow : Window
     private UIElement SettingsPage()
     {
         var stack = PageStack("设置", "管理 Live UDP、HUD、界面、录制、更新与本地数据。监听设置重启后生效。");
+        var identity = new Grid();
+        identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
+        identity.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var identityText = new StackPanel();
+        identityText.Children.Add(Label("玩家代号", 17, FontWeights.SemiBold));
+        identityText.Children.Add(Label(
+            "用于新录制和圈速分享；首次加入地产赛事时作为代表名默认值。可留空，不覆盖上次参赛代表名。",
+            11,
+            FontWeights.Normal,
+            "MutedBrush"));
+        identity.Children.Add(identityText);
+        var playerCode = new TextBox
+        {
+            Text = PlayerIdentitySettings.Normalize(
+                store.GetAppSetting(PlayerIdentitySettings.PlayerCodeSettingKey)),
+            MaxLength = PlayerIdentitySettings.MaximumLength,
+            Padding = new Thickness(9, 7, 9, 7),
+            Margin = new Thickness(18, 0, 12, 0),
+            VerticalContentAlignment = VerticalAlignment.Center,
+            ToolTip = $"最多 {PlayerIdentitySettings.MaximumLength} 个字符；留空表示不标注"
+        };
+        Grid.SetColumn(playerCode, 1);
+        identity.Children.Add(playerCode);
+        var saveIdentity = new Button
+        {
+            Content = "保存",
+            Padding = new Thickness(16, 7, 16, 7),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        saveIdentity.Click += (_, _) =>
+        {
+            var normalized = PlayerIdentitySettings.Normalize(playerCode.Text);
+            playerCode.Text = normalized;
+            store.SetAppSetting(PlayerIdentitySettings.PlayerCodeSettingKey, normalized);
+            saveIdentity.Content = "已保存";
+        };
+        playerCode.TextChanged += (_, _) => saveIdentity.Content = "保存";
+        Grid.SetColumn(saveIdentity, 2);
+        identity.Children.Add(saveIdentity);
+        stack.Children.Add(Card(identity));
+
         var network = new Grid();
         network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
         network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
