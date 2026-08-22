@@ -416,6 +416,20 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                 throw new InvalidOperationException("当前没有正在录入的维修区通道。");
             if (pitLaneCapture.Count < 12 || PolylineLength(pitLaneCapture) < 15)
                 throw new InvalidOperationException("维修区通道样本或长度不足。请从入口前重新开始，完整驶到出口后再停止。");
+            var maximumGap = EstatePitGeometryValidation.MaximumSegmentMeters(pitLaneCapture);
+            if (maximumGap > EstatePitGeometryValidation.MaximumCaptureSegmentMeters)
+            {
+                pitLaneCapture.Clear();
+                SetPitState(
+                    EstatePitCapturePhase.Idle,
+                    pitEnrollment!.TrackId,
+                    pitState.TrackName,
+                    $"维修区通道录入失败：遥测轨迹中断 {maximumGap:0.0} 米。",
+                    "请保持 2–30 km/h，从分流点前连续驶到并道点后重新录入。",
+                    true);
+                throw new InvalidOperationException(
+                    $"维修区通道存在 {maximumGap:0.0} 米的采样断点，无法可靠生成维修区起终点门。请降低车速并完整重录维修区通道。");
+            }
             var simplified = ResamplePitLane(pitLaneCapture, 0.75);
             pitLaneCapture.Clear();
             pitLaneCapture.AddRange(simplified);
@@ -524,6 +538,10 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                          throw new InvalidOperationException("赛道已不存在。");
             var definition = store.LoadEstateTrackDefinition(pitEnrollment.TrackId) ??
                              throw new InvalidOperationException("地产赛道定义已不存在。");
+            var maximumGap = EstatePitGeometryValidation.MaximumSegmentMeters(pitLaneCapture);
+            if (maximumGap > EstatePitGeometryValidation.MaximumPortableSegmentMeters)
+                throw new InvalidOperationException(
+                    $"现有维修区通道存在 {maximumGap:0.0} 米的轨迹断点。请勾选“维修区通道”并完整重录后再保存。");
             var entryCapture = CreatePitGateAtPoint(
                 pitLaneCapture,
                 GateCenter(pitEntryGate!),
@@ -973,6 +991,11 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             var loaded = store.LoadTrack(trackId) ?? throw new InvalidOperationException("没有找到所选赛道。");
             var storedDefinition = store.LoadEstateTrackDefinition(trackId) ??
                              throw new InvalidOperationException("所选赛道缺少地产计时定义。");
+            if (storedDefinition.Pit is { } storedPit &&
+                EstatePitGeometryValidation.MaximumSegmentMeters(storedPit.CenterLine) >
+                EstatePitGeometryValidation.MaximumPortableSegmentMeters)
+                throw new InvalidOperationException(
+                    "这条赛道的维修区通道存在大段遥测缺口，维修区起终点门不可信。请只重录“维修区通道”后再开始计时。");
             if (loaded.Track.TimingKind != TrackTimingKind.EstateGeometry || loaded.Track.LayoutKind != TrackLayoutKind.Circuit)
                 throw new InvalidOperationException("只能手动启用地产环道计时。");
             if (!string.Equals(loaded.Track.Source, trackSource, StringComparison.Ordinal))

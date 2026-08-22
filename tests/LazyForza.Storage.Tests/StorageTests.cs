@@ -901,6 +901,53 @@ public sealed class StorageTests
     }
 
     [TestMethod]
+    public void EstateTrackPackageRejectsADiscontinuousPitCenterLine()
+    {
+        var databasePath = TempDatabasePath();
+        try
+        {
+            using var store = new LazyForzaStore(databasePath);
+            var (track, sectors, definition) = EstatePackageFixture("fh6_udp_live");
+            var pitGate = new EstateTimingGate(
+                new EstateGatePoint(96, 2, -4), new EstateGatePoint(104, 2, -4),
+                0, 1, 0, 0, 0);
+            var pit = new EstatePitDefinition(
+                pitGate,
+                pitGate with
+                {
+                    Left = new EstateGatePoint(96, 2, 84),
+                    Right = new EstateGatePoint(104, 2, 84)
+                },
+                [
+                    new EstateGatePoint(100, 2, -8),
+                    new EstateGatePoint(100, 2, -4),
+                    new EstateGatePoint(100, 2, 80),
+                    new EstateGatePoint(100, 2, 84)
+                ],
+                new EstateGatePoint(100, 2, 40),
+                5,
+                80,
+                3,
+                4,
+                null,
+                pitGate with
+                {
+                    Left = new EstateGatePoint(96, 2, 40),
+                    Right = new EstateGatePoint(104, 2, 40)
+                });
+            store.SaveTrack(track, sectors, definition with { Pit = pit });
+
+            var service = new EstateTrackPackageService(store, "test-version");
+            var exception = Assert.ThrowsExactly<InvalidDataException>(() => service.Identify(track.Id));
+            StringAssert.Contains(exception.Message, "维修区定义无效");
+        }
+        finally
+        {
+            DeleteDatabase(databasePath);
+        }
+    }
+
+    [TestMethod]
     public void EstateTrackIdentityUsesStableTrackIdRevisionAndCompetitionGeometryOnly()
     {
         var databasePath = TempDatabasePath();
