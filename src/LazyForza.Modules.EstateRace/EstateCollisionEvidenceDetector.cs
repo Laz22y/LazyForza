@@ -11,9 +11,13 @@ internal sealed class EstateCollisionEvidenceDetector
 {
     private static readonly TimeSpan EvidenceLifetime = TimeSpan.FromMilliseconds(900);
     private static readonly TimeSpan EventCooldown = TimeSpan.FromMilliseconds(650);
-    private const int MinimumWindowMilliseconds = 40;
-    private const int MaximumWindowMilliseconds = 260;
-    private const double MinimumHorizontalImpulseMps = 1.45;
+    private static readonly TimeSpan CandidateConfirmationDelay = TimeSpan.FromMilliseconds(180);
+    private const int MinimumImpactWindowMilliseconds = 32;
+    private const int TargetImpactWindowMilliseconds = 60;
+    private const int MaximumImpactWindowMilliseconds = 90;
+    private const int SmashableEvidenceWindowMilliseconds = 350;
+    private const double MinimumHorizontalImpulseMps = 2.4;
+    private const double MinimumHorizontalAccelerationMps2 = 32;
     private readonly List<MotionSample> samples = [];
     private DateTimeOffset? lastEventAt;
     private PendingEvidence? pending;
@@ -25,7 +29,7 @@ internal sealed class EstateCollisionEvidenceDetector
         Expire(now);
         var raw = frame.Raw;
         var worldVelocity = ToWorldVelocity(raw.Velocity, raw.Yaw);
-        if (!telemetryValid || !Finite(raw.Position) || !Finite(raw.Velocity) ||
+        if (!telemetryValid || !Finite(raw.Position) || !Finite(raw.Velocity) || !Finite(raw.Acceleration) ||
             !Finite(worldVelocity) || !float.IsFinite(raw.Yaw))
         {
             samples.Clear();
@@ -37,13 +41,22 @@ internal sealed class EstateCollisionEvidenceDetector
             raw.TimestampMS,
             raw.Position,
             worldVelocity,
+            HorizontalLength(raw.Acceleration),
             Math.Max(0, raw.SmashableVelDiff),
             Math.Max(0, raw.SmashableMass));
         samples.Add(current);
         PruneSamples(current);
 
+        if (HasRecentSmashableEvidence())
+        {
+            if (pending is not null && now - pending.DetectedAt <=
+                TimeSpan.FromMilliseconds(SmashableEvidenceWindowMilliseconds))
+                pending = null;
+            return Snapshot(raw, worldVelocity, now);
+        }
+
         var baseline = FindBaseline(current);
-        if (baseline is MotionSample prior && !HasRecentSmashableEvidence())
+        if (baseline is MotionSample prior)
         {
             var deltaX = current.WorldVelocity.X - prior.WorldVelocity.X;
             var deltaY = current.WorldVelocity.Y - prior.WorldVelocity.Y;
@@ -52,11 +65,10 @@ internal sealed class EstateCollisionEvidenceDetector
             var previousHorizontalSpeed = HorizontalLength(prior.WorldVelocity);
             var currentHorizontalSpeed = HorizontalLength(current.WorldVelocity);
             var speedLoss = Math.Max(0, previousHorizontalSpeed - currentHorizontalSpeed);
-            var directionChangeDegrees = DirectionChangeDegrees(prior.WorldVelocity, current.WorldVelocity);
             var horizontalCandidate = horizontalDelta >= MinimumHorizontalImpulseMps &&
                                       previousHorizontalSpeed >= 2.5 &&
-                                      (speedLoss >= .7 || directionChangeDegrees >= 4.5 ||
-                                       horizontalDelta >= 2.35);
+                                      PeakHorizontalAcceleration(prior, current) >=
+                                      MinimumHorizontalAccelerationMps2;
             var likelyVerticalLanding = Math.Abs(deltaY) > Math.Max(2.8, horizontalDelta * 1.45);
             if (horizontalCandidate && !likelyVerticalLanding)
                 Register(now, current, horizontalDelta, speedLoss);
@@ -88,9 +100,8 @@ internal sealed class EstateCollisionEvidenceDetector
         }
 
         lastEventAt = now;
-        sequence = Math.Max(sequence + 1, now.ToUnixTimeMilliseconds());
         pending = new PendingEvidence(
-            sequence,
+            0,
             now,
             sample.Position,
             sample.WorldVelocity,
@@ -106,31 +117,43 @@ internal sealed class EstateCollisionEvidenceDetector
         DateTimeOffset now)
     {
         Expire(now);
+        if (pending is { Sequence: 0 } candidate && now - candidate.DetectedAt >= CandidateConfirmationDelay)
+        {
+            sequence = Math.Max(sequence + 1, candidate.DetectedAt.ToUnixTimeMilliseconds());
+            pending = candidate with { Sequence = sequence };
+        }
+        var visible = pending is { Sequence: > 0 } ? pending : null;
         return new EstateCollisionTelemetry(
             raw.Position,
             raw.Velocity,
             worldVelocity,
-            pending?.Sequence ?? sequence,
-            pending?.Magnitude ?? 0,
-            pending?.SpeedLoss ?? 0,
-            pending?.Position ?? raw.Position,
-            pending?.WorldVelocity ?? worldVelocity,
-            pending?.SmashableVelDiff ?? Math.Max(0, raw.SmashableVelDiff),
-            pending?.SmashableMass ?? Math.Max(0, raw.SmashableMass),
-            pending is null
+            visible?.Sequence ?? sequence,
+            visible?.Magnitude ?? 0,
+            visible?.SpeedLoss ?? 0,
+            visible?.Position ?? raw.Position,
+            visible?.WorldVelocity ?? worldVelocity,
+            visible?.SmashableVelDiff ?? Math.Max(0, raw.SmashableVelDiff),
+            visible?.SmashableMass ?? Math.Max(0, raw.SmashableMass),
+            visible is null
                 ? 0
-                : Math.Clamp((int)Math.Round((now - pending.DetectedAt).TotalMilliseconds), 0, 2_000));
+                : Math.Clamp((int)Math.Round((now - visible.DetectedAt).TotalMilliseconds), 0, 2_000));
     }
 
     private MotionSample? FindBaseline(MotionSample current)
     {
+        MotionSample? nearest = null;
+        var nearestDifference = int.MaxValue;
         foreach (var sample in samples)
         {
             var elapsed = unchecked(current.Timestamp - sample.Timestamp);
-            if (elapsed is >= MinimumWindowMilliseconds and <= MaximumWindowMilliseconds)
-                return sample;
+            if (elapsed is < MinimumImpactWindowMilliseconds or > MaximumImpactWindowMilliseconds)
+                continue;
+            var difference = Math.Abs((int)elapsed - TargetImpactWindowMilliseconds);
+            if (difference >= nearestDifference) continue;
+            nearest = sample;
+            nearestDifference = difference;
         }
-        return null;
+        return nearest;
     }
 
     private void PruneSamples(MotionSample current)
@@ -138,7 +161,7 @@ internal sealed class EstateCollisionEvidenceDetector
         var removeCount = 0;
         foreach (var sample in samples)
         {
-            if (unchecked(current.Timestamp - sample.Timestamp) <= MaximumWindowMilliseconds) break;
+            if (unchecked(current.Timestamp - sample.Timestamp) <= SmashableEvidenceWindowMilliseconds) break;
             removeCount++;
         }
         if (removeCount > 0) samples.RemoveRange(0, removeCount);
@@ -147,6 +170,18 @@ internal sealed class EstateCollisionEvidenceDetector
 
     private bool HasRecentSmashableEvidence() => samples.Any(sample =>
         sample.SmashableVelDiff >= .2 || sample.SmashableMass >= .5);
+
+    private double PeakHorizontalAcceleration(MotionSample prior, MotionSample current)
+    {
+        var window = unchecked(current.Timestamp - prior.Timestamp);
+        var maximum = 0d;
+        foreach (var sample in samples)
+        {
+            if (unchecked(current.Timestamp - sample.Timestamp) > window) continue;
+            maximum = Math.Max(maximum, sample.HorizontalAcceleration);
+        }
+        return maximum;
+    }
 
     private void Expire(DateTimeOffset now)
     {
@@ -167,18 +202,6 @@ internal sealed class EstateCollisionEvidenceDetector
     private static double HorizontalLength(Vector3F value) =>
         Math.Sqrt(value.X * value.X + value.Z * value.Z);
 
-    private static double DirectionChangeDegrees(Vector3F left, Vector3F right)
-    {
-        var leftLength = HorizontalLength(left);
-        var rightLength = HorizontalLength(right);
-        if (leftLength < .5 || rightLength < .5) return 0;
-        var cosine = Math.Clamp(
-            (left.X * right.X + left.Z * right.Z) / (leftLength * rightLength),
-            -1,
-            1);
-        return Math.Acos(cosine) * 180 / Math.PI;
-    }
-
     private static bool Finite(Vector3F value) =>
         float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
 
@@ -186,6 +209,7 @@ internal sealed class EstateCollisionEvidenceDetector
         uint Timestamp,
         Vector3F Position,
         Vector3F WorldVelocity,
+        double HorizontalAcceleration,
         double SmashableVelDiff,
         double SmashableMass);
 
