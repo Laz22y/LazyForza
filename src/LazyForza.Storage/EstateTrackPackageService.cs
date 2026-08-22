@@ -369,11 +369,17 @@ public sealed class EstateTrackPackageService
         {
             ValidateGate(pit.EntryGate, "维修区入口");
             ValidateGate(pit.ExitGate, "维修区出口");
+            if (pit.StartFinishGate is { } pitStartFinishGate)
+                ValidateGate(pitStartFinishGate, "维修区起终点门");
             if (pit.CenterLine.Count < 2 ||
                 pit.CenterLine.Any(point => !IsFinite(point.X, point.Y, point.Z)) ||
+                EstatePitGeometryValidation.MaximumSegmentMeters(pit.CenterLine) >
+                EstatePitGeometryValidation.MaximumPortableSegmentMeters ||
                 !IsFinite(pit.ServiceCenter.X, pit.ServiceCenter.Y, pit.ServiceCenter.Z,
-                    pit.ServiceRadiusMeters, pit.SpeedLimitKph, pit.MinimumServiceSeconds) ||
-                pit.ServiceRadiusMeters <= 0 || pit.SpeedLimitKph <= 0 || pit.MinimumServiceSeconds < 0)
+                    pit.ServiceRadiusMeters, pit.SpeedLimitKph, pit.MinimumServiceSeconds,
+                    pit.LaneHalfWidthMeters) ||
+                pit.ServiceRadiusMeters <= 0 || pit.SpeedLimitKph <= 0 || pit.MinimumServiceSeconds < 0 ||
+                pit.LaneHalfWidthMeters is < 1 or > 20)
                 throw new InvalidDataException("地产环道维修区定义无效。");
         }
     }

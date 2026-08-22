@@ -873,6 +873,71 @@ public sealed class EstateCircuitModuleTests
     }
 
     [TestMethod]
+    public async Task PitLaneEnrollmentRejectsAHiddenTelemetryGapInsteadOfBridgingIt()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-pit-gap-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var route = Enumerable.Range(0, 121)
+                .Select(index =>
+                {
+                    var angle = index * Math.PI * 2 / 120;
+                    return new TrackPoint(80 * Math.Cos(angle), 2, 80 * Math.Sin(angle), 0, 0, 0);
+                })
+                .ToArray();
+            var track = TrackAlgorithms.BuildTemplate("维修区断点测试", route) with
+            {
+                Source = TelemetryDataPartition.TrackSource(TelemetrySourceKind.Live),
+                TimingKind = TrackTimingKind.EstateGeometry,
+                Category = "地产环道",
+                CaptureLapCount = 2
+            };
+            var definition = new EstateTrackDefinition(
+                track.Id, track.Name, "test", "pit-gap", "1",
+                new EstateTimingGate(
+                    new EstateGatePoint(-8, 2, 0), new EstateGatePoint(8, 2, 0),
+                    0, 1, 0, 0, 0),
+                EstateTrackAlgorithms.CreateCheckpoints(track, 4),
+                null, 60, 60, 1, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+            store.SaveTrack(track, TrackAlgorithms.CreateSectors(track), definition);
+
+            var feed = new TestFeed();
+            var module = new EstateCircuitModule(store, TelemetrySourceKind.Live);
+            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.StartAsync(CancellationToken.None);
+            try
+            {
+                module.BeginPitEnrollment(new EstatePitEnrollmentRequest(track.Id, 4, 80, 3));
+                module.StartPitLaneCapture();
+                for (var index = 0; index < 12; index++)
+                    PublishPosition(feed, (uint)(10_000 + index * 100), 20, 2, index * .5, 5);
+                for (var index = 0; index < 12; index++)
+                    PublishPosition(feed, (uint)(12_000 + index * 100), 20, 2, 60 + index * .5, 5);
+                await WaitUntilAsync(
+                    () => module.PitState.LaneSamples >= 20,
+                    TimeSpan.FromSeconds(2),
+                    () => module.PitState.ToString());
+
+                var exception = Assert.ThrowsExactly<InvalidOperationException>(module.StopPitLaneCapture);
+                StringAssert.Contains(exception.Message, "采样断点");
+                Assert.AreEqual(EstatePitCapturePhase.Idle, module.PitState.Phase);
+                Assert.AreEqual(0, module.PitState.LaneSamples,
+                    "不连续轨迹不能被静默插值并保存为维修区通道。");
+            }
+            finally
+            {
+                await module.DisposeAsync();
+                await feed.DisposeAsync();
+            }
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
     public void PitSettingsEditPreservesEveryGeometryComponent()
     {
         var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-pit-settings-{Guid.NewGuid():N}.db");
