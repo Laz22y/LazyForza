@@ -98,13 +98,8 @@ internal sealed class SingleInstanceCoordinator : IDisposable
             ownsMutex = false;
         }
         mutex.Dispose();
-        try
-        {
-            activationServer.GetAwaiter().GetResult();
-        }
-        catch (OperationCanceledException)
-        {
-        }
+        if (activationServer.IsFaulted)
+            _ = activationServer.Exception;
         activationCancellation.Dispose();
         GC.SuppressFinalize(this);
     }
@@ -126,6 +121,9 @@ internal sealed class SingleInstanceCoordinator : IDisposable
                     maxNumberOfServerInstances: 1,
                     PipeTransmissionMode.Byte,
                     PipeOptions.Asynchronous);
+                using var cancellationRegistration = cancellationToken.Register(
+                    static state => ((NamedPipeServerStream)state!).Dispose(),
+                    pipe);
                 await pipe.WaitForConnectionAsync(cancellationToken);
                 using var reader = new StreamReader(
                     pipe,
@@ -141,6 +139,14 @@ internal sealed class SingleInstanceCoordinator : IDisposable
                 }));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (IOException) when (cancellationToken.IsCancellationRequested)
             {
                 break;
             }

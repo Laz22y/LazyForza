@@ -220,6 +220,7 @@ internal sealed partial class MainWindow : Window
     internal async Task CaptureEstateRacePageQaAsync(string directory)
     {
         Directory.CreateDirectory(directory);
+        var englishHanAudit = new SortedSet<string>(StringComparer.Ordinal);
         EnsureEstateQaTrack();
         WindowState = WindowState.Normal;
         Width = 1440;
@@ -276,6 +277,34 @@ internal sealed partial class MainWindow : Window
             dataScroll.ScrollToEnd();
         await Task.Delay(200);
         CaptureVisual(this, Path.Combine(directory, "settings-data-1440x900.png"));
+
+        for (var pageIndex = 0; pageIndex < PrimaryPages.Length; pageIndex++)
+        {
+            navigation.SelectedIndex = pageIndex;
+            UpdateLayout();
+            if (content.Content is ScrollViewer pageScroll)
+                pageScroll.ScrollToHome();
+            await Task.Delay(180);
+            CaptureVisual(this, Path.Combine(directory, $"main-page-{pageIndex + 1}-1440x900.png"));
+            CollectHanText(this, $"page {pageIndex + 1}", englishHanAudit);
+        }
+        File.WriteAllLines(Path.Combine(directory, "english-han-audit.txt"), englishHanAudit);
+    }
+
+    private static void CollectHanText(DependencyObject node, string scope, ISet<string> output)
+    {
+        static bool ContainsHan(string value) => value.Any(character => character is >= '\u3400' and <= '\u9fff');
+
+        if (node is TextBlock { Text: { Length: > 0 } text } && ContainsHan(text))
+            output.Add($"[{scope}] {text.Replace('\r', ' ').Replace('\n', ' ')}");
+        if (node is ContentControl { Content: string content } && ContainsHan(content))
+            output.Add($"[{scope}] {content.Replace('\r', ' ').Replace('\n', ' ')}");
+        if (node is HeaderedContentControl { Header: string header } && ContainsHan(header))
+            output.Add($"[{scope}] {header.Replace('\r', ' ').Replace('\n', ' ')}");
+        if (node is FrameworkElement { ToolTip: string toolTip } && ContainsHan(toolTip))
+            output.Add($"[{scope}] {toolTip.Replace('\r', ' ').Replace('\n', ' ')}");
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(node); index++)
+            CollectHanText(VisualTreeHelper.GetChild(node, index), scope, output);
     }
 
     private void EnsureEstateQaTrack()
@@ -514,7 +543,7 @@ internal sealed partial class MainWindow : Window
         var summary = new UniformGrid { Columns = 4, Margin = new Thickness(0, 12, 0, 14) };
         summary.Children.Add(MetricCard("赛道", Label(module.CurrentTrack?.Name ?? hud.TrackName, 18, FontWeights.SemiBold), Label("当前识别", 11, FontWeights.Normal, "MutedBrush")));
         summary.Children.Add(MetricCard("性能等级 / PI", Label(competitionClass is int value ? $"{PerformanceClassName(value)}  {competitionPi?.ToString() ?? "—"}" : "—", 22, FontWeights.SemiBold), Label("按性能等级分别比较", 11, FontWeights.Normal, "MutedBrush")));
-        summary.Children.Add(MetricCard(showingRecent ? "上场最快" : "本场最快", Label(AnalysisTime(sessionBest, pointToPointTimingApproximate), 22, FontWeights.SemiBold, "SuccessBrush"), Label($"已完成 {sessionLaps.Count} 圈", 11, FontWeights.Normal, "MutedBrush")));
+        summary.Children.Add(MetricCard(showingRecent ? "上场最快" : "本场最快", Label(AnalysisTime(sessionBest, pointToPointTimingApproximate), 22, FontWeights.SemiBold, "SuccessBrush"), Label(AppLocalization.Format("competition.completedLaps", "已完成 {0} 圈", sessionLaps.Count), 11, FontWeights.Normal, "MutedBrush")));
         summary.Children.Add(MetricCard("同等级历史最快", Label(AnalysisTime(historicalBest, pointToPointTimingApproximate), 22, FontWeights.SemiBold, "PurpleBrush"), Label("本机保存记录", 11, FontWeights.Normal, "MutedBrush")));
         stack.Children.Add(summary);
 
@@ -1825,7 +1854,7 @@ internal sealed partial class MainWindow : Window
             CornerRadius = new CornerRadius(12),
             Padding = new Thickness(10, 4, 10, 4),
             VerticalAlignment = VerticalAlignment.Top,
-            Child = Label($"{tracks.Count} 条", 12, FontWeights.SemiBold, "AccentBrush")
+            Child = Label(AppLocalization.Format("tracks.count", "{0} 条", tracks.Count), 12, FontWeights.SemiBold, "AccentBrush")
         };
         Grid.SetColumn(count, 1);
         header.Children.Add(count);
@@ -1849,7 +1878,11 @@ internal sealed partial class MainWindow : Window
                 Background = new SolidColorBrush(TrackMapPreview.CategoryColor(category.Key)),
                 Margin = new Thickness(0, 1, 9, 0)
             });
-            categoryHeader.Children.Add(Label($"{category.Key}  ·  {category.Count()} 条", 15, FontWeights.SemiBold));
+            categoryHeader.Children.Add(Label(AppLocalization.Format(
+                "tracks.categoryCount",
+                "{0}  ·  {1} 条",
+                AppLocalization.Literal(category.Key),
+                category.Count()), 15, FontWeights.SemiBold));
             content.Children.Add(categoryHeader);
 
             var grid = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center };
@@ -1887,7 +1920,7 @@ internal sealed partial class MainWindow : Window
             Margin = new Thickness(10),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Child = Label(summary.LayoutKind == TrackLayoutKind.PointToPoint ? "定点" : "环道", 10, FontWeights.SemiBold)
+            Child = Label(AppLocalization.Literal(summary.LayoutKind == TrackLayoutKind.PointToPoint ? "定点" : "环道"), 10, FontWeights.SemiBold)
         };
         preview.Children.Add(layoutBadge);
         ApplyTopRoundedClip(preview, 9);
@@ -1903,7 +1936,7 @@ internal sealed partial class MainWindow : Window
         name.TextWrapping = TextWrapping.NoWrap;
         details.Children.Add(name);
         details.Children.Add(Label(
-            $"{summary.Length / 1000:0.00} km  ·  {summary.Laps} 圈",
+            AppLocalization.Format("tracks.lengthLaps", "{0:0.00} km  ·  {1} 圈", summary.Length / 1000, summary.Laps),
             11,
             FontWeights.Normal,
             "MutedBrush"));
@@ -2229,7 +2262,7 @@ internal sealed partial class MainWindow : Window
                 profilesPanel.Children.Add(new Expander
                 {
                     Header = VehicleProfileGroupHeader(
-                        VehicleNameCatalog.DisplayName(vehicleGroup.Key),
+                        VehicleDisplayName(vehicleGroup.Key),
                         vehicleGroup.Key,
                         orderedTunes,
                         activeProfileId),
@@ -2246,15 +2279,39 @@ internal sealed partial class MainWindow : Window
             var recommendationsEnabled =
                 (module.Snapshot as DashboardHudState)?.ShiftRecommendationsEnabled ?? true;
             var eta = learning.State == LearningState.Ready
-                ? "已就绪"
+                ? AppLocalization.Literal("已就绪")
                 : learning.EstimatedSecondsRemaining is double seconds
-                    ? $"约 {Math.Ceiling(seconds):0} 秒"
-                    : "等待有效加速";
-            summaryLabel.Text = $"{LearningStateText(learning.State)} · 完成度 {learning.Progress:P0} · 置信度 {learning.Confidence:P0}\n有效样本 {learning.AcceptedSamples} · 转速区间 {learning.ReadyBins}/{learning.RequiredBins} · 挡位 {learning.ReadyGears}\n预计：{eta} · 推荐挡位{(recommendationsEnabled ? "已启用" : "已关闭")}\n{learning.StatusMessage}";
-            guidanceLabel.Text = $"学习方法\n{learning.Guidance}";
+                    ? AppLocalization.Format("shift.etaSeconds", "约 {0:0} 秒", Math.Ceiling(seconds))
+                    : AppLocalization.Literal("等待有效加速");
+            summaryLabel.Text = AppLocalization.Format(
+                "shift.learningSummary",
+                "{0} · 完成度 {1:P0} · 置信度 {2:P0}\n有效样本 {3} · 转速区间 {4}/{5} · 挡位 {6}\n预计：{7} · 推荐挡位{8}\n{9}",
+                LearningStateText(learning.State),
+                learning.Progress,
+                learning.Confidence,
+                learning.AcceptedSamples,
+                learning.ReadyBins,
+                learning.RequiredBins,
+                learning.ReadyGears,
+                eta,
+                AppLocalization.Literal(recommendationsEnabled ? "已启用" : "已关闭"),
+                AppLocalization.Literal(learning.StatusMessage));
+            guidanceLabel.Text = AppLocalization.Format(
+                "shift.guidance",
+                "学习方法\n{0}",
+                AppLocalization.Literal(learning.Guidance));
             fingerprintLabel.Text = learning.Fingerprint is { } fingerprint
-                ? $"当前配置：{VehicleNameCatalog.DisplayName(fingerprint.CarOrdinal)} · {PerformanceClassName(fingerprint.CarClass)} {fingerprint.PerformanceIndex} · 车型编号 {fingerprint.CarOrdinal} · {DrivetrainText(fingerprint.DrivetrainType)} · {fingerprint.NumCylinders} 缸 · 最高 {fingerprint.RoundedMaxRpm:N0} RPM"
-                : "等待车辆数据。";
+                ? AppLocalization.Format(
+                    "shift.currentConfiguration",
+                    "当前配置：{0} · {1} {2} · 车型编号 {3} · {4} · {5} 缸 · 最高 {6:N0} RPM",
+                    VehicleDisplayName(fingerprint.CarOrdinal),
+                    PerformanceClassName(fingerprint.CarClass),
+                    fingerprint.PerformanceIndex,
+                    fingerprint.CarOrdinal,
+                    DrivetrainText(fingerprint.DrivetrainType),
+                    fingerprint.NumCylinders,
+                    fingerprint.RoundedMaxRpm)
+                : AppLocalization.Literal("等待车辆数据。");
             var nextSignature = string.Join("|", learning.Targets.Select(target => $"{target.FromGear}:{target.ToGear}:{target.TargetRpm:0}:{target.CueRpm:0}:{target.Confidence:0.000}"));
             if (!string.Equals(targetSignature, nextSignature, StringComparison.Ordinal))
             {
@@ -2263,12 +2320,24 @@ internal sealed partial class MainWindow : Window
                 targets.Children.Add(Label("各挡目标", 16, FontWeights.SemiBold));
                 foreach (var target in learning.Targets)
                 {
-                    targets.Children.Add(Label($"{target.FromGear} → {target.ToGear}    目标 {target.TargetRpm:0} RPM    提示 {target.CueRpm:0} RPM    换挡后 {target.AfterShiftRpm:0} RPM    置信度 {target.Confidence:P0}" + (target.UsedLimiterFallback ? " · 转速限制推算" : string.Empty), 13));
+                    targets.Children.Add(Label(AppLocalization.Format(
+                        "shift.target",
+                        "{0} → {1}    目标 {2:0} RPM    提示 {3:0} RPM    换挡后 {4:0} RPM    置信度 {5:P0}{6}",
+                        target.FromGear,
+                        target.ToGear,
+                        target.TargetRpm,
+                        target.CueRpm,
+                        target.AfterShiftRpm,
+                        target.Confidence,
+                        target.UsedLimiterFallback ? AppLocalization.Literal(" · 转速限制推算") : string.Empty), 13));
                 }
                 if (learning.Targets.Count == 0) targets.Children.Add(Label("数据不足：不会伪造最佳换挡点。", 13, FontWeights.Normal, "MutedBrush"));
             }
             var rejected = string.Join(" · ", learning.RejectedSamples.OrderByDescending(item => item.Value).Take(8).Select(item => $"{item.Key} {item.Value}"));
-            rejectedLabel.Text = "未计入：" + (string.IsNullOrEmpty(rejected) ? "暂无" : rejected);
+            rejectedLabel.Text = AppLocalization.Format(
+                "shift.rejected",
+                "未计入：{0}",
+                string.IsNullOrEmpty(rejected) ? AppLocalization.Literal("暂无") : rejected);
             RefreshProfiles();
         };
         RefreshProfiles(true);
@@ -2472,13 +2541,21 @@ internal sealed partial class MainWindow : Window
         };
     }
 
-    private static string DrivetrainText(int drivetrain) => drivetrain switch
+    private static string DrivetrainText(int drivetrain) => AppLocalization.Literal(drivetrain switch
     {
         0 => "前驱",
         1 => "后驱",
         2 => "四驱",
         _ => "驱动未知"
-    };
+    });
+
+    private static string VehicleDisplayName(int carOrdinal)
+    {
+        var displayName = VehicleNameCatalog.DisplayName(carOrdinal);
+        return string.Equals(displayName, $"车辆 {carOrdinal}", StringComparison.Ordinal)
+            ? AppLocalization.Format("vehicle.unknown", "车辆 {0}", carOrdinal)
+            : displayName;
+    }
 
     private async Task OfferUpdateAsync(UpdateReleaseInfo release, TextBlock? status = null)
     {
@@ -2571,11 +2648,14 @@ internal sealed partial class MainWindow : Window
         protectionSummary.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.4, GridUnitType.Star) });
         protectionSummary.Children.Add(DataSummaryItem(
             "现有备份",
-            $"{automaticBackups} 份",
+            AppLocalization.Format("settings.backup.count", "{0} 份", automaticBackups),
             "SuccessBrush"));
         var retention = DataSummaryItem(
             "轮换上限",
-            $"{DataBackupService.AutomaticBackupRetention} 份");
+            AppLocalization.Format(
+                "settings.backup.count",
+                "{0} 份",
+                DataBackupService.AutomaticBackupRetention));
         Grid.SetColumn(retention, 1);
         protectionSummary.Children.Add(retention);
         var location = DataSummaryItem("保存位置", directories.BackupsPath);
@@ -2952,11 +3032,11 @@ internal sealed partial class MainWindow : Window
             current.DashboardWidgets);
         var currentEstateRaceWidgets = EstateRaceHudLayoutSettings.Normalize(
             current.EstateRaceWidgets);
-        var visibleDashboardWidgetCount = Enum
-            .GetValues<DashboardWidgetKind>()
+        var dashboardWidgetKinds = Enum.GetValues<DashboardWidgetKind>();
+        var estateRaceWidgetKinds = Enum.GetValues<EstateRaceHudWidgetKind>();
+        var visibleDashboardWidgetCount = dashboardWidgetKinds
             .Count(kind => currentDashboardWidgets.Get(kind).IsVisible);
-        var visibleEstateRaceWidgetCount = Enum
-            .GetValues<EstateRaceHudWidgetKind>()
+        var visibleEstateRaceWidgetCount = estateRaceWidgetKinds
             .Count(kind => currentEstateRaceWidgets.Get(kind).IsVisible);
         var controls = new StackPanel();
 
@@ -2966,13 +3046,22 @@ internal sealed partial class MainWindow : Window
         var headerText = new StackPanel();
         headerText.Children.Add(Label("Overlay 设置", 17, FontWeights.SemiBold));
         var overlaySummary = Label(
-            $"仪表盘 {currentDashboardBounds.Width:0} × {currentDashboardBounds.Height:0} · " +
-            $"圈速 {currentLapBounds.Width:0} × {currentLapBounds.Height:0} · " +
-            $"漂移 {currentDriftBounds.Width:0} × {currentDriftBounds.Height:0} · " +
-            $"仪表盘部件 {visibleDashboardWidgetCount}/7 · " +
-            $"赛事部件 {visibleEstateRaceWidgetCount}/4 · " +
-            $"{(current.LapHudAttachedToDashboard ? "已吸附" : "独立布局")} · " +
-            $"不透明度 {current.Opacity:P0} · {current.MonitorId}",
+            AppLocalization.Format(
+                "settings.overlay.summary",
+                "仪表盘 {0:0} × {1:0} · 圈速 {2:0} × {3:0} · 漂移 {4:0} × {5:0} · 仪表盘部件 {6}/{7} · 赛事部件 {8}/{9} · {10} · 不透明度 {11:P0} · {12}",
+                currentDashboardBounds.Width,
+                currentDashboardBounds.Height,
+                currentLapBounds.Width,
+                currentLapBounds.Height,
+                currentDriftBounds.Width,
+                currentDriftBounds.Height,
+                visibleDashboardWidgetCount,
+                dashboardWidgetKinds.Length,
+                visibleEstateRaceWidgetCount,
+                estateRaceWidgetKinds.Length,
+                AppLocalization.Literal(current.LapHudAttachedToDashboard ? "已吸附" : "独立布局"),
+                current.Opacity,
+                current.MonitorId),
             11, FontWeights.Normal, "MutedBrush");
         overlaySummary.Margin = new Thickness(0, 3, 0, 0);
         headerText.Children.Add(overlaySummary);
@@ -3063,7 +3152,7 @@ internal sealed partial class MainWindow : Window
             appearance, "不透明度", "HUD 内容的最高可见度", current.Opacity,
             0.25, 1, 0.05, value => value.ToString("P0"));
         var monitor = Label(
-            $"当前显示器：{current.MonitorId}",
+            AppLocalization.Format("settings.overlay.monitor", "当前显示器：{0}", current.MonitorId),
             10,
             FontWeights.Normal,
             "MutedBrush");
@@ -3305,8 +3394,10 @@ internal sealed partial class MainWindow : Window
             Padding = new Thickness(12, 7, 12, 7),
             ToolTip = "诊断页用于排查 UDP、赛道识别、模块与本地文件问题；日常使用可以保持隐藏。"
         };
-        void RefreshDiagnosticsNavigationText() => diagnosticsNavigation.Content =
-            $"在侧边栏显示诊断：{(diagnosticsNavigation.IsChecked == true ? "开" : "关")}";
+        void RefreshDiagnosticsNavigationText() => diagnosticsNavigation.Content = AppLocalization.Format(
+            "settings.diagnostics.navigation",
+            "在侧边栏显示诊断：{0}",
+            AppLocalization.Literal(diagnosticsNavigation.IsChecked == true ? "开" : "关"));
         diagnosticsNavigation.Click += (_, _) =>
         {
             showDiagnosticsNavigation = diagnosticsNavigation.IsChecked == true;
@@ -3386,7 +3477,7 @@ internal sealed partial class MainWindow : Window
             var item = new StackPanel { Margin = new Thickness(6, 3, 14, 12) };
             var slider = AddValueSlider(
                 item, title, "", value, minimum, maximum, tick,
-                currentValue => $"{currentValue:0.0} 秒");
+                currentValue => AppLocalization.Format("settings.seconds", "{0:0.0} 秒", currentValue));
             parent.Children.Add(item);
             return slider;
         }

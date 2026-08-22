@@ -61,7 +61,9 @@ public partial class App : Application
                 captureWindow.Show();
                 await captureWindow.CaptureQaAsync(initializationCaptureDirectory);
                 captureWindow.Close();
-                ExitApplication();
+                _ = Dispatcher.BeginInvoke(
+                    new Action(() => ExitApplication()),
+                    System.Windows.Threading.DispatcherPriority.Send);
                 return;
             }
             InitializationResult? initialization = null;
@@ -71,7 +73,9 @@ public partial class App : Application
                 MainWindow = initializationWindow;
                 if (initializationWindow.ShowDialog() != true || initializationWindow.Result is null)
                 {
-                    ExitApplication();
+                    _ = Dispatcher.BeginInvoke(
+                        new Action(() => ExitApplication()),
+                        System.Windows.Threading.DispatcherPriority.Send);
                     return;
                 }
 

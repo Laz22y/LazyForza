@@ -48,7 +48,9 @@ internal static class AppLocalization
         translations = LoadTranslations(option.Code);
         OverlayTextLocalization.Configure(Literal);
         var culture = option.Code == "en" ? CultureInfo.GetCultureInfo("en-US") : CultureInfo.GetCultureInfo("zh-CN");
+        CultureInfo.CurrentCulture = culture;
         CultureInfo.CurrentUICulture = culture;
+        CultureInfo.DefaultThreadCurrentCulture = culture;
         CultureInfo.DefaultThreadCurrentUICulture = culture;
     }
 

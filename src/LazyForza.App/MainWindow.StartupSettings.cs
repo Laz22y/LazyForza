@@ -23,24 +23,20 @@ internal sealed partial class MainWindow
         description.Margin = new Thickness(0, 4, 0, 15);
         panel.Children.Add(description);
 
-        var form = new Grid();
-        form.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
-        form.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        form.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
         var language = new ComboBox
         {
             ItemsSource = AppLocalization.SupportedLanguages,
             DisplayMemberPath = nameof(AppLanguageOption.NativeName),
             SelectedItem = AppLocalization.SupportedLanguages.First(option =>
                 option.Code.Equals(profile.Language, StringComparison.OrdinalIgnoreCase)),
+            MinWidth = 280,
             MaxWidth = 340,
-            HorizontalAlignment = HorizontalAlignment.Stretch
+            HorizontalAlignment = HorizontalAlignment.Left
         };
-        AddRow(
+        panel.Children.Add(StartupSettingRow(
             AppLocalization.Text("settings.app.language", "界面语言"),
-            language,
-            0);
+            AppLocalization.Text("settings.app.languageDetail", "选择主界面与初始化指引使用的语言。"),
+            language));
 
         var storageChoices = new[]
         {
@@ -61,13 +57,9 @@ internal sealed partial class MainWindow
             DisplayMemberPath = nameof(DataDirectoryChoice.Name),
             SelectedItem = storageChoices.First(choice =>
                 choice.Path is not null && PathsEqual(choice.Path, profile.DataDirectory)) ?? storageChoices[^1],
-            MaxWidth = 520,
+            MinWidth = 300,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        AddRow(
-            AppLocalization.Text("settings.app.storage", "数据存储目录"),
-            storage,
-            1);
         var selectedDataDirectory = profile.DataDirectory;
         var chooseFolder = new Button
         {
@@ -75,30 +67,26 @@ internal sealed partial class MainWindow
             Padding = new Thickness(14, 8, 14, 8),
             Margin = new Thickness(10, 0, 0, 0)
         };
-        Grid.SetRow(chooseFolder, 1);
-        Grid.SetColumn(chooseFolder, 2);
-        form.Children.Add(chooseFolder);
-        var storagePath = Label(profile.DataDirectory, 10, FontWeights.Normal, "MutedBrush");
-        storagePath.Margin = new Thickness(0, 5, 0, 12);
+        var storagePicker = new Grid();
+        storagePicker.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        storagePicker.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        storagePicker.Children.Add(storage);
+        Grid.SetColumn(chooseFolder, 1);
+        storagePicker.Children.Add(chooseFolder);
+        var storagePath = Label(string.Empty, 10, FontWeights.Normal, "MutedBrush");
+        storagePath.Margin = new Thickness(2, 7, 0, 0);
         storagePath.TextTrimming = TextTrimming.CharacterEllipsis;
         storagePath.TextWrapping = TextWrapping.NoWrap;
-        Grid.SetRow(storagePath, 2);
-        Grid.SetColumn(storagePath, 1);
-        Grid.SetColumnSpan(storagePath, 2);
-        form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        form.Children.Add(storagePath);
+        var storageControl = new StackPanel();
+        storageControl.Children.Add(storagePicker);
+        storageControl.Children.Add(storagePath);
+        UpdateStoragePath();
         storage.SelectionChanged += (_, _) =>
         {
             if (storage.SelectedItem is not DataDirectoryChoice choice) return;
             if (choice.Path is not null)
-            {
                 selectedDataDirectory = choice.Path;
-                storagePath.Text = choice.Path;
-            }
-            else
-            {
-                storagePath.Text = selectedDataDirectory;
-            }
+            UpdateStoragePath();
         };
         chooseFolder.Click += (_, _) =>
         {
@@ -119,8 +107,12 @@ internal sealed partial class MainWindow
             storage.ItemsSource = storageChoices;
             storage.DisplayMemberPath = nameof(DataDirectoryChoice.Name);
             storage.SelectedItem = storageChoices[^1];
-            storagePath.Text = selectedDataDirectory;
+            UpdateStoragePath();
         };
+        panel.Children.Add(StartupSettingRow(
+            AppLocalization.Text("settings.app.storage", "数据存储目录"),
+            AppLocalization.Text("settings.app.storageDetail", "圈速、录制、赛道、设置与缓存统一保存在此。"),
+            storageControl));
 
         var closeChoices = new[]
         {
@@ -136,29 +128,32 @@ internal sealed partial class MainWindow
             ItemsSource = closeChoices,
             DisplayMemberPath = nameof(CloseBehaviorChoice.Name),
             SelectedItem = closeChoices.First(choice => choice.Value == profile.CloseBehavior),
+            MinWidth = 280,
             MaxWidth = 340,
-            HorizontalAlignment = HorizontalAlignment.Stretch
+            HorizontalAlignment = HorizontalAlignment.Left
         };
-        AddRow(
+        panel.Children.Add(StartupSettingRow(
             AppLocalization.Text("settings.app.close", "点击关闭窗口时"),
-            closeBehavior,
-            3);
-        panel.Children.Add(form);
+            AppLocalization.Text("settings.app.closeDetail", "决定主窗口右上角关闭按钮的行为。"),
+            closeBehavior));
 
+        var footer = new Grid { Margin = new Thickness(2, 3, 0, 0) };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var note = Label(
-            AppLocalization.Format(
-                "settings.app.currentData",
-                "当前正在使用：{0}\n更换语言或数据目录后需重启；切换目录不会自动搬移现有数据。",
-                directories.Root),
+            AppLocalization.Text(
+                "settings.app.restartNote",
+                "语言和数据目录在重启后生效；切换目录不会搬移现有数据。"),
             10,
             FontWeights.Normal,
             "MutedBrush");
-        note.Margin = new Thickness(0, 8, 0, 10);
-        panel.Children.Add(note);
+        note.VerticalAlignment = VerticalAlignment.Center;
+        note.Margin = new Thickness(0, 0, 18, 0);
+        footer.Children.Add(note);
         var save = new Button
         {
             Content = AppLocalization.Text("settings.app.save", "保存启动设置"),
-            HorizontalAlignment = HorizontalAlignment.Left,
+            HorizontalAlignment = HorizontalAlignment.Right,
             Padding = new Thickness(16, 8, 16, 8)
         };
         save.Click += (_, _) =>
@@ -185,23 +180,44 @@ internal sealed partial class MainWindow
                     MessageBoxImage.Information);
             profile = updatedProfile;
         };
-        panel.Children.Add(save);
+        Grid.SetColumn(save, 1);
+        footer.Children.Add(save);
+        panel.Children.Add(footer);
         return Card(panel);
 
-        void AddRow(string label, Control control, int row)
+        void UpdateStoragePath()
         {
-            while (form.RowDefinitions.Count <= row)
-                form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var caption = Label(label, 12, FontWeights.SemiBold, "MutedBrush");
-            caption.VerticalAlignment = VerticalAlignment.Center;
-            caption.Margin = new Thickness(0, 0, 12, 12);
-            Grid.SetRow(caption, row);
-            form.Children.Add(caption);
-            control.Margin = new Thickness(0, 0, 0, 12);
-            Grid.SetRow(control, row);
-            Grid.SetColumn(control, 1);
-            form.Children.Add(control);
+            storagePath.Text = AppLocalization.Format(
+                "settings.app.selectedData",
+                "已选择：{0}",
+                selectedDataDirectory);
         }
+    }
+
+    private static Border StartupSettingRow(string title, string detail, FrameworkElement control)
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var copy = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        copy.Children.Add(Label(title, 12, FontWeights.SemiBold));
+        var detailLabel = Label(detail, 10, FontWeights.Normal, "MutedBrush");
+        detailLabel.Margin = new Thickness(0, 4, 18, 0);
+        copy.Children.Add(detailLabel);
+        row.Children.Add(copy);
+        control.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(control, 1);
+        row.Children.Add(control);
+        return new Border
+        {
+            Background = Brush("PanelBrush"),
+            BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(16, 13, 16, 13),
+            Margin = new Thickness(0, 0, 0, 10),
+            Child = row
+        };
     }
 
     private static bool IsKnownPath(string path) =>

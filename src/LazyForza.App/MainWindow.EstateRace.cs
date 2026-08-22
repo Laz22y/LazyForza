@@ -401,7 +401,7 @@ internal sealed partial class MainWindow
             onlineValue.Text = session is null ? "0 / 12" : $"{session.Participants.Count(item => item.IsConnected)} / 12";
             fastestValue.Text = Time(session?.FastestLapSeconds);
             var strategy = state.PitStrategy;
-            strategyTitle.Text = strategy?.Title ?? "暂不预测";
+            strategyTitle.Text = AppLocalization.Literal(strategy?.Title ?? "暂不预测");
             strategyTitle.Foreground = Brush(strategy?.Decision switch
             {
                 EstatePitStrategyDecision.PitThisLap or EstatePitStrategyDecision.PitWindow => "WarningBrush",
@@ -409,7 +409,7 @@ internal sealed partial class MainWindow
                 EstatePitStrategyDecision.InPit => "AccentBrush",
                 _ => "TextBrush"
             });
-            strategySummary.Text = strategy?.Summary ?? "尚未收到策略样本。";
+            strategySummary.Text = AppLocalization.Literal(strategy?.Summary ?? "尚未收到策略样本。");
             strategyConfidence.Text = PitStrategyConfidenceText(strategy?.Confidence);
             strategyConfidence.Foreground = Brush(strategy?.Confidence switch
             {
@@ -422,39 +422,56 @@ internal sealed partial class MainWindow
                 ? $"+{pitLoss:0.0}s"
                 : "—";
             strategyPitLossSource.Text = strategy?.EstimatedPitLossSeconds is null
-                ? "等待完整进站样本"
+                ? AppLocalization.Literal("等待完整进站样本")
                 : strategy.PitLossSource switch
                 {
-                    EstatePitLossSource.CurrentSession => $"本场实测 · {strategy.ObservedPitStopCount} 次",
-                    EstatePitLossSource.Historical => "同赛道历史有效进站",
-                    EstatePitLossSource.ConfiguredGeometry => "维修区几何与限速估算",
-                    _ => "等待完整进站样本"
+                    EstatePitLossSource.CurrentSession => AppLocalization.Format(
+                        "estate.strategy.sessionPitStops",
+                        "本场实测 · {0} 次",
+                        strategy.ObservedPitStopCount),
+                    EstatePitLossSource.Historical => AppLocalization.Literal("同赛道历史有效进站"),
+                    EstatePitLossSource.ConfiguredGeometry => AppLocalization.Literal("维修区几何与限速估算"),
+                    _ => AppLocalization.Literal("等待完整进站样本")
                 };
             strategyPace.Text = Time(strategy?.RepresentativeLapSeconds);
             strategyTrend.Text = strategy?.DegradationPerLapSeconds is double trend
                 ? $"{trend:+0.000;-0.000;±0.000}s"
                 : "—";
             strategyEvidence.Text = strategy is null
-                ? "尚无样本。"
-                : $"采用 {strategy.CleanLapCount} 个当前轮胎周期代表圈；排除 {strategy.ExcludedLapCount} 圈" +
-                  $"（其中边界 {strategy.BoundaryIncidentLapCount}、异常离群 {strategy.AnomalousLapCount}、进站 {strategy.PitAffectedLapCount}；分类可能重叠）。" +
+                ? AppLocalization.Literal("尚无样本。")
+                : AppLocalization.Format(
+                      "estate.strategy.evidence",
+                      "采用 {0} 个当前轮胎周期代表圈；排除 {1} 圈（其中边界 {2}、异常离群 {3}、进站 {4}；分类可能重叠）。",
+                      strategy.CleanLapCount,
+                      strategy.ExcludedLapCount,
+                      strategy.BoundaryIncidentLapCount,
+                      strategy.AnomalousLapCount,
+                      strategy.PitAffectedLapCount) +
                   (strategy.HistoricalSampleCount > 0
-                      ? $" 同赛道历史匹配 {strategy.HistoricalSampleCount} 条、长距离证据 {strategy.HistoricalEvidenceLapCount} 圈；{strategy.HistoricalMatchDescription}。"
-                      : " 尚未匹配到同赛道历史样本。") +
-                  (strategy.UsesHistoricalPace ? " 当前建议正在使用历史配速基线。" : string.Empty);
+                      ? AppLocalization.Format(
+                          "estate.strategy.historyEvidence",
+                          " 同赛道历史匹配 {0} 条、长距离证据 {1} 圈；{2}。",
+                          strategy.HistoricalSampleCount,
+                          strategy.HistoricalEvidenceLapCount,
+                          AppLocalization.Literal(strategy.HistoricalMatchDescription ?? string.Empty))
+                      : AppLocalization.Literal(" 尚未匹配到同赛道历史样本。")) +
+                  (strategy.UsesHistoricalPace ? AppLocalization.Literal(" 当前建议正在使用历史配速基线。") : string.Empty);
 
             var practiceState = state.PracticeTests;
             practiceCard.Visibility = !state.IsObserver && session?.Phase == RaceSessionPhase.Practice
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            practiceStorage.Text = $"同赛道历史样本 {practiceState?.StoredSampleCount ?? 0} 条 · 自动轮换";
+            practiceStorage.Text = AppLocalization.Format(
+                "estate.practice.storedSamples",
+                "同赛道历史样本 {0} 条 · 自动轮换",
+                practiceState?.StoredSampleCount ?? 0);
             foreach (var (kind, controls) in practiceControls)
             {
                 var item = practiceState?.Items.FirstOrDefault(candidate => candidate.Kind == kind);
                 if (item is null) continue;
-                controls.Title.Text = item.Title;
-                controls.Description.Text = item.Description;
-                controls.Guidance.Text = item.Guidance;
+                controls.Title.Text = AppLocalization.Literal(item.Title);
+                controls.Description.Text = AppLocalization.Literal(item.Description);
+                controls.Guidance.Text = AppLocalization.Literal(item.Guidance);
                 controls.Status.Text = PracticeTestStatusText(item.Status);
                 controls.Status.Foreground = Brush(item.Status switch
                 {
@@ -466,21 +483,21 @@ internal sealed partial class MainWindow
                 });
                 controls.Progress.Maximum = Math.Max(1, item.TargetSteps);
                 controls.Progress.Value = Math.Clamp(item.CompletedSteps, 0, Math.Max(1, item.TargetSteps));
-                controls.Action.Content = item.IsActive
+                controls.Action.Content = AppLocalization.Literal(item.IsActive
                     ? "结束项目"
                     : item.Status is EstatePracticeTestStatus.Completed or EstatePracticeTestStatus.Failed or EstatePracticeTestStatus.Cancelled
                         ? "再测一次"
-                        : "开始测试";
+                        : "开始测试");
                 controls.Action.IsEnabled = item.IsActive || practiceState?.ActiveKind is null;
             }
             participantRows.Children.Clear();
-            participantTitle.Text = session?.Phase switch
+            participantTitle.Text = AppLocalization.Literal(session?.Phase switch
                 {
                     RaceSessionPhase.Practice => "练习赛排名",
                     RaceSessionPhase.Qualifying or RaceSessionPhase.Grid => "排位赛排名",
                     RaceSessionPhase.Finished => "正赛最终成绩",
                     _ => "正赛排名"
-                };
+                });
             exportResult.Visibility = !state.IsObserver &&
                                       session?.Phase is (RaceSessionPhase.Grid or RaceSessionPhase.Finished)
                 ? Visibility.Visible

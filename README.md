@@ -30,9 +30,9 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 1. 从 [Releases](https://github.com/Laz22y/LazyForza/releases/latest) 下载 Windows 安装包，或下载 `win-x64.zip` 便携版并完整解压；
 2. 启动 LazyForza，按首次启动指引选择语言、玩家代号、数据目录和关闭方式；
-3. 在指引中按提示开启 FH6 Data Out。收到有效遥测后，主窗口自动打开。
+3. 在指引中按提示开启 FH6 Data Out。收到有效遥测后会自动进入主窗口，也可暂时跳过连接。
 
-安装版会创建开始菜单入口，并关联 `.lfztelemetry`、`.lfzlap` 和 `.lfzestate`；便携版不写入这些系统项。两种版本都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。需要通过命令行固定目录时可使用：
+安装版默认安装到 `C:\Program Files\LazyForza`，创建开始菜单入口；桌面快捷方式和 `.lfztelemetry`、`.lfzlap`、`.lfzestate` 文件关联可在安装时选择。便携版不写入这些系统项。两种版本都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。需要通过命令行固定目录时可使用：
 
 ```powershell
 LazyForza.App.exe --data-dir "D:\LazyForza_Data"

@@ -23,7 +23,10 @@ internal sealed partial class MainWindow
             Padding = new Thickness(12, 7, 12, 7)
         };
         void RefreshUpdateToggle() =>
-            updateToggle.Content = updateToggle.IsChecked == true ? "启动检查：开" : "启动检查：关";
+            updateToggle.Content = AppLocalization.Format(
+                "settings.update.checkOnStartup",
+                "启动检查：{0}",
+                AppLocalization.Literal(updateToggle.IsChecked == true ? "开" : "关"));
         RefreshUpdateToggle();
         updateToggle.Click += (_, _) =>
         {
@@ -45,7 +48,7 @@ internal sealed partial class MainWindow
         };
         sourceSelector.Items.Add(new ComboBoxItem
         {
-            Content = "GitCode（中国大陆优先）",
+            Content = AppLocalization.Text("settings.update.gitcode", "GitCode（中国大陆优先）"),
             Tag = UpdateSourceKind.GitCode
         });
         sourceSelector.Items.Add(new ComboBoxItem
@@ -64,11 +67,16 @@ internal sealed partial class MainWindow
         panel.Children.Add(sourceSelector);
 
         var updateStatus = Label(
-            $"当前版本 {CurrentApplicationVersion()} · " +
-            $"首选 {updateManager.PreferredSourceName}，失败时自动尝试 {updateManager.FallbackSourceName}。 " +
-            (updateManager.CanInstallAutomatically
-                ? "发现新版后由你确认，程序不会强制更新。"
-                : "开发构建仅检查版本，不覆盖开发目录。"),
+            AppLocalization.Format(
+                updateManager.CanInstallAutomatically
+                    ? "settings.update.statusInstall"
+                    : "settings.update.statusDevelopment",
+                updateManager.CanInstallAutomatically
+                    ? "当前版本 {0} · 首选 {1}，失败时自动尝试 {2}。发现新版后由你确认，程序不会强制更新。"
+                    : "当前版本 {0} · 首选 {1}，失败时自动尝试 {2}。开发构建仅检查版本，不覆盖开发目录。",
+                CurrentApplicationVersion(),
+                updateManager.PreferredSourceName,
+                updateManager.FallbackSourceName),
             12,
             FontWeights.Normal,
             "MutedBrush");
@@ -86,15 +94,21 @@ internal sealed partial class MainWindow
         checkNow.Click += async (_, _) =>
         {
             checkNow.IsEnabled = false;
-            updateStatus.Text =
-                $"正在连接 {updateManager.PreferredSourceName}，必要时使用 {updateManager.FallbackSourceName}…";
+            updateStatus.Text = AppLocalization.Format(
+                "settings.update.checking",
+                "正在连接 {0}，必要时使用 {1}…",
+                updateManager.PreferredSourceName,
+                updateManager.FallbackSourceName);
             try
             {
                 var release = await updateManager.CheckAsync(lifetimeCancellation.Token);
                 if (release is null)
                 {
-                    updateStatus.Text =
-                        $"已是最新版本 {CurrentApplicationVersion()} · 首选更新源 {updateManager.PreferredSourceName}。";
+                    updateStatus.Text = AppLocalization.Format(
+                        "settings.update.current",
+                        "已是最新版本 {0} · 首选更新源 {1}。",
+                        CurrentApplicationVersion(),
+                        updateManager.PreferredSourceName);
                 }
                 else
                 {
@@ -108,7 +122,10 @@ internal sealed partial class MainWindow
             catch (Exception exception)
             {
                 updateManager.ReportFailure("Manual update check failed", exception);
-                updateStatus.Text = $"检查失败：{exception.Message}";
+                updateStatus.Text = AppLocalization.Format(
+                    "settings.update.failed",
+                    "检查失败：{0}",
+                    exception.Message);
             }
             finally
             {

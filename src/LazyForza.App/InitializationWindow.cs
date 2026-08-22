@@ -28,15 +28,17 @@ internal sealed class InitializationWindow : Window
     private readonly string? fixedDataDirectory;
     private readonly ContentControl pageHost = new();
     private readonly StackPanel stepRail = new();
-    private readonly TextBlock sectionLabel = Text(string.Empty, 11, FontWeights.SemiBold, "AccentBrush");
     private readonly Button backButton = new();
     private readonly Button nextButton = new();
+    private readonly Button closeButton = new();
     private readonly DispatcherTimer welcomeTimer;
     private CancellationTokenSource? probeCancellation;
+    private Task? probeTask;
     private TextBlock? telemetryStatus;
     private TextBlock? telemetryDetail;
     private Border? telemetryStatusIcon;
     private Button? retryButton;
+    private TextBlock? welcomeTitle;
     private int step;
     private int welcomeFrame;
     private bool completing;
@@ -61,7 +63,7 @@ internal sealed class InitializationWindow : Window
 
         Title = "LazyForza Setup";
         Width = 1060;
-        Height = 700;
+        Height = 620;
         ResizeMode = ResizeMode.NoResize;
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
@@ -76,7 +78,7 @@ internal sealed class InitializationWindow : Window
         {
             if (step != 0) return;
             welcomeFrame++;
-            RenderPage();
+            RefreshWelcomeTitle();
         }, Dispatcher);
         welcomeTimer.Start();
         Closing += OnClosing;
@@ -101,7 +103,7 @@ internal sealed class InitializationWindow : Window
             if (index == 0)
             {
                 welcomeFrame = 1;
-                RenderPage();
+                RefreshWelcomeTitle();
                 await Task.Delay(260);
                 CapturePng(Path.Combine(directory, "initialization-1-en-welcome.png"));
             }
@@ -109,10 +111,14 @@ internal sealed class InitializationWindow : Window
 
         AppLocalization.UseLanguage("en");
         language = "en";
-        step = 1;
-        Render();
-        await Task.Delay(260);
-        CapturePng(Path.Combine(directory, "initialization-2-en.png"));
+        for (var index = 0; index <= FinalStep; index++)
+        {
+            step = index;
+            welcomeFrame = 1;
+            Render();
+            await Task.Delay(260);
+            CapturePng(Path.Combine(directory, $"initialization-{index + 1}-en.png"));
+        }
     }
 
     private UIElement BuildWindow()
@@ -143,37 +149,26 @@ internal sealed class InitializationWindow : Window
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var brand = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        brand.Children.Add(new Image
+        var brand = new Image
         {
-            Source = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForza.png", UriKind.Absolute)),
-            Width = 30,
-            Height = 30,
-            Stretch = Stretch.Uniform
-        });
-        var brandText = Text("LAZYFORZA", 14, FontWeights.Bold);
-        brandText.Margin = new Thickness(10, 0, 0, 0);
-        brandText.VerticalAlignment = VerticalAlignment.Center;
-        brand.Children.Add(brandText);
-        header.Children.Add(brand);
-        sectionLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        sectionLabel.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(sectionLabel, 1);
-        header.Children.Add(sectionLabel);
-        var close = new Button
-        {
-            Content = "×",
-            Width = 34,
-            Height = 34,
-            Padding = new Thickness(0),
-            FontSize = 20,
-            Background = Brushes.Transparent,
-            BorderBrush = Brushes.Transparent,
-            ToolTip = AppLocalization.Text("wizard.exit", "退出初始化")
+            Source = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForzaWordmark.png", UriKind.Absolute)),
+            Width = 146,
+            Height = 32,
+            Stretch = Stretch.Uniform,
+            VerticalAlignment = VerticalAlignment.Center
         };
-        close.Click += (_, _) => Close();
-        Grid.SetColumn(close, 2);
-        header.Children.Add(close);
+        header.Children.Add(brand);
+        closeButton.Content = "×";
+        closeButton.Width = 34;
+        closeButton.Height = 34;
+        closeButton.Padding = new Thickness(0);
+        closeButton.FontSize = 20;
+        closeButton.Background = Brushes.Transparent;
+        closeButton.BorderBrush = Brushes.Transparent;
+        closeButton.ToolTip = AppLocalization.Text("wizard.exit", "退出初始化");
+        closeButton.Click += (_, _) => Close();
+        Grid.SetColumn(closeButton, 2);
+        header.Children.Add(closeButton);
         header.MouseLeftButtonDown += (_, args) =>
         {
             if (args.ButtonState == System.Windows.Input.MouseButtonState.Pressed) DragMove();
@@ -209,13 +204,6 @@ internal sealed class InitializationWindow : Window
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var privacy = Text(
-            AppLocalization.Text("wizard.localOnly", "设置只保存在本机"),
-            11,
-            FontWeights.Normal,
-            "MutedBrush");
-        privacy.VerticalAlignment = VerticalAlignment.Center;
-        footer.Children.Add(privacy);
         backButton.MinWidth = 100;
         backButton.Padding = new Thickness(18, 9, 18, 9);
         backButton.Click += (_, _) => Move(-1);
@@ -225,7 +213,13 @@ internal sealed class InitializationWindow : Window
         nextButton.Padding = new Thickness(20, 9, 20, 9);
         nextButton.Background = new SolidColorBrush(Color.FromRgb(16, 126, 148));
         nextButton.BorderBrush = new SolidColorBrush(Color.FromRgb(39, 198, 221));
-        nextButton.Click += (_, _) => Move(1);
+        nextButton.Click += async (_, _) =>
+        {
+            if (step == FinalStep)
+                await SkipTelemetryAsync();
+            else
+                Move(1);
+        };
         Grid.SetColumn(nextButton, 2);
         footer.Children.Add(nextButton);
         Grid.SetRow(footer, 2);
@@ -274,19 +268,24 @@ internal sealed class InitializationWindow : Window
         return canvas;
     }
 
-    private void Render()
+    private void Render(bool textOnlyLanguageRefresh = false)
     {
-        sectionLabel.Text = AppLocalization.Text("wizard.section", "首次启动设置").ToUpperInvariant();
         RenderRail();
-        RenderPage();
+        RenderPage(textOnlyLanguageRefresh);
         backButton.Content = AppLocalization.Text("wizard.back", "上一步");
         backButton.Visibility = step == 0 ? Visibility.Hidden : Visibility.Visible;
         backButton.IsEnabled = !completing;
-        nextButton.Content = step == 0
-            ? AppLocalization.Text("wizard.start", "开始设置")
-            : AppLocalization.Text("wizard.next", "下一步");
-        nextButton.Visibility = step == FinalStep ? Visibility.Hidden : Visibility.Visible;
+        nextButton.Content = step switch
+        {
+            0 => AppLocalization.Text("wizard.start", "开始设置"),
+            FinalStep => AppLocalization.Text("wizard.telemetry.skip", "跳过连接并进入"),
+            _ => AppLocalization.Text("wizard.next", "下一步")
+        };
+        nextButton.Visibility = Visibility.Visible;
         nextButton.IsEnabled = !completing;
+        closeButton.ToolTip = AppLocalization.Text("wizard.exit", "退出初始化");
+        if (textOnlyLanguageRefresh)
+            Dispatcher.BeginInvoke(AnimateLanguageTextRefresh, DispatcherPriority.Loaded);
     }
 
     private void RenderRail()
@@ -336,8 +335,9 @@ internal sealed class InitializationWindow : Window
         }
     }
 
-    private void RenderPage()
+    private void RenderPage(bool textOnlyLanguageRefresh = false)
     {
+        welcomeTitle = null;
         var page = step switch
         {
             0 => WelcomePage(),
@@ -347,9 +347,10 @@ internal sealed class InitializationWindow : Window
             4 => CloseBehaviorPage(),
             _ => TelemetryPage()
         };
+        pageHost.Content = page;
+        if (textOnlyLanguageRefresh) return;
         page.Opacity = 0;
         page.RenderTransform = new TranslateTransform(16, 0);
-        pageHost.Content = page;
         page.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(260)));
         ((TranslateTransform)page.RenderTransform).BeginAnimation(
             TranslateTransform.XProperty,
@@ -362,34 +363,28 @@ internal sealed class InitializationWindow : Window
     private FrameworkElement WelcomePage()
     {
         var panel = new Grid();
-        var content = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        var eyebrow = Text("FORZA TELEMETRY, MADE CLEAR", 11, FontWeights.SemiBold, "AccentBrush");
-        content.Children.Add(eyebrow);
+        var content = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
         var chinese = welcomeFrame % 2 == 0;
-        var title = Text(chinese ? "欢迎使用" : "WELCOME TO", chinese ? 44 : 38, FontWeights.Bold);
-        title.Margin = new Thickness(0, 14, 0, 0);
-        content.Children.Add(title);
+        welcomeTitle = Text(chinese ? "欢迎使用" : "WELCOME TO", chinese ? 44 : 38, FontWeights.Bold);
+        content.Children.Add(welcomeTitle);
         var product = Text("LazyForza", 58, FontWeights.Bold);
-        product.Foreground = new LinearGradientBrush(
-            Color.FromRgb(244, 248, 251),
-            Color.FromRgb(40, 196, 216),
-            0);
-        product.Margin = new Thickness(0, -4, 0, 0);
+        product.Foreground = new LinearGradientBrush
+        {
+            StartPoint = new Point(0, 0.5),
+            EndPoint = new Point(1, 0.5),
+            GradientStops =
+            {
+                new GradientStop(Color.FromRgb(37, 215, 242), 0),
+                new GradientStop(Color.FromRgb(65, 126, 255), 0.53),
+                new GradientStop(Color.FromRgb(181, 66, 255), 1)
+            }
+        };
+        product.Margin = new Thickness(0, 2, 0, 0);
         content.Children.Add(product);
-        var description = Text(
-            chinese
-                ? "六步完成语言、身份、数据与遥测连接设置。"
-                : "Six quick steps to set up language, identity, storage and telemetry.",
-            15,
-            FontWeights.Normal,
-            "MutedBrush");
-        description.Margin = new Thickness(2, 17, 0, 0);
-        content.Children.Add(description);
-        var tags = new WrapPanel { Margin = new Thickness(0, 26, 0, 0) };
-        tags.Children.Add(Pill("OFFICIAL UDP"));
-        tags.Children.Add(Pill("LOCAL DATA"));
-        tags.Children.Add(Pill("LIVE HUD"));
-        content.Children.Add(tags);
         panel.Children.Add(content);
         return panel;
     }
@@ -413,7 +408,7 @@ internal sealed class InitializationWindow : Window
                 {
                     language = option.Code;
                     AppLocalization.UseLanguage(language);
-                    Render();
+                    Render(textOnlyLanguageRefresh: true);
                 });
             card.Margin = new Thickness(index == 0 ? 0 : 8, 0, index == 0 ? 8 : 0, 0);
             Grid.SetColumn(card, index);
@@ -428,7 +423,7 @@ internal sealed class InitializationWindow : Window
         var stack = Page(
             AppLocalization.Text("wizard.identity.title", "设置玩家代号"),
             AppLocalization.Text("wizard.identity.description", "用于新录制、圈速分享和首次加入地产赛事时的默认代表名。"));
-        var card = new StackPanel { Margin = new Thickness(0, 26, 0, 0) };
+        var card = new StackPanel();
         card.Children.Add(Text(AppLocalization.Text("wizard.identity.label", "玩家代号"), 12, FontWeights.SemiBold));
         var input = new TextBox
         {
@@ -447,7 +442,12 @@ internal sealed class InitializationWindow : Window
             "MutedBrush");
         hint.Margin = new Thickness(0, 9, 0, 0);
         card.Children.Add(hint);
-        stack.Children.Add(PanelCard(card));
+        var identityCard = PanelCard(card);
+        identityCard.Width = 700;
+        identityCard.MaxWidth = 700;
+        identityCard.HorizontalAlignment = HorizontalAlignment.Left;
+        identityCard.Margin = new Thickness(0, 22, 0, 0);
+        stack.Children.Add(identityCard);
         Dispatcher.BeginInvoke(() => input.Focus(), DispatcherPriority.Input);
         return stack;
     }
@@ -553,12 +553,27 @@ internal sealed class InitializationWindow : Window
         var stack = Page(
             AppLocalization.Text("wizard.telemetry.title", "连接 FH6 遥测"),
             AppLocalization.Text("wizard.telemetry.description", "在游戏中启用 Data Out，LazyForza 收到有效数据后会自动完成初始化。"));
-        var content = new Grid { Margin = new Thickness(0, 17, 0, 0) };
-        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(244) });
-        var settings = new StackPanel { Margin = new Thickness(0, 0, 20, 0) };
+        var content = new Grid { Margin = new Thickness(0, 22, 0, 0) };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.9, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.1, GridUnitType.Star) });
+        var settings = new StackPanel();
+        settings.Children.Add(Text(
+            AppLocalization.Text("wizard.telemetry.endpointTitle", "监听端点"),
+            13,
+            FontWeights.SemiBold));
+        var endpointSpacer = new Border { Height = 14 };
+        settings.Children.Add(endpointSpacer);
         settings.Children.Add(InputRow(AppLocalization.Text("wizard.telemetry.address", "监听 IP"), listenAddress, value => listenAddress = value));
         settings.Children.Add(InputRow(AppLocalization.Text("wizard.telemetry.port", "UDP 端口"), portText, value => portText = value));
+        var endpointCard = PanelCard(settings);
+        endpointCard.Margin = new Thickness(0, 0, 9, 0);
+        content.Children.Add(endpointCard);
+
+        var connection = new StackPanel();
+        connection.Children.Add(Text(
+            AppLocalization.Text("wizard.telemetry.gameSettingsTitle", "游戏内设置"),
+            13,
+            FontWeights.SemiBold));
         var instructions = Text(
             AppLocalization.Text(
                 "wizard.telemetry.instructions",
@@ -567,8 +582,8 @@ internal sealed class InitializationWindow : Window
             FontWeights.Normal,
             "MutedBrush");
         instructions.LineHeight = 22;
-        instructions.Margin = new Thickness(0, 8, 0, 0);
-        settings.Children.Add(instructions);
+        instructions.Margin = new Thickness(0, 12, 0, 0);
+        connection.Children.Add(instructions);
         var statusRow = new Grid { Margin = new Thickness(0, 18, 0, 0) };
         statusRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
         statusRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -596,7 +611,7 @@ internal sealed class InitializationWindow : Window
         statusCopy.Children.Add(telemetryDetail);
         Grid.SetColumn(statusCopy, 1);
         statusRow.Children.Add(statusCopy);
-        settings.Children.Add(statusRow);
+        connection.Children.Add(statusRow);
         retryButton = new Button
         {
             Content = AppLocalization.Text("wizard.telemetry.retry", "重新监听"),
@@ -604,58 +619,19 @@ internal sealed class InitializationWindow : Window
             Margin = new Thickness(38, 10, 0, 0),
             Visibility = Visibility.Collapsed
         };
-        retryButton.Click += (_, _) => _ = StartProbeAsync();
-        settings.Children.Add(retryButton);
-        content.Children.Add(settings);
-
-        var placeholder = new Border
-        {
-            Background = new LinearGradientBrush(
-                Color.FromRgb(19, 31, 42),
-                Color.FromRgb(14, 22, 31),
-                45),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(45, 65, 82)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(13),
-            Padding = new Thickness(18)
-        };
-        var placeholderStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        var play = new Border
-        {
-            Width = 62,
-            Height = 62,
-            CornerRadius = new CornerRadius(31),
-            Background = new SolidColorBrush(Color.FromArgb(55, 31, 191, 212)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(31, 191, 212)),
-            BorderThickness = new Thickness(1),
-            Child = Text("▶", 22, FontWeights.Bold, "AccentBrush")
-        };
-        ((TextBlock)play.Child).HorizontalAlignment = HorizontalAlignment.Center;
-        ((TextBlock)play.Child).VerticalAlignment = VerticalAlignment.Center;
-        placeholderStack.Children.Add(play);
-        var placeholderTitle = Text(
-            AppLocalization.Text("wizard.telemetry.placeholder", "FH6 设置动图占位"),
-            12,
-            FontWeights.SemiBold);
-        placeholderTitle.HorizontalAlignment = HorizontalAlignment.Center;
-        placeholderTitle.Margin = new Thickness(0, 14, 0, 0);
-        placeholderStack.Children.Add(placeholderTitle);
-        var placeholderHint = Text(
-            AppLocalization.Text("wizard.telemetry.placeholderHint", "后续替换为游戏内设置演示"),
-            10,
-            FontWeights.Normal,
-            "MutedBrush");
-        placeholderHint.HorizontalAlignment = HorizontalAlignment.Center;
-        placeholderHint.Margin = new Thickness(0, 5, 0, 0);
-        placeholderStack.Children.Add(placeholderHint);
-        placeholder.Child = placeholderStack;
-        Grid.SetColumn(placeholder, 1);
-        content.Children.Add(placeholder);
+        retryButton.Click += (_, _) => BeginProbe();
+        connection.Children.Add(retryButton);
+        var connectionCard = PanelCard(connection);
+        connectionCard.Margin = new Thickness(9, 0, 0, 0);
+        Grid.SetColumn(connectionCard, 1);
+        content.Children.Add(connectionCard);
         stack.Children.Add(content);
         if (!captureMode)
-            Dispatcher.BeginInvoke(() => _ = StartProbeAsync(), DispatcherPriority.Background);
+            Dispatcher.BeginInvoke(BeginProbe, DispatcherPriority.Background);
         return stack;
     }
+
+    private void BeginProbe() => probeTask = StartProbeAsync();
 
     private FrameworkElement InputRow(string label, string value, Action<string> changed)
     {
@@ -679,9 +655,7 @@ internal sealed class InitializationWindow : Window
         probeCancellation?.Dispose();
         probeCancellation = new CancellationTokenSource();
         retryButton!.Visibility = Visibility.Collapsed;
-        if (!IPAddress.TryParse(listenAddress.Trim(), out _) ||
-            !int.TryParse(portText.Trim(), out var port) ||
-            port is < 1 or > 65535 || port is >= 5200 and <= 5300)
+        if (!TryReadTelemetryEndpoint(out var port))
         {
             ShowProbeError(
                 AppLocalization.Text("wizard.telemetry.invalid", "IP 或端口无效"),
@@ -693,7 +667,7 @@ internal sealed class InitializationWindow : Window
         telemetryStatus.Text = AppLocalization.Text("wizard.telemetry.waiting", "正在等待遥测数据");
         telemetryDetail.Text = AppLocalization.Format(
             "wizard.telemetry.endpoint",
-            "监听 {0}:{1} · 仅接受有效的 FH6 324 字节数据",
+            "正在监听 {0}:{1}",
             listenAddress,
             port);
         telemetryStatus.Foreground = ResourceBrush("TextBrush");
@@ -727,21 +701,7 @@ internal sealed class InitializationWindow : Window
                 RepeatBehavior = new RepeatBehavior(2)
             });
             await Task.Delay(1250);
-            var profile = sourceProfile with
-            {
-                SchemaVersion = StartupProfile.CurrentSchemaVersion,
-                InitializationCompleted = true,
-                Language = language,
-                DataDirectory = Path.GetFullPath(dataDirectory),
-                CloseBehavior = closeBehavior,
-                InitializationCompletedAt = DateTimeOffset.UtcNow
-            };
-            Result = new InitializationResult(
-                profile.Normalize(),
-                PlayerIdentitySettings.Normalize(playerCode),
-                listenAddress,
-                port);
-            DialogResult = true;
+            CompleteInitialization(port);
         }
         catch (OperationCanceledException)
         {
@@ -754,6 +714,63 @@ internal sealed class InitializationWindow : Window
                     ? AppLocalization.Text("wizard.telemetry.inUse", "该端口已被其他程序占用，请更换端口或关闭占用程序。")
                     : exception.Message);
         }
+    }
+
+    private async Task SkipTelemetryAsync()
+    {
+        if (step != FinalStep || completing) return;
+        if (!TryReadTelemetryEndpoint(out var port))
+        {
+            listenAddress = LazyForzaDefaults.TelemetryListenAddress;
+            port = LazyForzaDefaults.TelemetryPort;
+        }
+
+        probeCancellation?.Cancel();
+        if (probeTask is not null)
+        {
+            try
+            {
+                await probeTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+        if (completing) return;
+        completing = true;
+        backButton.IsEnabled = false;
+        nextButton.IsEnabled = false;
+        CompleteInitialization(port);
+    }
+
+    private bool TryReadTelemetryEndpoint(out int port)
+    {
+        port = 0;
+        if (!IPAddress.TryParse(listenAddress.Trim(), out _) ||
+            !int.TryParse(portText.Trim(), out port) ||
+            port is < 1 or > 65535 || port is >= 5200 and <= 5300)
+            return false;
+        listenAddress = listenAddress.Trim();
+        return true;
+    }
+
+    private void CompleteInitialization(int port)
+    {
+        var profile = sourceProfile with
+        {
+            SchemaVersion = StartupProfile.CurrentSchemaVersion,
+            InitializationCompleted = true,
+            Language = language,
+            DataDirectory = Path.GetFullPath(dataDirectory),
+            CloseBehavior = closeBehavior,
+            InitializationCompletedAt = DateTimeOffset.UtcNow
+        };
+        Result = new InitializationResult(
+            profile.Normalize(),
+            PlayerIdentitySettings.Normalize(playerCode),
+            listenAddress,
+            port);
+        DialogResult = true;
     }
 
     private void ShowProbeError(string title, string detail)
@@ -782,9 +799,76 @@ internal sealed class InitializationWindow : Window
         probeCancellation?.Dispose();
     }
 
+    private void RefreshWelcomeTitle()
+    {
+        if (step != 0 || welcomeTitle is null) return;
+        var chinese = welcomeFrame % 2 == 0;
+        welcomeTitle.Text = chinese ? "欢迎使用" : "WELCOME TO";
+        welcomeTitle.FontSize = chinese ? 44 : 38;
+        AnimateTextBlock(welcomeTitle, TimeSpan.Zero);
+    }
+
+    private void AnimateLanguageTextRefresh()
+    {
+        UpdateLayout();
+        var blocks = Descendants<TextBlock>(this)
+            .Where(block => block.IsVisible)
+            .OrderBy(block => HorizontalPosition(block))
+            .ToArray();
+        for (var index = 0; index < blocks.Length; index++)
+            AnimateTextBlock(blocks[index], TimeSpan.FromMilliseconds(Math.Min(index * 9, 120)));
+    }
+
+    private double HorizontalPosition(Visual visual)
+    {
+        try
+        {
+            return visual.TransformToAncestor(this).Transform(new Point()).X;
+        }
+        catch (InvalidOperationException)
+        {
+            return double.MaxValue;
+        }
+    }
+
+    private static void AnimateTextBlock(TextBlock block, TimeSpan beginTime)
+    {
+        block.Opacity = 0;
+        var transform = new TranslateTransform(-12, 0);
+        block.RenderTransform = transform;
+        block.BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220))
+            {
+                BeginTime = beginTime,
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+        transform.BeginAnimation(
+            TranslateTransform.XProperty,
+            new DoubleAnimation(-12, 0, TimeSpan.FromMilliseconds(260))
+            {
+                BeginTime = beginTime,
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+    }
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is T match) yield return match;
+            foreach (var descendant in Descendants<T>(child)) yield return descendant;
+        }
+    }
+
     private static StackPanel Page(string title, string description)
     {
-        var stack = new StackPanel();
+        var stack = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
         stack.Children.Add(Text(title, 30, FontWeights.Bold));
         var subtitle = Text(description, 13, FontWeights.Normal, "MutedBrush");
         subtitle.Margin = new Thickness(0, 8, 0, 0);
@@ -809,15 +893,9 @@ internal sealed class InitializationWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         button.Click += (_, _) => select();
-        var content = new Grid { Margin = new Thickness(14, 12, 14, 12) };
+        var content = new Grid { Margin = new Thickness(16, 13, 18, 13) };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
-        var copy = new StackPanel();
-        copy.Children.Add(Text(title, 14, FontWeights.SemiBold));
-        var detail = Text(description, 10, FontWeights.Normal, "MutedBrush");
-        detail.Margin = new Thickness(0, 4, 0, 0);
-        copy.Children.Add(detail);
-        content.Children.Add(copy);
         var marker = new Border
         {
             Width = 21,
@@ -827,10 +905,19 @@ internal sealed class InitializationWindow : Window
                 ? Color.FromRgb(53, 214, 230)
                 : Color.FromRgb(78, 93, 109)),
             BorderThickness = new Thickness(selected ? 6 : 1.5),
+            HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center
         };
-        Grid.SetColumn(marker, 1);
         content.Children.Add(marker);
+        var copy = new StackPanel();
+        copy.Children.Add(Text(title, 14, FontWeights.SemiBold));
+        var detail = Text(description, 10, FontWeights.Normal, "MutedBrush");
+        detail.Margin = new Thickness(0, 4, 0, 0);
+        detail.TextTrimming = TextTrimming.CharacterEllipsis;
+        detail.TextWrapping = TextWrapping.NoWrap;
+        copy.Children.Add(detail);
+        Grid.SetColumn(copy, 1);
+        content.Children.Add(copy);
         button.Content = content;
         return new Border
         {
@@ -855,17 +942,6 @@ internal sealed class InitializationWindow : Window
         Padding = new Thickness(18),
         Margin = new Thickness(0, 18, 0, 0),
         Child = child
-    };
-
-    private static Border Pill(string value) => new()
-    {
-        Background = new SolidColorBrush(Color.FromArgb(46, 30, 184, 207)),
-        BorderBrush = new SolidColorBrush(Color.FromArgb(130, 42, 191, 212)),
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(11),
-        Padding = new Thickness(10, 5, 10, 5),
-        Margin = new Thickness(0, 0, 8, 0),
-        Child = Text(value, 10, FontWeights.SemiBold, "AccentBrush")
     };
 
     private bool IsCustomSelection() =>

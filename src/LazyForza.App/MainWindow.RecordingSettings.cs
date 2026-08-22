@@ -35,8 +35,10 @@ internal sealed partial class MainWindow
             VerticalAlignment = VerticalAlignment.Top,
             Padding = new Thickness(12, 7, 12, 7)
         };
-        void RefreshEnabledText() =>
-            enabled.Content = enabled.IsChecked == true ? "自动录制：开" : "自动录制：关";
+        void RefreshEnabledText() => enabled.Content = AppLocalization.Format(
+            "settings.recording.enabled",
+            "自动录制：{0}",
+            AppLocalization.Literal(enabled.IsChecked == true ? "开" : "关"));
         enabled.Click += (_, _) => RefreshEnabledText();
         RefreshEnabledText();
         Grid.SetColumn(enabled, 1);
@@ -101,7 +103,12 @@ internal sealed partial class MainWindow
         panel.Children.Add(rotationNote);
 
         var status = Label(
-            $"{recorder.AutomaticStatus}\n当前录制占用 {FormatBytes(recorder.RecordingBytes)} · 目录 {directories.RecordingsPath}",
+            AppLocalization.Format(
+                "settings.recording.status",
+                "{0}\n当前录制占用 {1} · 目录 {2}",
+                AppLocalization.Literal(recorder.AutomaticStatus),
+                FormatBytes(recorder.RecordingBytes),
+                directories.RecordingsPath),
             11,
             FontWeights.Normal,
             "MutedBrush");

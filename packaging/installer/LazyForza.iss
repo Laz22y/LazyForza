@@ -22,11 +22,11 @@ AppPublisher=LazyForza
 AppPublisherURL=https://github.com/Laz22y/LazyForza
 AppSupportURL=https://github.com/Laz22y/LazyForza/issues
 AppUpdatesURL=https://github.com/Laz22y/LazyForza/releases/latest
-DefaultDirName={localappdata}\Programs\LazyForza
+DefaultDirName={autopf}\LazyForza
 DefaultGroupName=LazyForza
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
@@ -41,6 +41,7 @@ CloseApplications=force
 RestartApplications=no
 UsePreviousAppDir=yes
 UsePreviousLanguage=yes
+UsePreviousTasks=yes
 VersionInfoVersion={#NumericVersion}
 VersionInfoCompany=LazyForza
 VersionInfoDescription=LazyForza Setup
@@ -48,7 +49,7 @@ VersionInfoProductName=LazyForza
 VersionInfoProductVersion={#NumericVersion}
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimp"; MessagesFile: "compiler:Default.isl,ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
@@ -93,28 +94,47 @@ chinesesimp.FinishedHeadingLabel=[name] 安装完成
 chinesesimp.FinishedLabelNoIcons=[name] 已安装到你的电脑。
 chinesesimp.FinishedLabel=[name] 已安装到你的电脑，可从开始菜单启动。
 chinesesimp.ClickFinish=点击“完成”退出安装程序。
+chinesesimp.WizardSelectTasks=选择附加任务
+chinesesimp.SelectTasksDesc=需要安装程序执行哪些附加任务？
+chinesesimp.SelectTasksLabel2=选择安装 LazyForza 时需要执行的附加任务，然后点击“下一步”。
+chinesesimp.ReadyMemoTasks=附加任务：
+
+[CustomMessages]
+english.OptionalIntegration=Optional integration:
+english.AssociateLazyForzaFiles=Associate .lfztelemetry, .lfzlap and .lfzestate files
+chinesesimp.OptionalIntegration=可选系统集成：
+chinesesimp.CreateDesktopIcon=创建桌面快捷方式(&D)
+chinesesimp.AssociateLazyForzaFiles=关联 .lfztelemetry、.lfzlap 和 .lfzestate 文件
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:OptionalIntegration}"; Flags: unchecked
+Name: "fileassoc"; Description: "{cm:AssociateLazyForzaFiles}"; GroupDescription: "{cm:OptionalIntegration}"; Flags: unchecked
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Dirs]
+Name: "{app}\Data"; Permissions: users-modify
+
 [Icons]
 Name: "{autoprograms}\LazyForza"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
+Name: "{autodesktop}\LazyForza"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Registry]
-Root: HKA; Subkey: "Software\Classes\.lfztelemetry"; ValueType: string; ValueName: ""; ValueData: "LazyForza.Telemetry"; Flags: uninsdeletevalue uninsdeletekeyifempty
-Root: HKA; Subkey: "Software\Classes\LazyForza.Telemetry"; ValueType: string; ValueName: ""; ValueData: "LazyForza Telemetry Recording"; Flags: uninsdeletekey
-Root: HKA; Subkey: "Software\Classes\LazyForza.Telemetry\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
-Root: HKA; Subkey: "Software\Classes\LazyForza.Telemetry\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --open ""%1"""
+Root: HKA; Subkey: "Software\Classes\.lfztelemetry"; ValueType: string; ValueName: ""; ValueData: "LazyForza.Telemetry"; Flags: uninsdeletevalue uninsdeletekeyifempty; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\LazyForza.Telemetry"; ValueType: string; ValueName: ""; ValueData: "LazyForza Telemetry Recording"; Flags: uninsdeletekey; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\LazyForza.Telemetry\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\LazyForza.Telemetry\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --open ""%1"""; Tasks: fileassoc
 
-Root: HKA; Subkey: "Software\Classes\.lfzlap"; ValueType: string; ValueName: ""; ValueData: "LazyForza.LapAnalysis"; Flags: uninsdeletevalue uninsdeletekeyifempty
-Root: HKA; Subkey: "Software\Classes\LazyForza.LapAnalysis"; ValueType: string; ValueName: ""; ValueData: "LazyForza Lap Analysis"; Flags: uninsdeletekey
-Root: HKA; Subkey: "Software\Classes\LazyForza.LapAnalysis\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
-Root: HKA; Subkey: "Software\Classes\LazyForza.LapAnalysis\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --open ""%1"""
+Root: HKA; Subkey: "Software\Classes\.lfzlap"; ValueType: string; ValueName: ""; ValueData: "LazyForza.LapAnalysis"; Flags: uninsdeletevalue uninsdeletekeyifempty; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\LazyForza.LapAnalysis"; ValueType: string; ValueName: ""; ValueData: "LazyForza Lap Analysis"; Flags: uninsdeletekey; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\LazyForza.LapAnalysis\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\LazyForza.LapAnalysis\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --open ""%1"""; Tasks: fileassoc
 
-Root: HKA; Subkey: "Software\Classes\.lfzestate"; ValueType: string; ValueName: ""; ValueData: "LazyForza.EstateTrack"; Flags: uninsdeletevalue uninsdeletekeyifempty
-Root: HKA; Subkey: "Software\Classes\LazyForza.EstateTrack"; ValueType: string; ValueName: ""; ValueData: "LazyForza Estate Track"; Flags: uninsdeletekey
-Root: HKA; Subkey: "Software\Classes\LazyForza.EstateTrack\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
-Root: HKA; Subkey: "Software\Classes\LazyForza.EstateTrack\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --open ""%1"""
+Root: HKA; Subkey: "Software\Classes\.lfzestate"; ValueType: string; ValueName: ""; ValueData: "LazyForza.EstateTrack"; Flags: uninsdeletevalue uninsdeletekeyifempty; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\LazyForza.EstateTrack"; ValueType: string; ValueName: ""; ValueData: "LazyForza Estate Track"; Flags: uninsdeletekey; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\LazyForza.EstateTrack\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"; Tasks: fileassoc
+Root: HKA; Subkey: "Software\Classes\LazyForza.EstateTrack\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --open ""%1"""; Tasks: fileassoc
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,LazyForza}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent

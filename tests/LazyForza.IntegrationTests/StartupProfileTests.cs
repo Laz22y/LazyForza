@@ -65,17 +65,80 @@ public sealed class StartupProfileTests
     [TestMethod]
     public void LocalizationFallsBackToChineseForUnknownKeys()
     {
-        AppLocalization.UseLanguage("en");
-        Assert.AreEqual("Settings", AppLocalization.Text("nav.settings", "设置"));
-        Assert.AreEqual("Learning new track", AppLocalization.Literal("正在学习新赛道"));
-        Assert.AreEqual(
-            "Confirming start point · 42 trace points",
-            AppLocalization.Literal("正在确认起点 · 42 个轨迹点"));
-        Assert.AreEqual(
-            "Candidate: Demo loop · verified 119 m",
-            AppLocalization.Literal("候选：Demo loop · 已验证 119 m"));
-        Assert.AreEqual("未翻译", AppLocalization.Text("missing", "未翻译"));
-        AppLocalization.UseLanguage("zh-Hans");
+        try
+        {
+            AppLocalization.UseLanguage("en");
+            Assert.AreEqual("Settings", AppLocalization.Text("nav.settings", "设置"));
+            Assert.AreEqual("Learning new track", AppLocalization.Literal("正在学习新赛道"));
+            Assert.AreEqual(
+                "Confirming start point · 42 trace points",
+                AppLocalization.Literal("正在确认起点 · 42 个轨迹点"));
+            Assert.AreEqual(
+                "Candidate: Demo loop · verified 119 m",
+                AppLocalization.Literal("候选：Demo loop · 已验证 119 m"));
+            Assert.AreEqual("未翻译", AppLocalization.Text("missing", "未翻译"));
+        }
+        finally
+        {
+            AppLocalization.UseLanguage("zh-Hans");
+        }
+    }
+
+    [TestMethod]
+    public void LanguageCanSwitchBothDirectionsWithoutLosingTranslations()
+    {
+        try
+        {
+            AppLocalization.UseLanguage("en");
+            Assert.AreEqual("en", AppLocalization.CurrentLanguage);
+            Assert.AreEqual("en-US", System.Globalization.CultureInfo.CurrentCulture.Name);
+            Assert.AreEqual("Hokubu Circuit", AppLocalization.Literal("北部环道赛"));
+
+            AppLocalization.UseLanguage("zh-Hans");
+            Assert.AreEqual("zh-Hans", AppLocalization.CurrentLanguage);
+            Assert.AreEqual("zh-CN", System.Globalization.CultureInfo.CurrentCulture.Name);
+            Assert.AreEqual("北部环道赛", AppLocalization.Literal("北部环道赛"));
+
+            AppLocalization.UseLanguage("en");
+            Assert.AreEqual("Settings", AppLocalization.Text("nav.settings", "设置"));
+            Assert.AreEqual("Shimanoyama Charge", AppLocalization.Literal("霜山冲锋赛"));
+        }
+        finally
+        {
+            AppLocalization.UseLanguage("zh-Hans");
+        }
+    }
+
+    [TestMethod]
+    public void CompletedProfileCanSwitchLanguageBothDirections()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new StartupProfileStore(Path.Combine(root, "startup-profile.json"));
+            var original = StartupProfile.CreateDefault() with
+            {
+                InitializationCompleted = true,
+                DataDirectory = Path.Combine(root, "data"),
+                CloseBehavior = MainWindowCloseBehavior.ExitApplication,
+                InitializationCompletedAt = DateTimeOffset.Parse("2026-08-22T12:00:00+08:00")
+            };
+
+            store.Save(original with { Language = "en" });
+            var english = store.Load();
+            store.Save(english with { Language = "zh-Hans" });
+            var chinese = store.Load();
+
+            Assert.AreEqual("zh-Hans", chinese.Language);
+            Assert.IsTrue(chinese.InitializationCompleted);
+            Assert.AreEqual(Path.GetFullPath(original.DataDirectory), chinese.DataDirectory);
+            Assert.AreEqual(original.CloseBehavior, chinese.CloseBehavior);
+            Assert.AreEqual(original.InitializationCompletedAt, chinese.InitializationCompletedAt);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [DataTestMethod]

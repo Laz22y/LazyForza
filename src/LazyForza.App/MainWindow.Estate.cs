@@ -145,16 +145,20 @@ internal sealed partial class MainWindow
             description.Children.Add(Label(track.Name, 15, FontWeights.SemiBold));
             var identity = string.Join(" · ", new[]
             {
-                string.IsNullOrWhiteSpace(definition.Creator) ? null : $"作者 {definition.Creator}",
-                string.IsNullOrWhiteSpace(definition.ShareCode) ? null : $"标识 {definition.ShareCode}",
-                $"修订 {definition.MapRevision}",
+                string.IsNullOrWhiteSpace(definition.Creator) ? null : AppLocalization.Format("estate.track.author", "作者 {0}", definition.Creator),
+                string.IsNullOrWhiteSpace(definition.ShareCode) ? null : AppLocalization.Format("estate.track.code", "标识 {0}", definition.ShareCode),
+                AppLocalization.Format("estate.track.revision", "修订 {0}", definition.MapRevision),
                 $"{track.Length / 1000:0.00} km",
-                $"{sectorCount} 个分段",
-                $"{definition.Checkpoints.Count} 个检查点"
+                AppLocalization.Format("estate.track.sectors", "{0} 个分段", sectorCount),
+                AppLocalization.Format("estate.track.checkpoints", "{0} 个检查点", definition.Checkpoints.Count)
             }.Where(value => value is not null));
             description.Children.Add(Label(identity, 11, FontWeights.Normal, "MutedBrush"));
             description.Children.Add(Label(
-                $"起终点宽 {GateWidth(definition.StartFinishGate):0.0} m · 参考圈 {definition.ReferenceLapSeconds:0.000} s",
+                AppLocalization.Format(
+                    "estate.track.gateReference",
+                    "起终点宽 {0:0.0} m · 参考圈 {1:0.000} s",
+                    GateWidth(definition.StartFinishGate),
+                    definition.ReferenceLapSeconds),
                 11,
                 FontWeights.Normal,
                 "MutedBrush"));
@@ -316,7 +320,7 @@ internal sealed partial class MainWindow
             var isActive = estateModule.State.IsTimingActive && estateModule.State.TrackId == track.Id;
             var timing = new Button
             {
-                Content = isActive ? "停止计时" : "选择地图并开始计时",
+                Content = AppLocalization.Literal(isActive ? "停止计时" : "选择地图并开始计时"),
                 MinWidth = 150,
                 VerticalAlignment = VerticalAlignment.Center,
                 IsEnabled = !estateModule.State.IsEnrollmentActive
@@ -381,7 +385,7 @@ internal sealed partial class MainWindow
                 foreach (var (trackId, button) in timingButtons)
                 {
                     var isActive = current.IsTimingActive && current.TrackId == trackId;
-                    button.Content = isActive ? "停止计时" : "选择地图并开始计时";
+                    button.Content = AppLocalization.Literal(isActive ? "停止计时" : "选择地图并开始计时");
                     button.IsEnabled = !current.IsEnrollmentActive;
                 }
                 foreach (var button in exportButtons)
