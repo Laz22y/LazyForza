@@ -361,15 +361,17 @@ internal sealed partial class MainWindow
             var roomAttached = state.IsConnected ||
                                state.ConnectionState == EstateRaceConnectionState.Reconnecting &&
                                state.Session is not null;
-            statusText.Text = state.ConnectionText;
+            statusText.Text = AppLocalization.Literal(state.ConnectionText);
             statusText.Foreground = Brush(ConnectionBrush(state.ConnectionState));
-            statusTitle.Text = roomAttached ? state.Session?.SessionName ?? "已进入房间" : "尚未进入房间";
-            enterRoom.Content = roomAttached ? "退出房间" : "进入房间";
+            statusTitle.Text = roomAttached
+                ? state.Session?.SessionName ?? AppLocalization.Literal("已进入房间")
+                : AppLocalization.Literal("尚未进入房间");
+            enterRoom.Content = AppLocalization.Literal(roomAttached ? "退出房间" : "进入房间");
             connectedProfile.Text = roomAttached && module.ActiveProfile is { } profile
                 ? profile.IsObserver
                     ? $"{profile.DisplayName} · OB 转播 · {profile.ServerAddress}"
                     : $"{profile.DisplayName} · {profile.TeamName ?? "个人参赛"} · {profile.ServerAddress}"
-                : "进入房间时会读取服务端指定的赛道，并自动启用本机相同的地产环道。";
+                : AppLocalization.Literal("进入房间时会读取服务端指定的赛道，并自动启用本机相同的地产环道。");
             connectedContent.Visibility = roomAttached ? Visibility.Visible : Visibility.Collapsed;
             hostingGuide.Visibility = roomAttached ? Visibility.Collapsed : Visibility.Visible;
             var session = state.Session;
@@ -772,7 +774,7 @@ internal sealed partial class MainWindow
         _ => "MutedBrush"
     };
 
-    private static string RacePhaseLabel(RaceSessionPhase phase) => phase switch
+    private static string RacePhaseLabel(RaceSessionPhase phase) => AppLocalization.Literal(phase switch
     {
         RaceSessionPhase.Lobby => "大厅",
         RaceSessionPhase.Practice => "练习赛",
@@ -784,15 +786,15 @@ internal sealed partial class MainWindow
         RaceSessionPhase.Race => "正赛",
         RaceSessionPhase.Suspended => "红旗暂停",
         _ => "比赛结束"
-    };
+    });
 
-    private static string RaceFlagLabel(RaceControlFlag flag) => flag switch
+    private static string RaceFlagLabel(RaceControlFlag flag) => AppLocalization.Literal(flag switch
     {
         RaceControlFlag.Green => "绿旗",
         RaceControlFlag.Yellow => "黄旗",
         RaceControlFlag.Red => "红旗",
         _ => "方格旗"
-    };
+    });
 
     private static string RaceTotalTime(double? seconds)
     {
@@ -808,35 +810,35 @@ internal sealed partial class MainWindow
         if (prediction is null) return "—";
         return prediction.Decision switch
         {
-            EstatePitStrategyDecision.PitThisLap => "本圈末",
+            EstatePitStrategyDecision.PitThisLap => AppLocalization.Literal("本圈末"),
             EstatePitStrategyDecision.PitWindow when prediction.PitWindowStartLap is int start &&
                                                      prediction.PitWindowEndLap is int end && start == end =>
-                $"第 {start} 圈末",
+                AppLocalization.Format("race.pitLap", "第 {0} 圈末", start),
             EstatePitStrategyDecision.PitWindow when prediction.PitWindowStartLap is int start &&
                                                      prediction.PitWindowEndLap is int end =>
-                $"第 {start}–{end} 圈末",
-            EstatePitStrategyDecision.StayOut => "暂不进站",
-            EstatePitStrategyDecision.InPit => "进站中",
-            EstatePitStrategyDecision.Finished => "已结束",
+                AppLocalization.Format("race.pitWindow", "第 {0}–{1} 圈末", start, end),
+            EstatePitStrategyDecision.StayOut => AppLocalization.Literal("暂不进站"),
+            EstatePitStrategyDecision.InPit => AppLocalization.Literal("进站中"),
+            EstatePitStrategyDecision.Finished => AppLocalization.Literal("已结束"),
             _ => "—"
         };
     }
 
-    private static string PitStrategyConfidenceText(EstatePitStrategyConfidence? confidence) => confidence switch
+    private static string PitStrategyConfidenceText(EstatePitStrategyConfidence? confidence) => AppLocalization.Literal(confidence switch
     {
         EstatePitStrategyConfidence.High => "高置信度",
         EstatePitStrategyConfidence.Medium => "中置信度",
         _ => "低置信度"
-    };
+    });
 
-    private static string PracticeTestStatusText(EstatePracticeTestStatus status) => status switch
+    private static string PracticeTestStatusText(EstatePracticeTestStatus status) => AppLocalization.Literal(status switch
     {
         EstatePracticeTestStatus.Active => "进行中",
         EstatePracticeTestStatus.Completed => "已完成",
         EstatePracticeTestStatus.Failed => "未通过",
         EstatePracticeTestStatus.Cancelled => "已结束",
         _ => "可开始"
-    };
+    });
 
     private sealed record EstatePracticeTestControls(
         TextBlock Title,

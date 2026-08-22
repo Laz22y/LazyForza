@@ -67,8 +67,41 @@ public sealed class StartupProfileTests
     {
         AppLocalization.UseLanguage("en");
         Assert.AreEqual("Settings", AppLocalization.Text("nav.settings", "设置"));
+        Assert.AreEqual("Learning new track", AppLocalization.Literal("正在学习新赛道"));
+        Assert.AreEqual(
+            "Confirming start point · 42 trace points",
+            AppLocalization.Literal("正在确认起点 · 42 个轨迹点"));
+        Assert.AreEqual(
+            "Candidate: Demo loop · verified 119 m",
+            AppLocalization.Literal("候选：Demo loop · 已验证 119 m"));
         Assert.AreEqual("未翻译", AppLocalization.Text("missing", "未翻译"));
         AppLocalization.UseLanguage("zh-Hans");
+    }
+
+    [DataTestMethod]
+    [DataRow("--open", "C:\\data\\session.lfztelemetry")]
+    [DataRow("--open=C:\\data\\shared.lfzlap", null)]
+    [DataRow("C:\\data\\track.lfzestate", null)]
+    public void AssociatedFileArgumentAcceptsSupportedFileTypes(
+        string first,
+        string? second)
+    {
+        var arguments = second is null ? new[] { first } : new[] { first, second };
+
+        var path = LazyForza.App.App.AssociatedFilePath(arguments);
+
+        Assert.IsNotNull(path);
+        Assert.IsTrue(
+            path.EndsWith(".lfztelemetry", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".lfzlap", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".lfzestate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void AssociatedFileArgumentRejectsUnsupportedFileTypes()
+    {
+        Assert.IsNull(LazyForza.App.App.AssociatedFilePath(
+            ["--open", "C:\\data\\backup.lfzbackup"]));
     }
 
     private static string CreateTemporaryDirectory()

@@ -3,7 +3,9 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$')]
     [string]$Version = '1.4.9',
     [ValidateSet('win-x64')]
-    [string]$Runtime = 'win-x64'
+    [string]$Runtime = 'win-x64',
+    [switch]$SkipInstaller,
+    [switch]$Sign
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +17,8 @@ $publishPath = [System.IO.Path]::GetFullPath((Join-Path $workRoot 'publish'))
 $stagePath = [System.IO.Path]::GetFullPath((Join-Path $workRoot $packageName))
 $archivePath = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot "$packageName.zip"))
 $hashPath = "$archivePath.sha256"
+$setupPath = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot "LazyForza-$Version-$Runtime-setup.exe"))
+$setupHashPath = "$setupPath.sha256"
 
 function Assert-ChildPath {
     param(
@@ -35,6 +39,8 @@ Assert-ChildPath -Path $workRoot -Parent $releaseRoot
 Assert-ChildPath -Path $publishPath -Parent $releaseRoot
 Assert-ChildPath -Path $stagePath -Parent $releaseRoot
 Assert-ChildPath -Path $archivePath -Parent $releaseRoot
+Assert-ChildPath -Path $setupPath -Parent $releaseRoot
+Assert-ChildPath -Path $setupHashPath -Parent $releaseRoot
 
 New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
 if (Test-Path -LiteralPath $workRoot) {
@@ -45,6 +51,12 @@ if (Test-Path -LiteralPath $archivePath) {
 }
 if (Test-Path -LiteralPath $hashPath) {
     Remove-Item -LiteralPath $hashPath -Force
+}
+if (Test-Path -LiteralPath $setupPath) {
+    Remove-Item -LiteralPath $setupPath -Force
+}
+if (Test-Path -LiteralPath $setupHashPath) {
+    Remove-Item -LiteralPath $setupHashPath -Force
 }
 New-Item -ItemType Directory -Force -Path $publishPath, $stagePath | Out-Null
 
@@ -93,6 +105,14 @@ if (-not (Test-Path -LiteralPath $dotnetLicense) -or
 Copy-Item -LiteralPath $dotnetLicense -Destination (Join-Path $stagePath 'DOTNET_LICENSE.txt')
 Copy-Item -LiteralPath $dotnetNotices -Destination (Join-Path $stagePath 'DOTNET_THIRD_PARTY_NOTICES.txt')
 
+if ($Sign) {
+    & (Join-Path $repositoryRoot 'scripts\Sign-WindowsArtifacts.ps1') `
+        -Path (Join-Path $stagePath 'LazyForza.App.exe')
+    if ($LASTEXITCODE -ne 0) {
+        throw "Application signing failed with exit code $LASTEXITCODE."
+    }
+}
+
 $buildInfo = @(
     "LazyForza $Version"
     "Runtime: $Runtime self-contained"
@@ -128,8 +148,60 @@ Compress-Archive -LiteralPath $stagePath -DestinationPath $archivePath -Compress
 $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
 Set-Content -LiteralPath $hashPath -Value "$archiveHash  $([System.IO.Path]::GetFileName($archivePath))" -Encoding ASCII
 
+if (-not $SkipInstaller) {
+    $innoCompiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $innoCompiler) {
+        $innoCandidates = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+        )
+        $innoCompiler = $innoCandidates |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+            Select-Object -First 1
+    }
+    if ($null -eq $innoCompiler) {
+        throw 'Inno Setup 6 compiler was not found. Install Inno Setup 6 or use -SkipInstaller for portable-only local checks.'
+    }
+    $innoCompilerPath = if ($innoCompiler.PSObject.Properties.Name -contains 'Source') {
+        $innoCompiler.Source
+    } elseif ($innoCompiler.PSObject.Properties.Name -contains 'FullName') {
+        $innoCompiler.FullName
+    } else {
+        [string]$innoCompiler
+    }
+    $numericVersion = ($Version -split '[-+]')[0]
+    & $innoCompilerPath `
+        "-dAppVersion=$Version" `
+        "-dNumericVersion=$numericVersion" `
+        "-dPublishDir=$stagePath" `
+        "-dOutputDir=$releaseRoot" `
+        (Join-Path $repositoryRoot 'packaging\installer\LazyForza.iss')
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
+    }
+    if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) {
+        throw "Installer output is missing: $setupPath"
+    }
+    if ($Sign) {
+        & (Join-Path $repositoryRoot 'scripts\Sign-WindowsArtifacts.ps1') -Path $setupPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Installer signing failed with exit code $LASTEXITCODE."
+        }
+    }
+    $setupHash = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash
+    Set-Content -LiteralPath $setupHashPath `
+        -Value "$setupHash  $([System.IO.Path]::GetFileName($setupPath))" `
+        -Encoding ASCII
+}
+
 Remove-Item -LiteralPath $workRoot -Recurse -Force
 
 Write-Output "PACKAGE=$archivePath"
 Write-Output "SHA256=$archiveHash"
 Write-Output "SIZE=$((Get-Item -LiteralPath $archivePath).Length)"
+if (-not $SkipInstaller) {
+    Write-Output "INSTALLER=$setupPath"
+    Write-Output "INSTALLER_SHA256=$setupHash"
+    Write-Output "INSTALLER_SIZE=$((Get-Item -LiteralPath $setupPath).Length)"
+}

@@ -31,11 +31,16 @@ public partial class App : Application
     private StartupProfile startupProfile = StartupProfile.CreateDefault();
     private bool exitRequested;
     private bool minimizedNoticeShown;
+    private static bool localizationHandlerRegistered;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        singleInstance = SingleInstanceCoordinator.TryAcquire(Dispatcher, ShowMainWindow);
+        singleInstance = SingleInstanceCoordinator.TryAcquire(
+            Dispatcher,
+            ShowMainWindow,
+            e.Args,
+            ActivateExistingInstance);
         if (singleInstance is null)
         {
             Shutdown();
@@ -46,7 +51,8 @@ public partial class App : Application
             startupProfileStore = new StartupProfileStore();
             startupProfile = startupProfileStore.Load();
             var explicitDataRoot = DataRoot(e.Args);
-            AppLocalization.UseLanguage(startupProfile.Language);
+            AppLocalization.UseLanguage(LanguageOverride(e.Args) ?? startupProfile.Language);
+            EnsureWindowLocalization();
             var initializationCaptureDirectory = InitializationCaptureDirectory(e.Args);
             if (initializationCaptureDirectory is not null)
             {
@@ -78,6 +84,7 @@ public partial class App : Application
                 startupProfileStore.ResolveDataDirectory(explicitDataRoot, startupProfile));
             directories.EnsureCreated();
             var replayPath = ReplayPath(e.Args);
+            var associatedFilePath = AssociatedFilePath(e.Args);
             var captureDirectory = CaptureDirectory(e.Args);
             var captureDriftQa = e.Args.Contains(
                 "--capture-drift-qa",
@@ -199,6 +206,11 @@ public partial class App : Application
                 startupProfileStore);
             MainWindow.Closing += OnMainWindowClosing;
             MainWindow.Show();
+            if (associatedFilePath is not null)
+                _ = Dispatcher.BeginInvoke(
+                    new Action(() =>
+                        _ = ((MainWindow)MainWindow).OpenAssociatedFileAsync(associatedFilePath)),
+                    System.Windows.Threading.DispatcherPriority.Background);
             trayIcon = new TrayIconService(
                 SourceModeText(source.Kind),
                 $"{listenAddress}:{port}",
@@ -290,6 +302,14 @@ public partial class App : Application
         MainWindow.Focus();
     }
 
+    private void ActivateExistingInstance(IReadOnlyList<string> arguments)
+    {
+        if (MainWindow is not MainWindow mainWindow) return;
+        var associatedFilePath = AssociatedFilePath(arguments);
+        if (associatedFilePath is not null)
+            _ = mainWindow.OpenAssociatedFileAsync(associatedFilePath);
+    }
+
     private void ExitApplication(int exitCode = 0)
     {
         if (exitRequested) return;
@@ -365,11 +385,64 @@ public partial class App : Application
         return null;
     }
 
+    private static string? LanguageOverride(IReadOnlyList<string> arguments)
+    {
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            string? value = null;
+            if (arguments[index].StartsWith("--language=", StringComparison.OrdinalIgnoreCase))
+                value = arguments[index][11..];
+            else if (arguments[index].Equals("--language", StringComparison.OrdinalIgnoreCase) &&
+                     index + 1 < arguments.Count)
+                value = arguments[index + 1];
+            if (AppLocalization.IsSupported(value)) return value;
+        }
+
+        return null;
+    }
+
+    private static void EnsureWindowLocalization()
+    {
+        if (localizationHandlerRegistered) return;
+        localizationHandlerRegistered = true;
+        EventManager.RegisterClassHandler(
+            typeof(Window),
+            FrameworkElement.LoadedEvent,
+            new RoutedEventHandler((sender, _) =>
+            {
+                if (sender is Window { Content: DependencyObject content })
+                    AppLocalization.ApplyTo(content);
+            }));
+    }
+
+    internal static string? AssociatedFilePath(IReadOnlyList<string> arguments)
+    {
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            string? candidate = null;
+            if (arguments[index].StartsWith("--open=", StringComparison.OrdinalIgnoreCase))
+                candidate = arguments[index][7..];
+            else if (arguments[index].Equals("--open", StringComparison.OrdinalIgnoreCase) &&
+                     index + 1 < arguments.Count)
+                candidate = arguments[index + 1];
+            else if (!arguments[index].StartsWith("--", StringComparison.Ordinal) &&
+                     Path.HasExtension(arguments[index]))
+                candidate = arguments[index];
+            if (candidate is null) continue;
+            var extension = Path.GetExtension(candidate);
+            if (extension.Equals(".lfzlap", StringComparison.OrdinalIgnoreCase) ||
+                extension.Equals(".lfzestate", StringComparison.OrdinalIgnoreCase) ||
+                extension.Equals(".lfztelemetry", StringComparison.OrdinalIgnoreCase))
+                return candidate;
+        }
+
+        return null;
+    }
+
     private static bool SkipInitialization(IReadOnlyList<string> arguments) =>
         arguments.Any(argument =>
             argument.Equals("--skip-initialization", StringComparison.OrdinalIgnoreCase) ||
             argument.Equals("--demo", StringComparison.OrdinalIgnoreCase) ||
-            argument.StartsWith("--replay", StringComparison.OrdinalIgnoreCase) ||
             argument.StartsWith("--capture-", StringComparison.OrdinalIgnoreCase) ||
             argument.StartsWith("--auto-record-seconds", StringComparison.OrdinalIgnoreCase));
 

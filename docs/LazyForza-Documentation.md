@@ -13,11 +13,22 @@ LazyForza 是面向 Forza Horizon 6 的本地遥测、驾驶分析与地产赛�
 
 ### 1.1 下载与安装
 
-从 [GitHub Releases](https://github.com/Laz22y/LazyForza/releases/latest) 或官网的 GitCode 下载入口获取最新版 `win-x64.zip`。完整解压后运行 `LazyForza.App.exe`。正式包已包含 .NET 运行时，不需要安装程序。
+从 [GitHub Releases](https://github.com/Laz22y/LazyForza/releases/latest) 或官网的 GitCode 下载入口获取最新版：
+
+- 安装版：运行 `win-x64-setup.exe`，选择安装目录。安装器创建开始菜单入口，并关联 `.lfztelemetry`、`.lfzlap` 和 `.lfzestate`；
+- 便携版：下载 `win-x64.zip`，完整解压后运行 `LazyForza.App.exe`。便携版不写入注册表、不创建开始菜单入口，也不注册文件关联。
+
+两种版本都包含 .NET 运行时，主程序功能与数据格式相同。
 
 不要直接在 ZIP 压缩包内运行。更新、日志、录制和本地数据库都需要正常的可写目录。
 
-### 1.2 配置 FH6 Data Out
+### 1.2 首次启动
+
+首次启动不会直接显示主窗口。初始化指引依次设置界面语言、可选玩家代号、数据目录、关闭窗口行为和 FH6 Data Out。最后一步只在收到有效的 FH6 遥测后完成，随后打开主窗口。
+
+旧版升级后会执行一次初始化；完成标记独立保存在本机，后续更新不会重复触发。语言、数据目录和关闭行为可在设置页修改。
+
+### 1.3 配置 FH6 Data Out
 
 在 FH6 的“设置 > HUD 与游戏玩法”中：
 
@@ -27,7 +38,7 @@ LazyForza 是面向 Forza Horizon 6 的本地遥测、驾驶分析与地产赛�
 
 返回驾驶后，LazyForza 会自动接收数据。主界面显示 Live 状态即表示连接成功。
 
-### 1.3 第一次使用建议
+### 1.4 第一次使用建议
 
 1. 在 HUD 设置中只开启当前需要的部件；
 2. 打开布局编辑器，调整位置、缩放和透明度；
@@ -85,11 +96,14 @@ LazyForza 按赛道距离对齐单圈，联动显示：
 
 ### 3.1 本地数据目录
 
-默认目录为：
+首次启动可选择以下目录：
 
-```text
-%LOCALAPPDATA%\LazyForza
-```
+- `%LOCALAPPDATA%\LazyForza`；
+- `%LOCALAPPDATA%\LazyForza-Release`；
+- 程序目录下的 `Data`；
+- 任意自定义目录。
+
+选择新目录不会自动移动旧目录中的数据。设置页保存后重启生效。
 
 主要内容：
 
@@ -118,7 +132,7 @@ LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 
 ### 3.3 更新
 
-启动检查更新默认开启，可在设置中关闭。发现新版时只提示，不强制安装。程序优先使用 GitCode，失败时回退 GitHub；安装前校验发行包 SHA-256 和包内清单，失败时恢复原版本。
+启动检查更新默认开启，可在设置中关闭。发现新版时只提示，不强制安装。程序优先使用 GitCode，失败时回退 GitHub；安装前校验便携更新包 SHA-256 和包内清单，失败时恢复原版本。安装版和便携版共用同一更新内容，不会因更新改变已选择的数据目录或重复执行初始化。
 
 ## 4. RaceServer
 

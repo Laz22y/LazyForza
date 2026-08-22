@@ -65,6 +65,7 @@ internal sealed partial class MainWindow : Window
     private readonly Dictionary<Guid, HashSet<int>> selectedLapPerformanceClasses = [];
     private readonly HashSet<Guid> customizedLapPerformanceFilters = [];
     private readonly Dictionary<Guid, TrackTemplate> trackPreviewCache = [];
+    private string? pendingReplayRecordingPath;
     private Action? refreshVisiblePage;
     private bool changingModule;
     private bool showDiagnosticsNavigation;
@@ -1136,7 +1137,12 @@ internal sealed partial class MainWindow : Window
                 return;
             }
 
-            statusLabel.Text = $"{current.TrackName} · 已保存 {current.CompletedLaps} 圈\n{current.Status}";
+            statusLabel.Text = AppLocalization.Format(
+                "lap.status",
+                "{0} · 已保存 {1} 圈\n{2}",
+                AppLocalization.Literal(current.TrackName),
+                current.CompletedLaps,
+                AppLocalization.Literal(current.Status));
             for (var index = 0; index < current.Sectors.Count; index++)
             {
                 var sector = current.Sectors[index];
@@ -1190,7 +1196,7 @@ internal sealed partial class MainWindow : Window
             {
                 comparisonHost.Children.Add(activeTrack is null
                     ? module.HasCurrentCompetitionSession
-                        ? EmptyCard(hud.TrackName, hud.Status)
+                        ? EmptyCard(hud.TrackName, AppLocalization.Literal(hud.Status))
                         : EmptyCard("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。")
                     : activePerformanceClasses.Count == 0
                         ? EmptyCard("未选择性能等级", "选择至少一个性能等级。")
@@ -3797,7 +3803,7 @@ internal sealed partial class MainWindow : Window
     private static string AnalysisTime(double? seconds, bool approximate) =>
         seconds is double value ? $"{(approximate ? "≈ " : string.Empty)}{Time(value)}" : "—";
     private static string PerformanceClassName(int value) => PerformanceClassCatalog.Name(value);
-    private static string ModuleStateText(ModuleRuntimeState state) => state switch
+    private static string ModuleStateText(ModuleRuntimeState state) => AppLocalization.Literal(state switch
     {
         ModuleRuntimeState.Disabled => "已停用",
         ModuleRuntimeState.Initialized => "已就绪",
@@ -3806,9 +3812,9 @@ internal sealed partial class MainWindow : Window
         ModuleRuntimeState.Stopping => "正在停止",
         ModuleRuntimeState.Faulted => "发生错误",
         _ => state.ToString()
-    };
+    });
 
-    private static string TelemetryStateText(TelemetryStreamState state) => state switch
+    private static string TelemetryStateText(TelemetryStreamState state) => AppLocalization.Literal(state switch
     {
         TelemetryStreamState.Disconnected => "未连接",
         TelemetryStreamState.Connecting => "正在连接",
@@ -3817,9 +3823,9 @@ internal sealed partial class MainWindow : Window
         TelemetryStreamState.Stale => "数据中断",
         TelemetryStreamState.Faulted => "发生错误",
         _ => state.ToString()
-    };
+    });
 
-    private static string LearningStateText(LearningState state) => state switch
+    private static string LearningStateText(LearningState state) => AppLocalization.Literal(state switch
     {
         LearningState.NotStarted => "等待数据",
         LearningState.Collecting => "正在学习",
@@ -3828,7 +3834,7 @@ internal sealed partial class MainWindow : Window
         LearningState.Stale => "需要重新学习",
         LearningState.Error => "发生错误",
         _ => state.ToString()
-    };
+    });
     private static Color PerformanceClassColor(int value) => value switch
     {
         0 => Color.FromRgb(0x62, 0xB8, 0xE8),
@@ -3845,14 +3851,14 @@ internal sealed partial class MainWindow : Window
         (byte)(25 + color.R * 0.20),
         (byte)(30 + color.G * 0.20),
         (byte)(37 + color.B * 0.20));
-    private static string SectorStateText(SectorColorState state) => state switch
+    private static string SectorStateText(SectorColorState state) => AppLocalization.Literal(state switch
     {
         SectorColorState.Gray => "未跑",
         SectorColorState.Yellow => "偏慢",
         SectorColorState.Green => "本场最快",
         SectorColorState.Purple => "历史最快",
         _ => "未知"
-    };
+    });
     private static string SectorStateBrush(SectorColorState state) => state switch
     {
         SectorColorState.Gray => "MutedBrush",

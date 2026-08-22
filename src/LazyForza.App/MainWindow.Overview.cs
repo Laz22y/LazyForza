@@ -44,9 +44,14 @@ internal sealed partial class MainWindow
         {
             var diagnostics = telemetry.Diagnostics;
             streamValue.Text = TelemetryStateText(diagnostics.State);
-            streamDetail.Text = diagnostics.LastPacketAt?.ToLocalTime().ToString("HH:mm:ss") ?? "等待数据";
+            streamDetail.Text = diagnostics.LastPacketAt?.ToLocalTime().ToString("HH:mm:ss") ??
+                                AppLocalization.Literal("等待数据");
             rateValue.Text = diagnostics.PacketsPerSecond.ToString("0.0 Hz");
-            rateDetail.Text = $"{diagnostics.ValidPackets:N0} 个有效包 · {diagnostics.InvalidPackets:N0} 个无效包";
+            rateDetail.Text = AppLocalization.Format(
+                "overview.packetCounts",
+                "{0:N0} 个有效包 · {1:N0} 个无效包",
+                diagnostics.ValidPackets,
+                diagnostics.InvalidPackets);
             if (pageRefresh.ShouldRefreshOverviewStorage(DateTimeOffset.UtcNow))
             {
                 pageRefresh.UpdateOverviewStorage(
@@ -54,11 +59,17 @@ internal sealed partial class MainWindow
                     store.CountTracks(CurrentTrackSource),
                     DateTimeOffset.UtcNow);
             }
-            dataValue.Text = $"{pageRefresh.OverviewLapCount} 圈";
-            dataDetail.Text = $"{pageRefresh.OverviewTrackCount} 条赛道";
+            dataValue.Text = AppLocalization.Format(
+                "overview.laps",
+                "{0} 圈",
+                pageRefresh.OverviewLapCount);
+            dataDetail.Text = AppLocalization.Format(
+                "overview.tracks",
+                "{0} 条赛道",
+                pageRefresh.OverviewTrackCount);
             foreach (var (module, label) in moduleLabels)
             {
-                label.Text = $"{module.Descriptor.DisplayName} · {ModuleStateText(module.Status.State)}";
+                label.Text = $"{AppLocalization.Literal(module.Descriptor.DisplayName)} · {ModuleStateText(module.Status.State)}";
                 label.Foreground = Brush(module.Status.State == ModuleRuntimeState.Running ? "AccentBrush" : "MutedBrush");
             }
         };
@@ -81,7 +92,11 @@ internal sealed partial class MainWindow
             var description = new StackPanel();
             description.Children.Add(Label(module.Descriptor.DisplayName, 17, FontWeights.SemiBold));
             description.Children.Add(Label(module.Descriptor.Description, 13, FontWeights.Normal, "MutedBrush"));
-            description.Children.Add(Label($"状态：{ModuleStateText(module.Status.State)}" + (module.Status.LastError is null ? string.Empty : $" · {module.Status.LastError}"), 12,
+            description.Children.Add(Label(AppLocalization.Format(
+                    "modules.status",
+                    "状态：{0}",
+                    ModuleStateText(module.Status.State)) +
+                (module.Status.LastError is null ? string.Empty : $" · {module.Status.LastError}"), 12,
                 FontWeights.Normal, module.Status.State == ModuleRuntimeState.Faulted ? "AccentBrush" : "MutedBrush"));
             if (module is DriftDashboardModule)
             {
@@ -206,7 +221,9 @@ internal sealed partial class MainWindow
 
         return Scroll(stack);
 
-        static string AutoCloseDashboardText(bool enabled) =>
-            $"打开漂移仪表盘时自动关闭主仪表盘：{(enabled ? "开" : "关")}";
+        static string AutoCloseDashboardText(bool enabled) => AppLocalization.Format(
+            "modules.autoCloseDashboard",
+            "打开漂移仪表盘时自动关闭主仪表盘：{0}",
+            AppLocalization.Literal(enabled ? "开" : "关"));
     }
 }

@@ -166,12 +166,13 @@ internal sealed partial class MainWindow
             var selectedLanguage = ((AppLanguageOption)language.SelectedItem).Code;
             var selectedCloseBehavior = ((CloseBehaviorChoice)closeBehavior.SelectedItem).Value;
             var normalizedDataDirectory = Path.GetFullPath(selectedDataDirectory);
-            startupProfileStore.Save(profile with
+            var updatedProfile = profile with
             {
                 Language = selectedLanguage,
                 DataDirectory = normalizedDataDirectory,
                 CloseBehavior = selectedCloseBehavior
-            });
+            };
+            startupProfileStore.Save(updatedProfile);
             var restartRequired =
                 !selectedLanguage.Equals(profile.Language, StringComparison.OrdinalIgnoreCase) ||
                 !PathsEqual(normalizedDataDirectory, directories.Root);
@@ -182,6 +183,7 @@ internal sealed partial class MainWindow
                     AppLocalization.Text("settings.app.restartTitle", "需要重启"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
+            profile = updatedProfile;
         };
         panel.Children.Add(save);
         return Card(panel);
@@ -221,6 +223,13 @@ internal sealed partial class MainWindow
         }
     }
 
-    private sealed record DataDirectoryChoice(string Name, string? Path);
-    private sealed record CloseBehaviorChoice(string Name, MainWindowCloseBehavior Value);
+    private sealed record DataDirectoryChoice(string Name, string? Path)
+    {
+        public override string ToString() => Name;
+    }
+
+    private sealed record CloseBehaviorChoice(string Name, MainWindowCloseBehavior Value)
+    {
+        public override string ToString() => Name;
+    }
 }

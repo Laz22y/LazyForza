@@ -29,6 +29,9 @@ $tag = "v$Version"
 $packageName = "LazyForza-$Version-win-x64.zip"
 $packagePath = Join-Path $releaseRoot $packageName
 $checksumPath = "$packagePath.sha256"
+$installerName = "LazyForza-$Version-win-x64-setup.exe"
+$installerPath = Join-Path $releaseRoot $installerName
+$installerChecksumPath = "$installerPath.sha256"
 $majorFeatureLabel = -join @(
     [char]0x91CD,
     [char]0x5927,
@@ -504,14 +507,22 @@ if (-not $SkipBuild) {
 }
 
 if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf) -or
-    -not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
-    throw "Release package or checksum is missing for $Version."
+    -not (Test-Path -LiteralPath $checksumPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $installerPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $installerChecksumPath -PathType Leaf)) {
+    throw "Portable package, installer, or checksum is missing for $Version."
 }
 $localHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash
 $declaredHash = ((Get-Content -LiteralPath $checksumPath -Raw -Encoding ASCII).Trim() `
         -split '\s+')[0].ToUpperInvariant()
 if ($localHash -ne $declaredHash) {
     throw "Local package hash does not match its sidecar: $localHash / $declaredHash"
+}
+$localInstallerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash
+$declaredInstallerHash = ((Get-Content -LiteralPath $installerChecksumPath -Raw -Encoding ASCII).Trim() `
+        -split '\s+')[0].ToUpperInvariant()
+if ($localInstallerHash -ne $declaredInstallerHash) {
+    throw "Local installer hash does not match its sidecar: $localInstallerHash / $declaredInstallerHash"
 }
 
 $head = (git rev-parse HEAD).Trim()
@@ -552,6 +563,8 @@ try {
     gh release create $tag `
         $packagePath `
         $checksumPath `
+        $installerPath `
+        $installerChecksumPath `
         --repo $githubRepository `
         --title $expectedTitle `
         --notes-file $publishedNotesPath `
@@ -568,6 +581,12 @@ try {
     if ($githubPackage.Count -ne 1 -or
         $githubPackage[0].digest -ne "sha256:$($localHash.ToLowerInvariant())") {
         throw 'GitHub package digest verification failed.'
+    }
+    $githubInstaller = @($githubRelease.assets |
+        Where-Object name -eq $installerName)
+    if ($githubInstaller.Count -ne 1 -or
+        $githubInstaller[0].digest -ne "sha256:$($localInstallerHash.ToLowerInvariant())") {
+        throw 'GitHub installer digest verification failed.'
     }
     if ($githubRelease.name -ne $expectedTitle -or
         -not ([string]$githubRelease.body).Contains($updateTypeMarker)) {
@@ -650,6 +669,14 @@ try {
             -ApiClient $apiClient `
             -UploadClient $uploadClient `
             -File (Get-Item -LiteralPath $checksumPath)
+        Send-GitCodeAsset `
+            -ApiClient $apiClient `
+            -UploadClient $uploadClient `
+            -File (Get-Item -LiteralPath $installerPath)
+        Send-GitCodeAsset `
+            -ApiClient $apiClient `
+            -UploadClient $uploadClient `
+            -File (Get-Item -LiteralPath $installerChecksumPath)
 
         $gitCodeResult = Invoke-GitCodeRequest `
             -Client $apiClient `
@@ -657,11 +684,15 @@ try {
             -Uri "$gitCodeRepositoryUri/releases/tags/$tag"
         $gitCodeRelease = $gitCodeResult.Body | ConvertFrom-Json
         $binaryAssets = @($gitCodeRelease.assets |
-            Where-Object { $_.name -in @($packageName, "$packageName.sha256") })
+            Where-Object { $_.name -in @(
+                $packageName,
+                "$packageName.sha256",
+                $installerName,
+                "$installerName.sha256") })
         if ($gitCodeRelease.tag_name -ne $tag -or
             $gitCodeRelease.name -ne $expectedTitle -or
             -not ([string]$gitCodeRelease.body).Contains($updateTypeMarker) -or
-            $binaryAssets.Count -ne 2) {
+            $binaryAssets.Count -ne 4) {
             throw 'GitCode release metadata verification failed.'
         }
     }
@@ -684,6 +715,8 @@ New-Item -ItemType Directory -Path $verifyRoot | Out-Null
 try {
     $downloadedPackage = Join-Path $verifyRoot $packageName
     $downloadedChecksum = "$downloadedPackage.sha256"
+    $downloadedInstaller = Join-Path $verifyRoot $installerName
+    $downloadedInstallerChecksum = "$downloadedInstaller.sha256"
     $downloadBase =
         "$gitCodeRepositoryUri/releases/$tag/attach_files"
     $downloadClient = New-GitCodeHttpClient
@@ -699,6 +732,14 @@ try {
             -Client $downloadClient `
             -Uri "$downloadBase/$packageName.sha256/download" `
             -DestinationPath $downloadedChecksum
+        Receive-GitCodePublicAsset `
+            -Client $downloadClient `
+            -Uri "$downloadBase/$installerName/download" `
+            -DestinationPath $downloadedInstaller
+        Receive-GitCodePublicAsset `
+            -Client $downloadClient `
+            -Uri "$downloadBase/$installerName.sha256/download" `
+            -DestinationPath $downloadedInstallerChecksum
     }
     finally {
         $downloadClient.Dispose()
@@ -712,6 +753,15 @@ try {
     if ($downloadedHash -ne $localHash -or
         $downloadedDeclaredHash -ne $localHash) {
         throw 'GitCode public download verification failed.'
+    }
+    $downloadedInstallerHash =
+        (Get-FileHash -LiteralPath $downloadedInstaller -Algorithm SHA256).Hash
+    $downloadedInstallerDeclaredHash =
+        ((Get-Content -LiteralPath $downloadedInstallerChecksum -Raw -Encoding ASCII).Trim() `
+            -split '\s+')[0].ToUpperInvariant()
+    if ($downloadedInstallerHash -ne $localInstallerHash -or
+        $downloadedInstallerDeclaredHash -ne $localInstallerHash) {
+        throw 'GitCode public installer verification failed.'
     }
 }
 finally {
@@ -737,5 +787,8 @@ Write-Output "TESTS=$testCount"
 Write-Output "PACKAGE=$packagePath"
 Write-Output "SIZE=$((Get-Item -LiteralPath $packagePath).Length)"
 Write-Output "SHA256=$localHash"
+Write-Output "INSTALLER=$installerPath"
+Write-Output "INSTALLER_SIZE=$((Get-Item -LiteralPath $installerPath).Length)"
+Write-Output "INSTALLER_SHA256=$localInstallerHash"
 Write-Output "GITHUB=https://github.com/$githubRepository/releases/tag/$tag"
 Write-Output "GITCODE=https://gitcode.com/Laz22y/LazyForza/releases/$tag"

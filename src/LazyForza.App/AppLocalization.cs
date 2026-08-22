@@ -1,12 +1,17 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using LazyForza.Overlay;
 
 namespace LazyForza.App;
 
-internal sealed record AppLanguageOption(string Code, string NativeName, string EnglishName);
+internal sealed record AppLanguageOption(string Code, string NativeName, string EnglishName)
+{
+    public override string ToString() => NativeName;
+}
 
 internal static class AppLocalization
 {
@@ -18,6 +23,15 @@ internal static class AppLocalization
 
     private static IReadOnlyDictionary<string, string> translations =
         new Dictionary<string, string>(StringComparer.Ordinal);
+    private static readonly Regex ConfirmingStartPattern = new(
+        "^正在确认起点 · (?<count>[0-9]+) 个轨迹点$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex DriveThroughLapsPattern = new(
+        "^还可跨越终点线 (?<count>[0-9]+) 次$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex CandidateVerifiedPattern = new(
+        "^候选：(?<name>.+) · 已验证 (?<meters>[0-9]+) m$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static string CurrentLanguage { get; private set; } = StartupProfile.DefaultLanguage;
 
@@ -32,6 +46,7 @@ internal static class AppLocalization
             item.Code.Equals(language, StringComparison.OrdinalIgnoreCase)) ?? LanguageOptions[0];
         CurrentLanguage = option.Code;
         translations = LoadTranslations(option.Code);
+        OverlayTextLocalization.Configure(Literal);
         var culture = option.Code == "en" ? CultureInfo.GetCultureInfo("en-US") : CultureInfo.GetCultureInfo("zh-CN");
         CultureInfo.CurrentUICulture = culture;
         CultureInfo.DefaultThreadCurrentUICulture = culture;
@@ -51,9 +66,29 @@ internal static class AppLocalization
     public static string Literal(string text)
     {
         if (string.IsNullOrEmpty(text) || CurrentLanguage == StartupProfile.DefaultLanguage) return text;
-        return translations.TryGetValue($"literal:{text}", out var localized) && !string.IsNullOrWhiteSpace(localized)
-            ? localized
-            : text;
+        if (translations.TryGetValue($"literal:{text}", out var localized) &&
+            !string.IsNullOrWhiteSpace(localized))
+            return localized;
+        var match = ConfirmingStartPattern.Match(text);
+        if (match.Success)
+            return Format(
+                "template.confirmingStart",
+                "正在确认起点 · {0} 个轨迹点",
+                match.Groups["count"].Value);
+        match = DriveThroughLapsPattern.Match(text);
+        if (match.Success)
+            return Format(
+                "template.driveThroughLaps",
+                "还可跨越终点线 {0} 次",
+                match.Groups["count"].Value);
+        match = CandidateVerifiedPattern.Match(text);
+        if (match.Success)
+            return Format(
+                "template.candidateVerified",
+                "候选：{0} · 已验证 {1} m",
+                match.Groups["name"].Value,
+                match.Groups["meters"].Value);
+        return text;
     }
 
     public static void ApplyTo(DependencyObject root)
@@ -70,7 +105,7 @@ internal static class AppLocalization
             case HeaderedContentControl headered when headered.Header is string header:
                 headered.Header = Literal(header);
                 break;
-            case ItemsControl itemsControl:
+            case ItemsControl itemsControl when itemsControl.ItemsSource is null:
                 for (var index = 0; index < itemsControl.Items.Count; index++)
                 {
                     if (itemsControl.Items[index] is string item)

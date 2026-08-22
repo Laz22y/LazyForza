@@ -66,8 +66,8 @@ internal sealed partial class MainWindow
         {
             MessageBox.Show(
                 this,
-                "请先在已保存圈速中勾选 1–4 圈。",
-                "导出圈速",
+                AppLocalization.Text("lap.exchange.selectFirst", "请先在已保存圈速中勾选 1–4 圈。"),
+                AppLocalization.Text("lap.exchange.exportTitle", "导出圈速"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
@@ -77,8 +77,8 @@ internal sealed partial class MainWindow
         {
             MessageBox.Show(
                 this,
-                "所选圈速的赛道数据不完整，无法导出。",
-                "导出圈速",
+                AppLocalization.Text("lap.exchange.incompleteTrack", "所选圈速的赛道数据不完整，无法导出。"),
+                AppLocalization.Text("lap.exchange.exportTitle", "导出圈速"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;
@@ -91,8 +91,8 @@ internal sealed partial class MainWindow
             .ToArray();
         var dialog = new SaveFileDialog
         {
-            Title = "导出 LazyForza 圈速分析",
-            Filter = "LazyForza 圈速分析 (*.lfzlap)|*.lfzlap",
+            Title = AppLocalization.Text("lap.exchange.exportDialog", "导出 LazyForza 圈速分析"),
+            Filter = AppLocalization.Text("lap.exchange.fileFilter", "LazyForza 圈速分析 (*.lfzlap)|*.lfzlap"),
             DefaultExt = ".lfzlap",
             AddExtension = true,
             FileName =
@@ -115,8 +115,8 @@ internal sealed partial class MainWindow
                 lifetimeCancellation.Token);
             MessageBox.Show(
                 this,
-                $"已导出 {laps.Length} 圈：\n{dialog.FileName}",
-                "导出完成",
+                AppLocalization.Format("lap.exchange.exported", "已导出 {0} 圈：\n{1}", laps.Length, dialog.FileName),
+                AppLocalization.Text("common.exportComplete", "导出完成"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -124,8 +124,8 @@ internal sealed partial class MainWindow
         {
             MessageBox.Show(
                 this,
-                $"无法导出圈速：{exception.Message}",
-                "导出失败",
+                AppLocalization.Format("lap.exchange.exportFailedMessage", "无法导出圈速：{0}", exception.Message),
+                AppLocalization.Text("common.exportFailed", "导出失败"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -135,39 +135,58 @@ internal sealed partial class MainWindow
         }
     }
 
-    private async Task ImportLapAnalysisAsync(LapAnalysisModule module, Button button)
+    private async Task ImportLapAnalysisAsync(
+        LapAnalysisModule module,
+        Button? button,
+        string? sourcePath = null)
     {
-        var dialog = new OpenFileDialog
+        if (sourcePath is null)
         {
-            Title = "导入 LazyForza 圈速分析",
-            Filter = "LazyForza 圈速分析 (*.lfzlap)|*.lfzlap|所有文件 (*.*)|*.*",
-            CheckFileExists = true,
-            Multiselect = false
-        };
-        if (dialog.ShowDialog(this) != true) return;
+            var dialog = new OpenFileDialog
+            {
+                Title = AppLocalization.Text("lap.exchange.importDialog", "导入 LazyForza 圈速分析"),
+                Filter = AppLocalization.Text(
+                    "lap.exchange.openFilter",
+                    "LazyForza 圈速分析 (*.lfzlap)|*.lfzlap|所有文件 (*.*)|*.*"),
+                CheckFileExists = true,
+                Multiselect = false
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            sourcePath = dialog.FileName;
+        }
 
-        button.IsEnabled = false;
+        if (button is not null) button.IsEnabled = false;
         try
         {
             var package = await LapAnalysisExchangeFile.ReadAsync(
-                dialog.FileName,
+                sourcePath,
                 lifetimeCancellation.Token);
             if (store.LoadTrack(package.TrackId) is not { } saved)
                 throw new InvalidOperationException(
-                    $"本机没有“{package.TrackName}”的赛道数据。请先导入或录入对应赛道。");
+                    AppLocalization.Format(
+                        "lap.exchange.missingTrack",
+                        "本机没有“{0}”的赛道数据。请先导入或录入对应赛道。",
+                        package.TrackName));
             if (saved.Track.Direction != package.Direction ||
                 saved.Sectors.All(sector => sector.SectorSchemaVersion != package.SectorSchemaVersion))
-                throw new InvalidOperationException("本机赛道与圈速文件的方向或分段版本不一致。");
+                throw new InvalidOperationException(AppLocalization.Text(
+                    "lap.exchange.trackMismatch",
+                    "本机赛道与圈速文件的方向或分段版本不一致。"));
 
             var players = package.Laps
                 .Select(lap => PlayerCodeText(lap.PlayerCode ?? package.ExportedByPlayerCode))
                 .Distinct(StringComparer.CurrentCulture)
                 .ToArray();
-            var playerText = string.Join("、", players);
+            var playerText = string.Join(AppLocalization.Text("common.listSeparator", "、"), players);
             if (MessageBox.Show(
                     this,
-                    $"赛道：{saved.Track.Name}\n圈速：{package.Laps.Count} 圈\n玩家代号：{playerText}\n\n导入后将加入本地圈速对比。",
-                    "导入圈速",
+                    AppLocalization.Format(
+                        "lap.exchange.importConfirmation",
+                        "赛道：{0}\n圈速：{1} 圈\n玩家代号：{2}\n\n导入后将加入本地圈速对比。",
+                        saved.Track.Name,
+                        package.Laps.Count,
+                        playerText),
+                    AppLocalization.Text("literal:导入圈速", "导入圈速"),
                     MessageBoxButton.OKCancel,
                     MessageBoxImage.Information) != MessageBoxResult.OK) return;
 
@@ -198,9 +217,16 @@ internal sealed partial class MainWindow
             MessageBox.Show(
                 this,
                 imported.Length == 0
-                    ? $"文件中的圈速已存在。\n玩家代号：{playerText}"
-                    : $"已导入 {imported.Length} 圈。\n玩家代号：{playerText}",
-                "导入完成",
+                    ? AppLocalization.Format(
+                        "lap.exchange.alreadyImported",
+                        "文件中的圈速已存在。\n玩家代号：{0}",
+                        playerText)
+                    : AppLocalization.Format(
+                        "lap.exchange.imported",
+                        "已导入 {0} 圈。\n玩家代号：{1}",
+                        imported.Length,
+                        playerText),
+                AppLocalization.Text("common.importComplete", "导入完成"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -212,13 +238,13 @@ internal sealed partial class MainWindow
             MessageBox.Show(
                 this,
                 exception.Message,
-                "无法导入圈速",
+                AppLocalization.Text("lap.exchange.importFailed", "无法导入圈速"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
         finally
         {
-            button.IsEnabled = true;
+            if (button is not null) button.IsEnabled = true;
         }
     }
 
@@ -230,7 +256,9 @@ internal sealed partial class MainWindow
     }
 
     private static string PlayerCodeText(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "未标注" : value.Trim();
+        string.IsNullOrWhiteSpace(value)
+            ? AppLocalization.Text("common.unlabeled", "未标注")
+            : value.Trim();
 
     private static string? NullIfBlank(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;

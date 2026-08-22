@@ -2760,7 +2760,7 @@ internal sealed class HudSurface : FrameworkElement
                     : "先执行罚时，完成后才能开始换胎";
         RaceText(dc, title, width * 0.045, height * 0.55,
             Math.Max(14, height * 0.19), White, TextAlignment.Left, true);
-        RaceBoundedText(dc, detail,
+        RaceBoundedText(dc, OverlayTextLocalization.Text(detail),
             new Rect(width * 0.045, height * 0.67, width * 0.68, height * 0.22),
             Math.Max(11, height * 0.125), RaceSecondary, true, TextAlignment.Left);
         var valueText = completed
@@ -3002,9 +3002,9 @@ internal sealed class HudSurface : FrameworkElement
         dc.DrawRectangle(color, null, new Rect(0, 0, width * 0.018, height));
         RaceText(dc, "GRIP TREND", width * 0.070, height * 0.25,
             Math.Max(11, height * 0.17), RaceSecondary, TextAlignment.Left, true);
-        RaceText(dc, GripConditionText(state.LocalGripCondition), width * 0.070, height * 0.58,
+        RaceText(dc, OverlayTextLocalization.Text(GripConditionText(state.LocalGripCondition)), width * 0.070, height * 0.58,
             Math.Max(13, height * 0.25), color, TextAlignment.Left, true);
-        RaceBoundedText(dc, state.GripExplanation,
+        RaceBoundedText(dc, OverlayTextLocalization.Text(state.GripExplanation),
             new Rect(width * 0.42, height * 0.08, width * 0.52, height * 0.46),
             Math.Max(11, height * 0.15),
             RaceSecondary,
@@ -3657,7 +3657,7 @@ internal sealed class HudSurface : FrameworkElement
             new Pen(BrushOf(0x8B, 0x9A, 0xAA, 0.20), 1),
             new Point(width * 0.045, height * 0.355),
             new Point(width * 0.955, height * 0.355));
-        RaceBoundedText(dc, item.Title,
+        RaceBoundedText(dc, OverlayTextLocalization.Text(item.Title),
             new Rect(width * 0.045, height * 0.405, width * 0.91, height * 0.235),
             Math.Max(14, height * 0.165), White, true, TextAlignment.Left);
         DrawRacePracticeGuidance(dc, item,
@@ -3717,9 +3717,10 @@ internal sealed class HudSurface : FrameworkElement
             practiceGuidanceAnimationKey = key;
             practiceGuidanceAnimationStartedSeconds = estateRaceAnimationNowSeconds;
         }
-        var typeface = ContainsChinese(item.Guidance) ? ChineseLightTypeface : RaceLightTypeface;
+        var guidance = OverlayTextLocalization.Text(item.Guidance);
+        var typeface = ContainsChinese(guidance) ? ChineseLightTypeface : RaceLightTypeface;
         var formatted = new FormattedText(
-            item.Guidance,
+            guidance,
             System.Globalization.CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
             typeface,
@@ -3807,10 +3808,10 @@ internal sealed class HudSurface : FrameworkElement
         RaceText(dc, banner.IsInvestigation ? "UNDER INVESTIGATION" : BannerKindText(banner.Kind),
             width * 0.035, height * 0.36,
             Math.Max(11, height * 0.15), foreground, TextAlignment.Left, true);
-        RaceText(dc, banner.Title, width * 0.035, height * 0.70,
+        RaceText(dc, OverlayTextLocalization.Text(banner.Title), width * 0.035, height * 0.70,
             Math.Max(16, height * 0.27), White, TextAlignment.Left, true);
         if (!string.IsNullOrWhiteSpace(banner.Detail))
-            RaceBoundedText(dc, banner.Detail!,
+            RaceBoundedText(dc, OverlayTextLocalization.Text(banner.Detail!),
                 new Rect(width * 0.47, height * 0.08, width * 0.49, height * 0.84),
                 Math.Max(13, height * 0.21), RaceSecondary, true);
     }
@@ -4903,7 +4904,7 @@ internal sealed class HudSurface : FrameworkElement
 
         var statusY = height * 0.055;
         var approximatePrefix = state.IsPointToPoint ? "≈ " : string.Empty;
-        var title = $"{state.TrackName}  ·  {approximatePrefix}{FormatLapTime(state.CurrentLapSeconds)}";
+        var title = $"{OverlayTextLocalization.Text(state.TrackName)}  ·  {approximatePrefix}{FormatLapTime(state.CurrentLapSeconds)}";
         Text(dc, title, width * 0.5 + 1.2, statusY + 1.2,
             height * 0.025, BrushOf(0x00, 0x00, 0x00, 0.82), TextAlignment.Center, true);
         Text(dc, title, width * 0.5, statusY,

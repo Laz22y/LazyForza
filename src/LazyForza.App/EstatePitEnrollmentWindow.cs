@@ -101,8 +101,18 @@ internal sealed class EstatePitEnrollmentWindow : Window
         var trackCard = new StackPanel();
         trackCard.Children.Add(Text(track.Name, 18, FontWeights.SemiBold));
         trackCard.Children.Add(Text(
-            $"地产修订 {definition.MapRevision} · {track.LengthMeters / 1000:0.00} km · " +
-            (definition.Pit is null ? "尚未配置维修区" : $"已有 {definition.Pit.CenterLine.Count} 个通道点 · 未选择的组件保持不变"),
+            definition.Pit is null
+                ? AppLocalization.Format(
+                    "estate.pit.trackWithoutPit",
+                    "地产修订 {0} · {1:0.00} km · 尚未配置维修区",
+                    definition.MapRevision,
+                    track.LengthMeters / 1000)
+                : AppLocalization.Format(
+                    "estate.pit.trackWithPit",
+                    "地产修订 {0} · {1:0.00} km · 已有 {2} 个通道点 · 未选择的组件保持不变",
+                    definition.MapRevision,
+                    track.LengthMeters / 1000,
+                    definition.Pit.CenterLine.Count),
             13, "MutedBrush"));
         stack.Children.Add(Card(trackCard));
 
@@ -245,38 +255,45 @@ internal sealed class EstatePitEnrollmentWindow : Window
         if (state.IsActive) preview.Update(track, definition, module.PitEnrollmentPreview);
         if (!state.IsActive)
         {
-            phase.Text = "当前阶段：准备";
+            phase.Text = AppLocalization.Literal("当前阶段：准备");
             status.Text = editScope == EstatePitEditScope.Settings
-                ? "已载入当前维修区设置。"
-                : "点击“准备录入”后开始本次修改。";
+                ? AppLocalization.Literal("已载入当前维修区设置。")
+                : AppLocalization.Literal("点击“准备录入”后开始本次修改。");
             instruction.Text = editScope == EstatePitEditScope.Settings
-                ? "确认参数后准备保存。"
+                ? AppLocalization.Literal("确认参数后准备保存。")
                 : ScopeSteps(editScope).Split('\n')[0];
             counts.Text = CountSummary(state);
         }
         else
         {
-            phase.Text = state.Phase switch
+            phase.Text = AppLocalization.Literal(state.Phase switch
             {
                 EstatePitCapturePhase.CapturingLane => "当前阶段：维修区通道录入",
                 EstatePitCapturePhase.AwaitingServiceCorners => "当前阶段：换胎区边界录入",
                 EstatePitCapturePhase.ReadyToSave => "当前阶段：可以保存",
                 EstatePitCapturePhase.Saved => "维修区录入完成",
                 _ => "当前阶段：准备"
-            };
-            status.Text = state.Status;
-            instruction.Text = state.Instruction;
+            });
+            status.Text = AppLocalization.Literal(state.Status);
+            instruction.Text = AppLocalization.Literal(state.Instruction);
             counts.Text = CountSummary(state);
         }
         prepare.IsEnabled = !state.IsActive || state.Phase == EstatePitCapturePhase.Idle;
         lane.IsEnabled = editScope.HasFlag(EstatePitEditScope.Lane) && state.IsActive && state.Phase is EstatePitCapturePhase.Idle or EstatePitCapturePhase.CapturingLane or EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
-        lane.Content = state.Phase == EstatePitCapturePhase.CapturingLane ? "2  结束通道录入" : "2  开始通道录入";
+        lane.Content = AppLocalization.Literal(
+            state.Phase == EstatePitCapturePhase.CapturingLane
+                ? "2  结束通道录入"
+                : "2  开始通道录入");
         entryGate.IsEnabled = editScope.HasFlag(EstatePitEditScope.EntryGate) && state.Phase is EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
         exitGate.IsEnabled = editScope.HasFlag(EstatePitEditScope.ExitGate) && state.Phase is EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
         var entryStep = editScope == EstatePitEditScope.All ? 3 : 2;
         var exitStep = editScope == EstatePitEditScope.All ? 4 : 2;
-        entryGate.Content = state.EntryLineCaptured ? $"{entryStep}  重设入口线" : $"{entryStep}  确认入口线";
-        exitGate.Content = state.ExitLineCaptured ? $"{exitStep}  重设出口线" : $"{exitStep}  确认出口线";
+        entryGate.Content = state.EntryLineCaptured
+            ? AppLocalization.Format("estate.pit.resetEntry", "{0}  重设入口线", entryStep)
+            : AppLocalization.Format("estate.pit.confirmEntry", "{0}  确认入口线", entryStep);
+        exitGate.Content = state.ExitLineCaptured
+            ? AppLocalization.Format("estate.pit.resetExit", "{0}  重设出口线", exitStep)
+            : AppLocalization.Format("estate.pit.confirmExit", "{0}  确认出口线", exitStep);
         corner.IsEnabled = editScope.HasFlag(EstatePitEditScope.ServiceZone) && state.Phase is EstatePitCapturePhase.AwaitingServiceCorners or EstatePitCapturePhase.ReadyToSave;
         clearCorners.IsEnabled = editScope.HasFlag(EstatePitEditScope.ServiceZone) && state.ServiceCorners > 0;
         save.IsEnabled = state.Phase == EstatePitCapturePhase.ReadyToSave &&
@@ -294,15 +311,24 @@ internal sealed class EstatePitEnrollmentWindow : Window
 
     private string CountSummary(EstatePitEnrollmentState state) => editScope switch
     {
-        EstatePitEditScope.Lane => $"通道样本 {state.LaneSamples}",
-        EstatePitEditScope.EntryGate => $"入口线{(state.EntryLineCaptured ? "已确认" : "待确认")}",
-        EstatePitEditScope.ExitGate => $"出口线{(state.ExitLineCaptured ? "已确认" : "待确认")}",
-        EstatePitEditScope.ServiceZone => $"换胎区边界点 {state.ServiceCorners}",
-        EstatePitEditScope.Settings => "几何数据保持不变",
-        _ => $"通道样本 {state.LaneSamples} · " +
-             $"入口线{(state.EntryLineCaptured ? "已确认" : "未确认")} · " +
-             $"出口线{(state.ExitLineCaptured ? "已确认" : "未确认")} · " +
-             $"换胎区边界点 {state.ServiceCorners}"
+        EstatePitEditScope.Lane => AppLocalization.Format(
+            "estate.pit.laneSamples", "通道样本 {0}", state.LaneSamples),
+        EstatePitEditScope.EntryGate => AppLocalization.Format(
+            "estate.pit.entryState", "入口线{0}",
+            AppLocalization.Literal(state.EntryLineCaptured ? "已确认" : "待确认")),
+        EstatePitEditScope.ExitGate => AppLocalization.Format(
+            "estate.pit.exitState", "出口线{0}",
+            AppLocalization.Literal(state.ExitLineCaptured ? "已确认" : "待确认")),
+        EstatePitEditScope.ServiceZone => AppLocalization.Format(
+            "estate.pit.serviceCorners", "换胎区边界点 {0}", state.ServiceCorners),
+        EstatePitEditScope.Settings => AppLocalization.Literal("几何数据保持不变"),
+        _ => AppLocalization.Format(
+            "estate.pit.counts",
+            "通道样本 {0} · 入口线{1} · 出口线{2} · 换胎区边界点 {3}",
+            state.LaneSamples,
+            AppLocalization.Literal(state.EntryLineCaptured ? "已确认" : "未确认"),
+            AppLocalization.Literal(state.ExitLineCaptured ? "已确认" : "未确认"),
+            state.ServiceCorners)
     };
 
     private void OnClosing(object? sender, CancelEventArgs eventArgs)
@@ -352,7 +378,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
 
     private static Button ActionButton(string label) => new()
     {
-        Content = label,
+        Content = AppLocalization.Literal(label),
         MinHeight = 42,
         Padding = new Thickness(16, 8, 16, 8),
         FontSize = 14,
@@ -361,7 +387,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
 
     private static TextBlock Text(string value, double size, FontWeight? weight = null, string? brush = null) => new()
     {
-        Text = value,
+        Text = AppLocalization.Literal(value),
         FontFamily = UiFont,
         FontSize = Math.Max(13, size),
         FontWeight = weight ?? FontWeights.Normal,
@@ -373,7 +399,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
     private static TextBlock Text(string value, double size, string brush) =>
         Text(value, size, null, brush);
 
-    private static string ScopeTitle(EstatePitEditScope scope, bool isNew) => isNew || scope == EstatePitEditScope.All
+    private static string ScopeTitle(EstatePitEditScope scope, bool isNew) => AppLocalization.Literal(isNew || scope == EstatePitEditScope.All
         ? "完整录入维修区"
         : scope switch
         {
@@ -383,9 +409,9 @@ internal sealed class EstatePitEnrollmentWindow : Window
             EstatePitEditScope.ServiceZone => "重录换胎区",
             EstatePitEditScope.Settings => "修改维修区规则",
             _ => "编辑维修区"
-        };
+        });
 
-    private static string ScopeDescription(EstatePitEditScope scope) => scope switch
+    private static string ScopeDescription(EstatePitEditScope scope) => AppLocalization.Literal(scope switch
     {
         EstatePitEditScope.Lane => "只重新采集维修区中心通道。原入口线、出口线、换胎区和规则参数会保留，并在保存时重新校验。",
         EstatePitEditScope.EntryGate => "只重设入口线。把车停在新入口线中心约 1 秒后确认；其他维修区数据保持不变。",
@@ -393,9 +419,9 @@ internal sealed class EstatePitEnrollmentWindow : Window
         EstatePitEditScope.ServiceZone => "只重录换胎区边界。依次在边界角点停车确认；通道、出入口和规则参数保持不变。",
         EstatePitEditScope.Settings => "只修改限速、通道宽度和最短服务时间，不需要重新驾驶录入。几何数据保持不变。",
         _ => "按比赛方向录入维修区通道，再分别确认入口线、出口线和换胎区边界。"
-    };
+    });
 
-    private static string ScopeSteps(EstatePitEditScope scope) => scope switch
+    private static string ScopeSteps(EstatePitEditScope scope) => AppLocalization.Literal(scope switch
     {
         EstatePitEditScope.Lane =>
             "点击准备后，从赛道分流点前开始，以 2–25 km/h 沿通道中心驶到并道点后。停车并结束录入，检查预览后保存。",
@@ -409,7 +435,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
             "修改参数后点击准备，再直接保存。限速是 LazyForza 赛事规则，不会改变游戏内车辆限速。",
         _ =>
             "1. 从分流点前开始，沿通道中心完整驶到并道点后。\n2. 在入口线和出口线中心分别停车确认。\n3. 按同一方向记录换胎区边界角点。\n4. 检查预览后保存。"
-    };
+    });
 
     private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];
 }

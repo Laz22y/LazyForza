@@ -59,7 +59,11 @@ internal sealed partial class MainWindow
         {
             trackSelector.Items.Add(new ComboBoxItem
             {
-                Content = $"{track.Name} · {track.Laps} 圈",
+                Content = AppLocalization.Format(
+                    "replay.trackItem",
+                    "{0} · {1} 圈",
+                    track.Name,
+                    track.Laps),
                 Tag = track.Id
             });
         }
@@ -80,7 +84,7 @@ internal sealed partial class MainWindow
         var previousTick = DateTimeOffset.UtcNow;
         LapRecord? currentLap = null;
         TrackTemplate? currentTrack = null;
-        var currentSourceName = "未知赛道";
+        var currentSourceName = AppLocalization.Text("replay.unknownTrack", "未知赛道");
         TrackMapView? mapView = null;
         Slider? timeline = null;
         TextBlock? timeValue = null;
@@ -106,17 +110,20 @@ internal sealed partial class MainWindow
             lapSelector.Items.Clear();
             if (trackSelector.SelectedItem is not ComboBoxItem { Tag: Guid trackId }) return;
             currentTrack = store.LoadTrack(trackId)?.Track;
-            currentSourceName = currentTrack?.Name ?? "未知赛道";
+            currentSourceName = currentTrack?.Name ?? AppLocalization.Text("replay.unknownTrack", "未知赛道");
             foreach (var lap in store.LoadLapSummaries(trackId)
                          .OrderByDescending(lap => lap.StartedAt))
             {
                 lapSelector.Items.Add(new ComboBoxItem
                 {
-                    Content =
-                        $"{AnalysisTime(lap.TotalSeconds, currentTrack?.LayoutKind == TrackLayoutKind.PointToPoint)} · " +
-                        $"{PerformanceClassName(lap.Vehicle.CarClass)} {lap.Vehicle.PerformanceIndex} · " +
-                        $"{lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss} · " +
-                        $"玩家 {PlayerCodeText(lap.PlayerCode)}",
+                    Content = AppLocalization.Format(
+                        "replay.savedLapItem",
+                        "{0} · {1} {2} · {3:MM-dd HH:mm:ss} · 玩家 {4}",
+                        AnalysisTime(lap.TotalSeconds, currentTrack?.LayoutKind == TrackLayoutKind.PointToPoint),
+                        PerformanceClassName(lap.Vehicle.CarClass),
+                        lap.Vehicle.PerformanceIndex,
+                        lap.StartedAt.ToLocalTime(),
+                        PlayerCodeText(lap.PlayerCode)),
                     Tag = lap.Id
                 });
             }
@@ -137,7 +144,7 @@ internal sealed partial class MainWindow
             currentLap = store.LoadLap(lapId);
             if (currentLap is null) return;
             currentTrack = store.LoadTrack(currentLap.TrackId)?.Track;
-            currentSourceName = currentTrack?.Name ?? "未知赛道";
+            currentSourceName = currentTrack?.Name ?? AppLocalization.Text("replay.unknownTrack", "未知赛道");
             elapsed = 0;
             previousTick = DateTimeOffset.UtcNow;
             exportRecording.IsEnabled = true;
@@ -149,8 +156,8 @@ internal sealed partial class MainWindow
             if (currentLap is null) return;
             var dialog = new SaveFileDialog
             {
-                Title = "导出单圈 LazyForza 遥测",
-                Filter = "LazyForza 单圈遥测 (*.lfztelemetry)|*.lfztelemetry",
+                Title = AppLocalization.Text("replay.exportDialog", "导出单圈 LazyForza 遥测"),
+                Filter = AppLocalization.Text("replay.exportFilter", "LazyForza 单圈遥测 (*.lfztelemetry)|*.lfztelemetry"),
                 DefaultExt = ".lfztelemetry",
                 AddExtension = true,
                 FileName =
@@ -169,16 +176,16 @@ internal sealed partial class MainWindow
                         : currentLap,
                     lifetimeCancellation.Token);
                 MessageBox.Show(
-                    $"已导出：\n{dialog.FileName}",
-                    "导出完成",
+                    AppLocalization.Format("common.exportedPath", "已导出：\n{0}", dialog.FileName),
+                    AppLocalization.Text("common.exportComplete", "导出完成"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
             }
             catch (Exception exception)
             {
                 MessageBox.Show(
-                    $"无法导出单圈遥测：{exception.Message}",
-                    "导出失败",
+                    AppLocalization.Format("replay.exportFailedMessage", "无法导出单圈遥测：{0}", exception.Message),
+                    AppLocalization.Text("common.exportFailed", "导出失败"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
@@ -192,21 +199,43 @@ internal sealed partial class MainWindow
         {
             var dialog = new OpenFileDialog
             {
-                Title = "打开 LazyForza 遥测录制",
-                Filter = "LazyForza 遥测录制 (*.lfztelemetry)|*.lfztelemetry|所有文件 (*.*)|*.*",
+                Title = AppLocalization.Text("replay.openDialog", "打开 LazyForza 遥测录制"),
+                Filter = AppLocalization.Text(
+                    "replay.openFilter",
+                    "LazyForza 遥测录制 (*.lfztelemetry)|*.lfztelemetry|所有文件 (*.*)|*.*"),
                 CheckFileExists = true,
                 Multiselect = false
             };
             if (dialog.ShowDialog(this) != true) return;
+            await LoadRecordingAsync(dialog.FileName);
+        };
 
+        if (pendingReplayRecordingPath is not null)
+        {
+            var recordingPath = pendingReplayRecordingPath;
+            pendingReplayRecordingPath = null;
+            _ = Dispatcher.BeginInvoke(
+                new Action(() => _ = LoadRecordingAsync(recordingPath)),
+                DispatcherPriority.Background);
+        }
+
+        if (tracks.Length > 0) trackSelector.SelectedIndex = 0;
+        stack.Unloaded += (_, _) => timer.Stop();
+        return Scroll(stack);
+
+        async Task LoadRecordingAsync(string recordingPath)
+        {
             timer.Stop();
             playing = false;
             openRecording.IsEnabled = false;
-            fileStatus.Text = $"正在读取 {Path.GetFileName(dialog.FileName)}…";
+            fileStatus.Text = AppLocalization.Format(
+                "replay.reading",
+                "正在读取 {0}…",
+                Path.GetFileName(recordingPath));
             try
             {
                 var replay = await TelemetryRecordingAnalysis.LoadAsync(
-                    dialog.FileName,
+                    recordingPath,
                     lifetimeCancellation.Token);
                 trackSelector.SelectedIndex = -1;
                 lapSelector.SelectedIndex = -1;
@@ -223,24 +252,33 @@ internal sealed partial class MainWindow
                 var playerCode = PlayerCodeText(
                     replay.Lap.PlayerCode ?? replay.Metadata.PlayerCode);
                 fileStatus.Text = replay.Metadata.ContentKind == TelemetryRecordingContentKind.SingleLap
-                    ? $"{Path.GetFileName(replay.SourcePath)} · 单圈分析导出 · " +
-                      $"玩家 {playerCode} · {replay.Lap.Samples.Count:N0} 样本 · " +
-                      $"{AnalysisTime(replay.Lap.TotalSeconds, false)}"
-                    : $"{Path.GetFileName(replay.SourcePath)} · 原始 {replay.FrameCount:N0} 帧 · " +
-                      $"玩家 {playerCode} · 工作台 {replay.Lap.Samples.Count:N0} 样本 · " +
-                      $"{AnalysisTime(replay.Lap.TotalSeconds, false)}";
+                    ? AppLocalization.Format(
+                        "replay.singleLapStatus",
+                        "{0} · 单圈分析导出 · 玩家 {1} · {2:N0} 样本 · {3}",
+                        Path.GetFileName(replay.SourcePath),
+                        playerCode,
+                        replay.Lap.Samples.Count,
+                        AnalysisTime(replay.Lap.TotalSeconds, false))
+                    : AppLocalization.Format(
+                        "replay.rawStatus",
+                        "{0} · 原始 {1:N0} 帧 · 玩家 {2} · 工作台 {3:N0} 样本 · {4}",
+                        Path.GetFileName(replay.SourcePath),
+                        replay.FrameCount,
+                        playerCode,
+                        replay.Lap.Samples.Count,
+                        AnalysisTime(replay.Lap.TotalSeconds, false));
                 RenderReplay();
             }
             catch (OperationCanceledException)
             {
-                fileStatus.Text = "已取消读取录制文件。";
+                fileStatus.Text = AppLocalization.Text("replay.readCancelled", "已取消读取录制文件。");
             }
             catch (Exception exception)
             {
-                fileStatus.Text = "无法读取该录制文件。";
+                fileStatus.Text = AppLocalization.Text("replay.readFailed", "无法读取该录制文件。");
                 MessageBox.Show(
                     exception.Message,
-                    "回放文件无效",
+                    AppLocalization.Text("replay.invalidFile", "回放文件无效"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
             }
@@ -248,11 +286,7 @@ internal sealed partial class MainWindow
             {
                 openRecording.IsEnabled = true;
             }
-        };
-
-        if (tracks.Length > 0) trackSelector.SelectedIndex = 0;
-        stack.Unloaded += (_, _) => timer.Stop();
-        return Scroll(stack);
+        }
 
         void RenderReplay()
         {
@@ -265,7 +299,7 @@ internal sealed partial class MainWindow
             controlCard.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             playPause = new Button
             {
-                Content = "播放",
+                Content = AppLocalization.Text("replay.play", "播放"),
                 Width = 72,
                 Padding = new Thickness(10, 7, 10, 7),
                 Margin = new Thickness(0, 0, 12, 0)
@@ -275,7 +309,9 @@ internal sealed partial class MainWindow
                 if (currentLap is null) return;
                 if (elapsed >= currentLap.TotalSeconds - 0.001) elapsed = 0;
                 playing = !playing;
-                playPause.Content = playing ? "暂停" : "播放";
+                playPause.Content = playing
+                    ? AppLocalization.Text("replay.pause", "暂停")
+                    : AppLocalization.Text("replay.play", "播放");
                 previousTick = DateTimeOffset.UtcNow;
                 timer.IsEnabled = playing;
             };
@@ -399,7 +435,10 @@ internal sealed partial class MainWindow
             mapPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             var header = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
             header.Children.Add(Label(
-                $"{currentSourceName} · 回放走线 · 按下左键定位时间",
+                AppLocalization.Format(
+                    "replay.mapTitle",
+                    "{0} · 回放走线 · 按下左键定位时间",
+                    currentSourceName),
                 13,
                 FontWeights.SemiBold));
             mapView = new TrackMapView(
@@ -435,7 +474,8 @@ internal sealed partial class MainWindow
                 elapsed = currentLap.TotalSeconds;
                 playing = false;
                 timer.Stop();
-                if (playPause is not null) playPause.Content = "播放";
+                if (playPause is not null)
+                    playPause.Content = AppLocalization.Text("replay.play", "播放");
             }
             timeline.Value = elapsed;
             UpdateFrame();
@@ -448,14 +488,26 @@ internal sealed partial class MainWindow
             if (mapView is not null) mapView.PlaybackElapsedSeconds = elapsed;
             if (timeValue is not null) timeValue.Text = AnalysisTime(elapsed, false);
             if (speedValue is not null)
-                speedValue.Text = $"{sample.SpeedMps * 3.6:0} km/h · {ReplayGear(sample.Gear)} 挡";
+                speedValue.Text = AppLocalization.Format(
+                    "replay.speedGear",
+                    "{0:0} km/h · {1} 挡",
+                    sample.SpeedMps * 3.6,
+                    ReplayGear(sample.Gear));
             if (inputValue is not null)
-                inputValue.Text = $"油门 {sample.Accel:P0} · 制动 {sample.Brake:P0}";
+                inputValue.Text = AppLocalization.Format(
+                    "replay.inputs",
+                    "油门 {0:P0} · 制动 {1:P0}",
+                    sample.Accel,
+                    sample.Brake);
             if (dynamicsValue is not null)
             {
                 dynamicsValue.Text = sample.Dynamics is { } dynamics
-                    ? $"方向 {dynamics.Steering:+0.00;-0.00;0.00} · 滑移 {dynamics.TireCombinedSlip.MaxAbsolute:0.00}"
-                    : "该圈未记录";
+                    ? AppLocalization.Format(
+                        "replay.dynamics",
+                        "方向 {0:+0.00;-0.00;0.00} · 滑移 {1:0.00}",
+                        dynamics.Steering,
+                        dynamics.TireCombinedSlip.MaxAbsolute)
+                    : AppLocalization.Text("replay.notRecorded", "该圈未记录");
             }
         }
     }

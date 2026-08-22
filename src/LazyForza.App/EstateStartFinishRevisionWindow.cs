@@ -30,7 +30,7 @@ internal sealed class EstateStartFinishRevisionWindow : Window
     {
         this.module = module;
         this.existingLapCount = existingLapCount;
-        Title = $"重设起终点线 · {track.Name}";
+        Title = AppLocalization.Format("estate.startFinish.windowTitle", "重设起终点线 · {0}", track.Name);
         Width = 900;
         Height = 660;
         MinWidth = 780;
@@ -134,24 +134,37 @@ internal sealed class EstateStartFinishRevisionWindow : Window
     private void Refresh()
     {
         var state = module.State;
-        status.Text = state.Status;
-        instruction.Text = state.Instruction;
-        metrics.Text = $"描摹样本 {state.FirstTraceSamples} / {state.SecondTraceSamples}" +
+        status.Text = AppLocalization.Literal(state.Status);
+        instruction.Text = AppLocalization.Literal(state.Instruction);
+        metrics.Text = AppLocalization.Format(
+                           "estate.startFinish.samples",
+                           "描摹样本 {0} / {1}",
+                           state.FirstTraceSamples,
+                           state.SecondTraceSamples) +
                        (state.GateWidthMeters is double width
-                           ? $"\n线宽 {width:0.00} m · 拟合误差 {state.FitRmsMeters:0.00} m · 双向偏移 {state.TraceOffsetMeters:0.00} m · 角差 {state.TraceAngleDegrees:0.00}°"
+                           ? AppLocalization.Format(
+                               "estate.startFinish.metrics",
+                               "\n线宽 {0:0.00} m · 拟合误差 {1:0.00} m · 双向偏移 {2:0.00} m · 角差 {3:0.00}°",
+                               width,
+                               state.FitRmsMeters,
+                               state.TraceOffsetMeters,
+                               state.TraceAngleDegrees)
                            : string.Empty);
         preview.Update(module.EnrollmentPreview);
         trace.IsEnabled = state.Phase is EstateCircuitPhase.Idle or EstateCircuitPhase.CapturingFirstTrace or
             EstateCircuitPhase.CapturingSecondTrace or EstateCircuitPhase.AwaitingDirection;
-        trace.Content = state.Phase switch
+        trace.Content = AppLocalization.Literal(state.Phase switch
         {
             EstateCircuitPhase.CapturingFirstTrace => "停止第一次描摹",
             EstateCircuitPhase.CapturingSecondTrace => "停止第二次描摹并拟合",
             _ when state.FirstTraceSamples > 0 => "开始第二次反向描摹",
             _ => "开始第一次描摹"
-        };
+        });
         direction.IsEnabled = state.Phase is EstateCircuitPhase.AwaitingDirection or EstateCircuitPhase.CapturingDirection;
-        direction.Content = state.Phase == EstateCircuitPhase.CapturingDirection ? "停止并确认比赛方向" : "开始比赛方向采样";
+        direction.Content = AppLocalization.Literal(
+            state.Phase == EstateCircuitPhase.CapturingDirection
+                ? "停止并确认比赛方向"
+                : "开始比赛方向采样");
         save.IsEnabled = state.Phase == EstateCircuitPhase.StartFinishReadyToSave;
     }
 
@@ -185,12 +198,12 @@ internal sealed class EstateStartFinishRevisionWindow : Window
 
     private static Button Button(string content) => new()
     {
-        Content = content, MinHeight = 42, Padding = new Thickness(16, 8, 16, 8), FontWeight = FontWeights.SemiBold
+        Content = AppLocalization.Literal(content), MinHeight = 42, Padding = new Thickness(16, 8, 16, 8), FontWeight = FontWeights.SemiBold
     };
 
     private static TextBlock Text(string value, double size, FontWeight weight, string brush = "TextBrush") => new()
     {
-        Text = value, FontSize = size, FontWeight = weight, Foreground = Brush(brush), TextWrapping = TextWrapping.Wrap
+        Text = AppLocalization.Literal(value), FontSize = size, FontWeight = weight, Foreground = Brush(brush), TextWrapping = TextWrapping.Wrap
     };
 
     private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];
