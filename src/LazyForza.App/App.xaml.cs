@@ -27,6 +27,8 @@ public partial class App : Application
     private DiagnosticCaptureService? diagnosticCapture;
     private SingleInstanceCoordinator? singleInstance;
     private TrayIconService? trayIcon;
+    private StartupProfileStore? startupProfileStore;
+    private StartupProfile startupProfile = StartupProfile.CreateDefault();
     private bool exitRequested;
     private bool minimizedNoticeShown;
 
@@ -41,7 +43,39 @@ public partial class App : Application
         }
         try
         {
-            var directories = new DataDirectoryService(DataRoot(e.Args));
+            startupProfileStore = new StartupProfileStore();
+            startupProfile = startupProfileStore.Load();
+            var explicitDataRoot = DataRoot(e.Args);
+            AppLocalization.UseLanguage(startupProfile.Language);
+            var initializationCaptureDirectory = InitializationCaptureDirectory(e.Args);
+            if (initializationCaptureDirectory is not null)
+            {
+                var captureWindow = new InitializationWindow(startupProfile, explicitDataRoot);
+                MainWindow = captureWindow;
+                captureWindow.Show();
+                await captureWindow.CaptureQaAsync(initializationCaptureDirectory);
+                captureWindow.Close();
+                ExitApplication();
+                return;
+            }
+            InitializationResult? initialization = null;
+            if (!startupProfile.InitializationCompleted && !SkipInitialization(e.Args))
+            {
+                var initializationWindow = new InitializationWindow(startupProfile, explicitDataRoot);
+                MainWindow = initializationWindow;
+                if (initializationWindow.ShowDialog() != true || initializationWindow.Result is null)
+                {
+                    ExitApplication();
+                    return;
+                }
+
+                initialization = initializationWindow.Result;
+                startupProfile = initialization.Profile;
+                AppLocalization.UseLanguage(startupProfile.Language);
+            }
+
+            var directories = new DataDirectoryService(
+                startupProfileStore.ResolveDataDirectory(explicitDataRoot, startupProfile));
             directories.EnsureCreated();
             var replayPath = ReplayPath(e.Args);
             var captureDirectory = CaptureDirectory(e.Args);
@@ -75,6 +109,17 @@ public partial class App : Application
                     directories.BackupsPath,
                     applicationVersion);
             store = new LazyForzaStore(databasePath);
+            if (initialization is not null)
+            {
+                store.SetAppSetting(
+                    PlayerIdentitySettings.PlayerCodeSettingKey,
+                    initialization.PlayerCode);
+                store.SetAppSetting("telemetry.listenAddress", initialization.ListenAddress);
+                store.SetAppSetting(
+                    "telemetry.port",
+                    initialization.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                startupProfileStore.Save(startupProfile);
+            }
             if (e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase))
                 await EnsureDemoVehicleProfilesAsync(store);
             var catalogImport = PlaygroundOfficialTrackCatalog.EnsureImported(store);
@@ -150,7 +195,8 @@ public partial class App : Application
                 source.Kind,
                 updateManager,
                 diagnosticCapture,
-                moduleActivation);
+                moduleActivation,
+                startupProfileStore);
             MainWindow.Closing += OnMainWindowClosing;
             MainWindow.Show();
             trayIcon = new TrayIconService(
@@ -175,7 +221,11 @@ public partial class App : Application
         }
         catch (Exception exception)
         {
-            MessageBox.Show($"LazyForza could not start.\n\n{exception}", "Startup error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(
+                AppLocalization.Format("app.startupErrorMessage", "LazyForza 无法启动。\n\n{0}", exception),
+                AppLocalization.Text("app.startupError", "启动错误"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
             ExitApplication(-1);
         }
     }
@@ -212,6 +262,13 @@ public partial class App : Application
     private void OnMainWindowClosing(object? sender, CancelEventArgs e)
     {
         if (exitRequested) return;
+        if ((startupProfileStore?.Load() ?? startupProfile).CloseBehavior ==
+            MainWindowCloseBehavior.ExitApplication)
+        {
+            e.Cancel = true;
+            ExitApplication();
+            return;
+        }
         e.Cancel = true;
         MainWindow.Hide();
         if (!minimizedNoticeShown)
@@ -293,6 +350,28 @@ public partial class App : Application
 
         return Environment.GetEnvironmentVariable("LAZYFORZA_DATA_DIR");
     }
+
+    private static string? InitializationCaptureDirectory(IReadOnlyList<string> arguments)
+    {
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            if (arguments[index].StartsWith("--capture-initialization-qa=", StringComparison.OrdinalIgnoreCase))
+                return arguments[index][28..];
+            if (arguments[index].Equals("--capture-initialization-qa", StringComparison.OrdinalIgnoreCase) &&
+                index + 1 < arguments.Count)
+                return arguments[index + 1];
+        }
+
+        return null;
+    }
+
+    private static bool SkipInitialization(IReadOnlyList<string> arguments) =>
+        arguments.Any(argument =>
+            argument.Equals("--skip-initialization", StringComparison.OrdinalIgnoreCase) ||
+            argument.Equals("--demo", StringComparison.OrdinalIgnoreCase) ||
+            argument.StartsWith("--replay", StringComparison.OrdinalIgnoreCase) ||
+            argument.StartsWith("--capture-", StringComparison.OrdinalIgnoreCase) ||
+            argument.StartsWith("--auto-record-seconds", StringComparison.OrdinalIgnoreCase));
 
     private static string ApplicationVersion()
         => ApplicationVersionInfo.Display;

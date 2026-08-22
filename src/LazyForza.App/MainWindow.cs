@@ -30,20 +30,20 @@ internal sealed partial class MainWindow : Window
 {
     private const string ShowDiagnosticsNavigationSetting = "ui.showDiagnosticsNavigation";
     private static readonly FontFamily UiFont = new("Microsoft YaHei UI");
-    private static readonly (string IconData, string Title)[] PrimaryPages =
+    private static readonly (string IconData, string Key, string Title)[] PrimaryPages =
     [
-        ("M 4 18 A 8 8 0 0 1 20 18 M 7 18 A 5 5 0 0 1 17 18 M 12 18 L 16.5 12.5 M 4 18 L 20 18", "概览"),
-        ("M 12 3 L 21 8 L 12 13 L 3 8 Z M 5 12 L 12 16 L 19 12 M 5 16 L 12 20 L 19 16", "模块"),
-        ("M 5 21 L 5 4 M 6 5 C 9 3.5 11 6.5 14 5 C 16.5 3.8 18.5 4.5 20 5.5 L 20 13 C 18 12 16.5 11.8 14.5 13 C 11.5 14.5 9 11.5 6 13 Z M 10 4.8 L 10 12.7 M 15 4.8 L 15 12.8 M 6 8.8 C 9 7.3 11.5 10.3 14.5 8.8 C 16.5 7.8 18 8.1 20 9", "当前比赛"),
-        ("M 4 18 L 4 10 L 8 10 L 8 6 L 12 6 L 12 3 M 12 6 L 16 6 L 16 10 L 20 10 L 20 18 M 3 18 L 21 18 M 7 21 L 17 21", "地产赛事"),
-        ("M 12 6 A 7 7 0 1 1 12 20 A 7 7 0 1 1 12 6 M 9 3 L 15 3 M 12 3 L 12 6 M 12 10 L 12 13 L 16 15", "圈速分析"),
-        ("M 5 5 L 5 19 L 17 12 Z M 19 5 L 19 19", "回放工作台"),
-        ("M 11 3 C 16 2 20 5 21 9 C 22 13 20 18 16 20 C 12 22 6 21 4 17 C 2 13 3 8 6 5 C 8 3 9 3 11 3 Z M 11 7 C 8 7 7 9 7 12 C 7 15 9 17 12 17 C 15 17 17 15 17 12 C 17 9 15 7 11 7 Z M 16 16 L 18.5 18 M 17.2 14.8 L 19.7 16.8", "赛道"),
-        ("M 4 16 L 5.5 11 L 8 8 L 16 8 L 18.5 11 L 20 16 L 20 19 L 18 19 L 18 17 L 6 17 L 6 19 L 4 19 Z M 6 12 L 18 12 M 8 15 L 8.01 15 M 16 15 L 16.01 15", "车辆与换挡"),
-        ("M 4 7 L 9 7 M 15 7 L 20 7 M 12 4 L 12 10 M 4 17 L 13 17 M 19 17 L 20 17 M 16 14 L 16 20", "设置")
+        ("M 4 18 A 8 8 0 0 1 20 18 M 7 18 A 5 5 0 0 1 17 18 M 12 18 L 16.5 12.5 M 4 18 L 20 18", "nav.overview", "概览"),
+        ("M 12 3 L 21 8 L 12 13 L 3 8 Z M 5 12 L 12 16 L 19 12 M 5 16 L 12 20 L 19 16", "nav.modules", "模块"),
+        ("M 5 21 L 5 4 M 6 5 C 9 3.5 11 6.5 14 5 C 16.5 3.8 18.5 4.5 20 5.5 L 20 13 C 18 12 16.5 11.8 14.5 13 C 11.5 14.5 9 11.5 6 13 Z M 10 4.8 L 10 12.7 M 15 4.8 L 15 12.8 M 6 8.8 C 9 7.3 11.5 10.3 14.5 8.8 C 16.5 7.8 18 8.1 20 9", "nav.competition", "当前比赛"),
+        ("M 4 18 L 4 10 L 8 10 L 8 6 L 12 6 L 12 3 M 12 6 L 16 6 L 16 10 L 20 10 L 20 18 M 3 18 L 21 18 M 7 21 L 17 21", "nav.estateRace", "地产赛事"),
+        ("M 12 6 A 7 7 0 1 1 12 20 A 7 7 0 1 1 12 6 M 9 3 L 15 3 M 12 3 L 12 6 M 12 10 L 12 13 L 16 15", "nav.lapAnalysis", "圈速分析"),
+        ("M 5 5 L 5 19 L 17 12 Z M 19 5 L 19 19", "nav.replay", "回放工作台"),
+        ("M 11 3 C 16 2 20 5 21 9 C 22 13 20 18 16 20 C 12 22 6 21 4 17 C 2 13 3 8 6 5 C 8 3 9 3 11 3 Z M 11 7 C 8 7 7 9 7 12 C 7 15 9 17 12 17 C 15 17 17 15 17 12 C 17 9 15 7 11 7 Z M 16 16 L 18.5 18 M 17.2 14.8 L 19.7 16.8", "nav.tracks", "赛道"),
+        ("M 4 16 L 5.5 11 L 8 8 L 16 8 L 18.5 11 L 20 16 L 20 19 L 18 19 L 18 17 L 6 17 L 6 19 L 4 19 Z M 6 12 L 18 12 M 8 15 L 8.01 15 M 16 15 L 16.01 15", "nav.vehicles", "车辆与换挡"),
+        ("M 4 7 L 9 7 M 15 7 L 20 7 M 12 4 L 12 10 M 4 17 L 13 17 M 19 17 L 20 17 M 16 14 L 16 20", "nav.settings", "设置")
     ];
-    private static readonly (string IconData, string Title) DiagnosticsPageEntry =
-        ("M 3 12 L 7 12 L 9 7 L 13 17 L 16 10 L 18 12 L 21 12 M 4 4 L 20 4 L 20 20 L 4 20 Z", "诊断");
+    private static readonly (string IconData, string Key, string Title) DiagnosticsPageEntry =
+        ("M 3 12 L 7 12 L 9 7 L 13 17 L 16 10 L 18 12 L 21 12 M 4 4 L 20 4 L 20 20 L 4 20 Z", "nav.diagnostics", "诊断");
     private readonly ModuleManager moduleManager;
     private readonly ITelemetryFeed telemetry;
     private readonly OverlayCoordinator overlay;
@@ -54,6 +54,7 @@ internal sealed partial class MainWindow : Window
     private readonly ApplicationUpdateManager updateManager;
     private readonly DiagnosticCaptureService diagnosticCapture;
     private readonly DriftDashboardActivationController moduleActivation;
+    private readonly StartupProfileStore startupProfileStore;
     private readonly MainWindowPageRefreshState pageRefresh = new();
     private readonly ContentControl content = new();
     private readonly ListBox navigation = new();
@@ -79,7 +80,8 @@ internal sealed partial class MainWindow : Window
         TelemetrySourceKind sourceKind,
         ApplicationUpdateManager updateManager,
         DiagnosticCaptureService diagnosticCapture,
-        DriftDashboardActivationController moduleActivation)
+        DriftDashboardActivationController moduleActivation,
+        StartupProfileStore startupProfileStore)
     {
         this.moduleManager = moduleManager;
         this.telemetry = telemetry;
@@ -91,6 +93,7 @@ internal sealed partial class MainWindow : Window
         this.updateManager = updateManager;
         this.diagnosticCapture = diagnosticCapture;
         this.moduleActivation = moduleActivation;
+        this.startupProfileStore = startupProfileStore;
         showDiagnosticsNavigation = bool.TryParse(
             store.GetAppSetting(ShowDiagnosticsNavigationSetting),
             out var showDiagnostics) && showDiagnostics;
@@ -424,11 +427,13 @@ internal sealed partial class MainWindow : Window
     {
         navigation.Items.Clear();
         foreach (var page in PrimaryPages)
-            navigation.Items.Add(NavigationEntry(page.IconData, page.Title));
+            navigation.Items.Add(NavigationEntry(
+                page.IconData,
+                AppLocalization.Text(page.Key, page.Title)));
         if (showDiagnosticsNavigation)
             navigation.Items.Add(NavigationEntry(
                 DiagnosticsPageEntry.IconData,
-                DiagnosticsPageEntry.Title));
+                AppLocalization.Text(DiagnosticsPageEntry.Key, DiagnosticsPageEntry.Title)));
     }
 
     private void RenderSelectedPage(bool preserveScroll = false)
@@ -449,6 +454,7 @@ internal sealed partial class MainWindow : Window
             8 => SettingsPage(),
             _ => DiagnosticsPage()
         };
+        AppLocalization.ApplyTo(page);
         content.Content = page;
         if (preserveScroll && page is ScrollViewer newScroll)
         {
@@ -2892,6 +2898,8 @@ internal sealed partial class MainWindow : Window
         identity.Children.Add(saveIdentity);
         stack.Children.Add(Card(identity));
 
+        stack.Children.Add(BuildStartupSettingsCard());
+
         var network = new Grid();
         network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
         network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
@@ -3760,7 +3768,7 @@ internal sealed partial class MainWindow : Window
 
     private static TextBlock Label(string text, double size, FontWeight? weight = null, string? brushKey = null) => new()
     {
-        Text = text,
+        Text = AppLocalization.Literal(text),
         FontSize = ReadableFontSize(size),
         FontWeight = weight ?? FontWeights.Normal,
         Foreground = brushKey is null ? Brush("TextBrush") : Brush(brushKey),

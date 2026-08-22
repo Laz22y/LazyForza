@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
 
 namespace LazyForza.App;
 
@@ -52,6 +54,35 @@ internal static class AppLocalization
         return translations.TryGetValue($"literal:{text}", out var localized) && !string.IsNullOrWhiteSpace(localized)
             ? localized
             : text;
+    }
+
+    public static void ApplyTo(DependencyObject root)
+    {
+        if (CurrentLanguage == StartupProfile.DefaultLanguage) return;
+        switch (root)
+        {
+            case TextBlock textBlock:
+                textBlock.Text = Literal(textBlock.Text);
+                break;
+            case ContentControl contentControl when contentControl.Content is string content:
+                contentControl.Content = Literal(content);
+                break;
+            case HeaderedContentControl headered when headered.Header is string header:
+                headered.Header = Literal(header);
+                break;
+            case ItemsControl itemsControl:
+                for (var index = 0; index < itemsControl.Items.Count; index++)
+                {
+                    if (itemsControl.Items[index] is string item)
+                        itemsControl.Items[index] = Literal(item);
+                }
+                break;
+        }
+
+        if (root is FrameworkElement element && element.ToolTip is string tooltip)
+            element.ToolTip = Literal(tooltip);
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+            ApplyTo(child);
     }
 
     private static IReadOnlyDictionary<string, string> LoadTranslations(string language)
