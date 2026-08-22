@@ -1,5 +1,19 @@
 namespace LazyForza.Domain;
 
+public static class PlayerIdentitySettings
+{
+    public const string PlayerCodeSettingKey = "identity.playerCode";
+    public const int MaximumLength = 20;
+
+    public static string Normalize(string? value)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        return normalized.Length <= MaximumLength
+            ? normalized
+            : normalized[..MaximumLength];
+    }
+}
+
 public sealed record OverlayLayout(
     double Left = 622.5,
     double Top = 688,

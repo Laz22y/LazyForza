@@ -75,8 +75,8 @@ public sealed class StorageTests
         {
             using var first = new LazyForzaStore(firstPath);
             using var second = new LazyForzaStore(secondPath);
-            Assert.AreEqual(11, first.SchemaVersion);
-            Assert.AreEqual(11, second.SchemaVersion);
+            Assert.AreEqual(12, first.SchemaVersion);
+            Assert.AreEqual(12, second.SchemaVersion);
             await first.SetAsync("dashboard", "enabled", "True", CancellationToken.None);
             Assert.AreEqual("True", await first.GetAsync("dashboard", "enabled", CancellationToken.None));
             Assert.IsNull(await second.GetAsync("dashboard", "enabled", CancellationToken.None));
@@ -236,7 +236,7 @@ public sealed class StorageTests
         try
         {
             using (var initialized = new LazyForzaStore(path))
-                Assert.AreEqual(11, initialized.SchemaVersion);
+                Assert.AreEqual(12, initialized.SchemaVersion);
 
             using (var raw = new WinSqliteDatabase(path))
             {
@@ -255,7 +255,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(11, migrated.SchemaVersion);
+            Assert.AreEqual(12, migrated.SchemaVersion);
             var profile = migrated.ListVehicleProfiles().Single();
             Assert.AreEqual("2014 Alfa Romeo 4C", profile.CustomName);
             Assert.IsFalse(profile.ShiftRecommendationsEnabled);
@@ -345,7 +345,7 @@ public sealed class StorageTests
 
             using (var store = new LazyForzaStore(path))
             {
-                Assert.AreEqual(11, store.SchemaVersion);
+                Assert.AreEqual(12, store.SchemaVersion);
                 var databaseField = typeof(LazyForzaStore).GetField(
                     "database",
                     System.Reflection.BindingFlags.Instance |
@@ -392,7 +392,7 @@ public sealed class StorageTests
             var vehicle = new VehicleProfileFingerprint(1, 4, 780, 2, 6, 8000, "g", "c");
             var samples = track.Points.Take(40).Select((point, index) => new LapSample(point.S, index * 0.1, 40, 5000, 4, 1, 0, 0, point.X, point.Y, point.Z)).ToArray();
             var lap = new LapRecord(Guid.NewGuid(), track.Id, track.Direction, 1, Guid.NewGuid(), vehicle, DateTimeOffset.UtcNow, 50, true, null,
-                sectors.Select(sector => new LapSegment(sector.Index, 50d / sectors.Count, true)).ToArray(), samples);
+                sectors.Select(sector => new LapSegment(sector.Index, 50d / sectors.Count, true)).ToArray(), samples, "LF-27");
             store.SaveLap(lap);
             Assert.AreEqual(1, store.CountTracks());
             Assert.AreEqual(1, store.CountLaps());
@@ -407,6 +407,7 @@ public sealed class StorageTests
             Assert.AreEqual(vehicle.CarClass, loadedLaps[0].Vehicle.CarClass);
             Assert.AreEqual(vehicle.PerformanceIndex, loadedLaps[0].Vehicle.PerformanceIndex);
             Assert.AreEqual(vehicle.RoundedMaxRpm, loadedLaps[0].Vehicle.RoundedMaxRpm);
+            Assert.AreEqual("LF-27", loadedLaps[0].PlayerCode);
             Assert.HasCount(lap.Segments.Count, loadedLaps[0].Segments);
             Assert.HasCount(lap.Samples.Count, loadedLaps[0].Samples);
             var loaded = store.LoadLatestTrack();
@@ -511,7 +512,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(11, migrated.SchemaVersion);
+            Assert.AreEqual(12, migrated.SchemaVersion);
             var migratedField = typeof(LazyForzaStore).GetField(
                 "database",
                 System.Reflection.BindingFlags.Instance |

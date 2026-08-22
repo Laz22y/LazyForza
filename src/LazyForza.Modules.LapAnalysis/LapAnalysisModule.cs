@@ -19,6 +19,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private static readonly TimeSpan AutomaticMatchMaximumDuration = TimeSpan.FromSeconds(30);
     private readonly LazyForzaStore store;
     private readonly Func<OverlayLayout> getOverlayLayout;
+    private readonly Func<string?> playerCodeProvider;
     private readonly Action<DiagnosticSignal>? diagnosticSink;
     private readonly LapPersistenceWorker persistence;
     private readonly LapLifecycleStateMachine lifecycle = new();
@@ -105,7 +106,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         LazyForzaStore store,
         TelemetrySourceKind? expectedSource = null,
         Func<OverlayLayout>? getOverlayLayout = null,
-        Action<DiagnosticSignal>? diagnosticSink = null)
+        Action<DiagnosticSignal>? diagnosticSink = null,
+        Func<string?>? playerCodeProvider = null)
         : base(new ModuleDescriptor(
             ModuleId,
             "圈速分析",
@@ -118,6 +120,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         this.store = store;
         this.getOverlayLayout = getOverlayLayout ?? (() => new OverlayLayout());
         this.diagnosticSink = diagnosticSink;
+        this.playerCodeProvider = playerCodeProvider ?? (() => null);
         persistence = new LapPersistenceWorker(
             store,
             LogIfInitialized,
@@ -1354,7 +1357,9 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             lapIsValid,
             lapIsValid ? null : currentLapInvalidated ? "rewind-crossed-lap-boundary" :
                 lapProjectionValid ? "sector-coverage-incomplete" : $"projection-low-confidence ({projectionRatio:P0})",
-            times, persistedSamples);
+            times,
+            persistedSamples,
+            PlayerIdentitySettings.Normalize(playerCodeProvider()));
         RegisterVisibleLap(lap);
         QueuePersistence(LapPersistenceCommand.Save(lap));
         LogIfInitialized(

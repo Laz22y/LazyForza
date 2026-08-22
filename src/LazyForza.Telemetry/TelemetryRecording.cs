@@ -19,7 +19,8 @@ public sealed record RecordingMetadata(
     DateTimeOffset CreatedAt,
     string Note,
     TelemetryRecordingContentKind ContentKind = TelemetryRecordingContentKind.RawFrames,
-    string? TrackName = null);
+    string? TrackName = null,
+    string? PlayerCode = null);
 
 public sealed record SingleLapTelemetryRecording(
     RecordingMetadata Metadata,
@@ -198,7 +199,10 @@ public static class SingleLapTelemetryRecordingFile
             DateTimeOffset.UtcNow,
             "Single-lap analysis export; no raw FH6 packets are fabricated.",
             TelemetryRecordingContentKind.SingleLap,
-            normalizedTrackName);
+            normalizedTrackName,
+            PlayerIdentitySettings.Normalize(lap.PlayerCode) is { Length: > 0 } playerCode
+                ? playerCode
+                : null);
         var metadataBytes = JsonSerializer.SerializeToUtf8Bytes(metadata, JsonOptions);
         if (metadataBytes.Length > ushort.MaxValue)
             throw new InvalidDataException("Recording metadata is too large.");
@@ -306,10 +310,19 @@ public static class SingleLapTelemetryRecordingFile
         var resolvedTrackName = string.IsNullOrWhiteSpace(payload.TrackName)
             ? metadata.TrackName ?? "未知赛道"
             : payload.TrackName;
+        var resolvedPlayerCode = PlayerIdentitySettings.Normalize(
+            payload.Lap.PlayerCode ?? metadata.PlayerCode);
         return new SingleLapTelemetryRecording(
-            metadata with { TrackName = resolvedTrackName },
+            metadata with
+            {
+                TrackName = resolvedTrackName,
+                PlayerCode = resolvedPlayerCode.Length == 0 ? null : resolvedPlayerCode
+            },
             resolvedTrackName,
-            payload.Lap);
+            payload.Lap with
+            {
+                PlayerCode = resolvedPlayerCode.Length == 0 ? null : resolvedPlayerCode
+            });
     }
 
     private static void ValidateLap(LapRecord lap)

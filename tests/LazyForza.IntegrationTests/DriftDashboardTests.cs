@@ -26,7 +26,7 @@ public sealed class DriftDashboardTests
             "实验性");
         StringAssert.Contains(
             module.Descriptor.Description,
-            "辅助能力有限");
+            "失控风险");
         Assert.IsNull(module.Descriptor.MainPageKey);
         Assert.IsNull(module.Descriptor.SettingsPageKey);
         Assert.IsNull(typeof(DriftHudState).GetProperty("Rpm"));

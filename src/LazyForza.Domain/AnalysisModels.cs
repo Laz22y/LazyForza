@@ -198,7 +198,8 @@ public sealed record LapSummary(
     double TotalSeconds,
     bool IsValid,
     string? InvalidReason,
-    IReadOnlyList<LapSegment> Segments)
+    IReadOnlyList<LapSegment> Segments,
+    string? PlayerCode = null)
 {
     public static LapSummary FromRecord(LapRecord lap) => new(
         lap.Id,
@@ -211,7 +212,8 @@ public sealed record LapSummary(
         lap.TotalSeconds,
         lap.IsValid,
         lap.InvalidReason,
-        lap.Segments);
+        lap.Segments,
+        lap.PlayerCode);
 
     public LapRecord WithSamples(IReadOnlyList<LapSample> samples) => new(
         Id,
@@ -225,7 +227,8 @@ public sealed record LapSummary(
         IsValid,
         InvalidReason,
         Segments,
-        samples);
+        samples,
+        PlayerCode);
 }
 
 public sealed record LapRecord(
@@ -240,7 +243,8 @@ public sealed record LapRecord(
     bool IsValid,
     string? InvalidReason,
     IReadOnlyList<LapSegment> Segments,
-    IReadOnlyList<LapSample> Samples);
+    IReadOnlyList<LapSample> Samples,
+    string? PlayerCode = null);
 
 public enum SectorColorState
 {

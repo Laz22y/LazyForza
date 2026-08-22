@@ -53,7 +53,13 @@ public sealed class StreamAndReplayTests
         {
             var parser = new Fh6PacketParser();
             await using (var writer = await TelemetryRecordingWriter.CreateAsync(path,
-                new RecordingMetadata("LazyForza.Tests", 1, TelemetrySourceKind.Simulator, DateTimeOffset.UnixEpoch, "deterministic"), CancellationToken.None))
+                new RecordingMetadata(
+                    "LazyForza.Tests",
+                    1,
+                    TelemetrySourceKind.Simulator,
+                    DateTimeOffset.UnixEpoch,
+                    "deterministic",
+                    PlayerCode: "LF-27"), CancellationToken.None))
             {
                 for (var index = 0; index < 8; index++)
                 {
@@ -74,6 +80,7 @@ public sealed class StreamAndReplayTests
                 CancellationToken.None);
             Assert.AreEqual("LazyForza.Tests", metadata.Product);
             Assert.AreEqual("deterministic", metadata.Note);
+            Assert.AreEqual("LF-27", metadata.PlayerCode);
             Assert.HasCount(8, streamed);
             Assert.IsTrue(streamed.All(frame => frame.Source == TelemetrySourceKind.Replay));
 
@@ -150,7 +157,7 @@ public sealed class StreamAndReplayTests
         var corruptPath = Path.Combine(Path.GetTempPath(), $"lazyforza-single-lap-corrupt-{Guid.NewGuid():N}.lfztelemetry");
         try
         {
-            var lap = SingleLap();
+            var lap = SingleLap() with { PlayerCode = "LF-27" };
             await SingleLapTelemetryRecordingFile.WriteAsync(
                 path,
                 "测试官方赛事",
@@ -163,6 +170,8 @@ public sealed class StreamAndReplayTests
             Assert.IsNotNull(loaded);
             Assert.AreEqual(TelemetryRecordingContentKind.SingleLap, loaded.Metadata.ContentKind);
             Assert.AreEqual("测试官方赛事", loaded.TrackName);
+            Assert.AreEqual("LF-27", loaded.Metadata.PlayerCode);
+            Assert.AreEqual("LF-27", loaded.Lap.PlayerCode);
             Assert.AreEqual(lap.Id, loaded.Lap.Id);
             Assert.AreEqual(lap.Vehicle, loaded.Lap.Vehicle);
             Assert.HasCount(lap.Samples.Count, loaded.Lap.Samples);
@@ -184,6 +193,56 @@ public sealed class StreamAndReplayTests
                     corruptPath,
                     CancellationToken.None));
             StringAssert.Contains(checksumError.Message, "checksum");
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+            if (File.Exists(corruptPath)) File.Delete(corruptPath);
+        }
+    }
+
+    [TestMethod]
+    public async Task LapAnalysisExchangeRoundTripsPlayerCodeAndRejectsCorruption()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-laps-{Guid.NewGuid():N}.lfzlap");
+        var corruptPath = Path.Combine(Path.GetTempPath(), $"lazyforza-laps-corrupt-{Guid.NewGuid():N}.lfzlap");
+        try
+        {
+            var first = SingleLap() with { PlayerCode = "LF-27" };
+            var second = SingleLap() with
+            {
+                Id = Guid.NewGuid(),
+                TrackId = first.TrackId,
+                Direction = first.Direction,
+                SectorSchemaVersion = first.SectorSchemaVersion,
+                SessionId = first.SessionId,
+                StartedAt = first.StartedAt.AddMinutes(1),
+                PlayerCode = "队友-08"
+            };
+            await LapAnalysisExchangeFile.WriteAsync(
+                path,
+                first.TrackId,
+                "测试赛道",
+                first.Direction,
+                first.SectorSchemaVersion,
+                "LF-27",
+                [first, second],
+                CancellationToken.None);
+
+            var loaded = await LapAnalysisExchangeFile.ReadAsync(path, CancellationToken.None);
+            Assert.AreEqual("测试赛道", loaded.TrackName);
+            Assert.AreEqual("LF-27", loaded.ExportedByPlayerCode);
+            Assert.HasCount(2, loaded.Laps);
+            Assert.AreEqual("LF-27", loaded.Laps[0].PlayerCode);
+            Assert.AreEqual("队友-08", loaded.Laps[1].PlayerCode);
+            Assert.HasCount(first.Samples.Count, loaded.Laps[0].Samples);
+
+            File.Copy(path, corruptPath);
+            var bytes = await File.ReadAllBytesAsync(corruptPath);
+            bytes[^1] ^= 0xFF;
+            await File.WriteAllBytesAsync(corruptPath, bytes);
+            await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+                await LapAnalysisExchangeFile.ReadAsync(corruptPath, CancellationToken.None));
         }
         finally
         {
