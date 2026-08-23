@@ -697,7 +697,7 @@ internal sealed class HudSurface : FrameworkElement
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.StartLights,
             widgets.Get(EstateRaceHudWidgetKind.StartLights),
             widgetDc => DrawRaceStartLights(widgetDc, startLightSession), showStartLights);
-        var pitHud = UpdatePitHud(session, state.LocalParticipantId, now, estimatedServerNow);
+        var pitHud = UpdatePitHud(session, state.LocalParticipantId, state.PitService, now, estimatedServerNow);
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.PitStopInfo,
             widgets.Get(EstateRaceHudWidgetKind.PitStopInfo),
             widgetDc => DrawRacePitStopInfo(widgetDc, pitHud),
@@ -2219,6 +2219,7 @@ internal sealed class HudSurface : FrameworkElement
     private PitHudSnapshot UpdatePitHud(
         EstateRaceSession session,
         Guid? localParticipantId,
+        EstatePitServiceState localPitService,
         DateTimeOffset now,
         DateTimeOffset estimatedServerNow)
     {
@@ -2241,7 +2242,9 @@ internal sealed class HudSurface : FrameworkElement
         foreach (var participant in session.Participants)
         {
             if (!participant.IsConnected) continue;
-            var inPit = participant.IsInPitLane || participant.IsInServiceZone;
+            var isLocal = participant.Id == localParticipantId;
+            var inServiceZone = isLocal ? localPitService.IsInServiceZone : participant.IsInServiceZone;
+            var inPit = (isLocal ? localPitService.IsInPitLane : participant.IsInPitLane) || inServiceZone;
             if (!pitHudRuntime.TryGetValue(participant.Id, out var runtime))
             {
                 if (!inPit) continue;
@@ -2263,28 +2266,32 @@ internal sealed class HudSurface : FrameworkElement
                 inPit);
             if (inPit && projectedPitLaneSeconds <= 0)
                 projectedPitLaneSeconds = Math.Max(0, (now - runtime.EnteredAt).TotalSeconds);
-            var serviceCounting = participant.IsInServiceZone &&
-                                  participant.PitServiceElapsedSeconds > 0 &&
-                                  participant.SpeedKph <= 1.5 &&
-                                  !participant.IsServingTimePenalty;
-            var projectedServiceSeconds = EstateRacePitHudTiming.ProjectElapsedSeconds(
-                participant.PitServiceElapsedSeconds,
-                participant.LastSeenAt,
-                estimatedServerNow,
-                serviceCounting);
+            var serviceCounting = isLocal
+                ? localPitService.IsCounting
+                : inServiceZone && participant.PitServiceElapsedSeconds > 0 &&
+                  participant.SpeedKph <= 1.5 && !participant.IsServingTimePenalty;
+            var serviceCompleted = isLocal
+                ? localPitService.RequirementMet
+                : participant.PitServiceRequirementMet;
+            var projectedServiceSeconds = isLocal
+                ? EffectivePitServiceElapsed(localPitService, now)
+                : EstateRacePitHudTiming.ProjectElapsedSeconds(
+                    participant.PitServiceElapsedSeconds,
+                    participant.LastSeenAt,
+                    estimatedServerNow,
+                    serviceCounting);
             if (serviceCounting)
             {
-                runtime.ServiceCompletedAt = null;
                 runtime.FrozenServiceSeconds = Math.Max(
                     runtime.FrozenServiceSeconds,
                     projectedServiceSeconds);
             }
-            else if (runtime.WasServiceCounting)
+            if (serviceCompleted && !runtime.ServiceCompleted)
             {
                 runtime.ServiceCompletedAt = now;
                 runtime.FrozenServiceSeconds = Math.Max(
                     runtime.FrozenServiceSeconds,
-                    participant.PitServiceElapsedSeconds);
+                    projectedServiceSeconds);
             }
             if (!inPit && runtime.WasInPit)
             {
@@ -2298,9 +2305,13 @@ internal sealed class HudSurface : FrameworkElement
             runtime.DisplayName = participant.DisplayName;
             runtime.ThemeColor = participant.ThemeColor;
             runtime.TeamName = participant.TeamName;
-            runtime.IsInServiceZone = participant.IsInServiceZone;
+            runtime.IsInServiceZone = inServiceZone;
             runtime.ServiceElapsedSeconds = projectedServiceSeconds;
             runtime.WasServiceCounting = serviceCounting;
+            runtime.ServiceCompleted = serviceCompleted;
+            runtime.ServiceRequiredSeconds = isLocal ? localPitService.RequiredSeconds : 0;
+            runtime.ServicePaused = isLocal &&
+                                    localPitService.ProgressState == EstatePitServiceProgressState.MovementGrace;
             runtime.PitLaneElapsedSeconds = projectedPitLaneSeconds;
             runtime.IsServingPenalty = participant.IsServingTimePenalty;
             runtime.PenaltyServiceCompleted = participant.PenaltyServiceCompleted;
@@ -2323,7 +2334,16 @@ internal sealed class HudSurface : FrameworkElement
                 var showPenalty = runtime.IsServingPenalty || runtime.PenaltyServiceCompleted;
                 var serviceHold = runtime.ServiceCompletedAt is DateTimeOffset completedAt &&
                                   now - completedAt <= TimeSpan.FromSeconds(3);
-                var showService = !showPenalty && (runtime.WasServiceCounting || serviceHold);
+                var showService = !showPenalty && (runtime.IsInServiceZone || serviceHold);
+                var serviceState = runtime.ServiceCompleted || serviceHold
+                    ? PitHudServiceState.Completed
+                    : runtime.WasServiceCounting
+                        ? PitHudServiceState.Counting
+                        : runtime.ServicePaused
+                            ? PitHudServiceState.Paused
+                            : runtime.IsInServiceZone
+                                ? PitHudServiceState.WaitingForStop
+                                : PitHudServiceState.None;
                 var seconds = showPenalty
                     ? runtime.PenaltyElapsedSeconds
                     : showService
@@ -2345,7 +2365,9 @@ internal sealed class HudSurface : FrameworkElement
                     runtime.WasInPit,
                     showPenalty,
                     runtime.PenaltyServiceCompleted,
-                    runtime.PenaltyRequiredSeconds);
+                    runtime.PenaltyRequiredSeconds,
+                    serviceState,
+                    runtime.ServiceRequiredSeconds);
             })
             .OrderByDescending(item => item.ParticipantId == localParticipantId)
             .ThenBy(item => Math.Abs(item.Position - localPosition))
@@ -2437,10 +2459,18 @@ internal sealed class HudSurface : FrameworkElement
                     Math.Max(9, rowHeight * 0.125), BrushWithOpacity(theme, 0.96), true);
             var modeColor = entry.IsPenalty
                 ? entry.PenaltyCompleted ? BrushOf(0x4D, 0xD8, 0x91) : BrushOf(0xFF, 0x45, 0x5F)
+                : entry.ServiceState == PitHudServiceState.Completed ? BrushOf(0x4D, 0xD8, 0x91)
                 : entry.IsService ? BrushOf(0x20, 0xD9, 0xEF) : BrushOf(0xA7, 0xB2, 0xBF);
             var modeText = entry.IsPenalty
                 ? entry.PenaltyCompleted ? "PENALTY SERVED" : "PENALTY"
-                : entry.IsService ? "TYRE STOP" : "PIT LANE";
+                : entry.ServiceState switch
+                {
+                    PitHudServiceState.Completed => "TYRE STOP OK",
+                    PitHudServiceState.Paused => "HOLD STILL",
+                    PitHudServiceState.WaitingForStop => "STOP CAR",
+                    PitHudServiceState.Counting => "TYRE STOP",
+                    _ => "PIT LANE"
+                };
             var modeBounds = new Rect(
                 width * (hasTeam ? 0.435 : informationLeft),
                 metadataTop - rowHeight * 0.01,
@@ -2456,15 +2486,25 @@ internal sealed class HudSurface : FrameworkElement
                 Math.Max(9, rowHeight * 0.12), modeColor, true);
             var secondsText = entry.IsPenalty && entry.PenaltyRequiredSeconds > 0
                 ? $"{entry.Seconds:0.0}/{entry.PenaltyRequiredSeconds:0.#}"
-                : $"{Math.Max(0, entry.Seconds):0.000}";
+                : entry.IsService && entry.ServiceRequiredSeconds > 0
+                    ? $"{Math.Max(0, entry.Seconds):0.0}/{entry.ServiceRequiredSeconds:0.#}"
+                    : $"{Math.Max(0, entry.Seconds):0.000}";
             var timeColor = entry.IsPenalty
                 ? entry.PenaltyCompleted ? BrushOf(0x4D, 0xD8, 0x91) : BrushOf(0xFF, 0xF4, 0xF5)
+                : entry.ServiceState == PitHudServiceState.Completed ? BrushOf(0x4D, 0xD8, 0x91)
                 : entry.IsService ? BrushOf(0x20, 0xD9, 0xEF) : White;
             RaceText(dc, secondsText, width * 0.945, top + rowHeight * 0.405,
                 Math.Max(23, rowHeight * 0.385), timeColor, TextAlignment.Right, true);
             var timerLabel = entry.IsPenalty
                 ? "PENALTY TIME"
-                : entry.IsService ? "TYRE TIME" : "TOTAL TIME";
+                : entry.ServiceState switch
+                {
+                    PitHudServiceState.Completed => "SERVICE COMPLETE",
+                    PitHudServiceState.Paused => "TIMER PAUSED",
+                    PitHudServiceState.WaitingForStop => "STOP TO START",
+                    PitHudServiceState.Counting => "TYRE TIME",
+                    _ => "TOTAL TIME"
+                };
             RaceText(dc, timerLabel, width * 0.945, metadataTop + rowHeight * 0.105,
                 Math.Max(9, rowHeight * 0.115), BrushWithOpacity(timeColor, 0.82), TextAlignment.Right, true);
             if (entry.IsService)
@@ -2796,11 +2836,14 @@ internal sealed class HudSurface : FrameworkElement
         public bool WasInPit { get; set; }
         public bool IsInServiceZone { get; set; }
         public bool WasServiceCounting { get; set; }
+        public bool ServiceCompleted { get; set; }
+        public bool ServicePaused { get; set; }
         public int Position { get; set; }
         public string DisplayName { get; set; } = string.Empty;
         public string ThemeColor { get; set; } = "#42D7E8";
         public string? TeamName { get; set; }
         public double ServiceElapsedSeconds { get; set; }
+        public double ServiceRequiredSeconds { get; set; }
         public double FrozenServiceSeconds { get; set; }
         public double FrozenPitLaneSeconds { get; set; }
         public double PitLaneElapsedSeconds { get; set; }
@@ -2922,7 +2965,18 @@ internal sealed class HudSurface : FrameworkElement
         bool IsInPit,
         bool IsPenalty,
         bool PenaltyCompleted,
-        double PenaltyRequiredSeconds);
+        double PenaltyRequiredSeconds,
+        PitHudServiceState ServiceState,
+        double ServiceRequiredSeconds);
+
+    private enum PitHudServiceState
+    {
+        None,
+        WaitingForStop,
+        Counting,
+        Paused,
+        Completed
+    }
 
     private sealed record PitHudSnapshot(
         IReadOnlyList<PitHudView> Entries,

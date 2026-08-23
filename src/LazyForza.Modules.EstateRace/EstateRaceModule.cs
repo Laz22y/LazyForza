@@ -27,6 +27,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private static readonly TimeSpan CommandSendTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RecoveredLapRetryInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan RecoveredPitServiceRetryInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FingerprintRefreshInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan BackgroundFailureLogInterval = TimeSpan.FromSeconds(10);
     private readonly Func<EstateRaceTrackContext?> trackContext;
@@ -38,6 +39,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private readonly object strategySync = new();
     private readonly object telemetryStateSync = new();
     private readonly object lapRecoverySync = new();
+    private readonly object pitServiceRecoverySync = new();
     private readonly EstateCollisionEvidenceDetector collisionEvidenceDetector = new();
     private readonly EstateShortcutDetector shortcutDetector = new();
     private readonly object trackMapCacheSync = new();
@@ -68,6 +70,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private EstateRaceSession? session;
     private Guid? sentLapEventId;
     private readonly List<PendingLapUpload> pendingLapUploads = [];
+    private readonly List<PendingPitServiceUpload> pendingPitServiceUploads = [];
+    private int observedPitServiceCount;
     private long sequence;
     private DateTimeOffset lastTelemetrySentAt;
     private long lastTelemetrySentMonotonicMilliseconds;
@@ -337,6 +341,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             receiveTask = Task.Run(
                 () => ReceiveLoopAsync(connectedSocket, connectedCancellation.Token),
                 CancellationToken.None);
+            await FlushPendingPitServiceUploadsAsync(timeout.Token).ConfigureAwait(false);
             await FlushPendingLapUploadsAsync(timeout.Token).ConfigureAwait(false);
             heartbeatTask = Task.Run(
                 () => HeartbeatLoopAsync(connectedCancellation.Token),
@@ -380,6 +385,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             lastPracticeSessionNumber = 0;
             sentLapEventId = null;
             ClearPendingLapUploads();
+            ClearPendingPitServiceUploads();
+            observedPitServiceCount = 0;
             SetRaceTimingEnabled(false);
             SetConnectionState(EstateRaceConnectionState.Disconnected, "未连接赛事服务");
         }
@@ -446,6 +453,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         lastValidProjection = null;
         sentLapEventId = null;
         ClearPendingLapUploads();
+        ClearPendingPitServiceUploads();
+        observedPitServiceCount = 0;
         SetRaceTimingEnabled(false);
         Volatile.Write(ref snapshot, EmptySnapshot());
     }
@@ -498,11 +507,37 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 context.Definition.Pit,
                 valid,
                 monotonicNow);
+        var localParticipant = session?.Participants.FirstOrDefault(candidate => candidate.Id == participantId);
+        var serviceBlocked = localParticipant is
+        {
+            PendingTimePenaltySeconds: > 0
+        } or { IsServingTimePenalty: true };
+        EstatePitServiceState pitService;
+        EstateRaceProjection projection;
+        RaceGripCondition gripCondition;
+        lock (telemetryStateSync)
+        {
+            gripEstimator.Observe(frame, context.CompletedLaps, valid);
+            pitService = pitServiceTracker.Observe(
+                frame,
+                context.Definition.Pit,
+                valid,
+                serviceBlocked);
+            projection = valid && shortcutObservation.Projection.IsValid
+                ? shortcutObservation.Projection
+                : lastValidProjection ?? new EstateRaceProjection(0, 0, 0.5, 0.5);
+            if (valid) lastValidProjection = projection;
+            gripCondition = gripEstimator.Current;
+        }
+        CapturePitServiceCompletion(
+            pitService,
+            socket?.State != WebSocketState.Open || !connectionAuthenticated);
         if (socket?.State != WebSocketState.Open || !connectionAuthenticated)
         {
             CaptureDisconnectedLap(context);
             return;
         }
+        await FlushPendingPitServiceUploadsAsync(cancellationToken).ConfigureAwait(false);
         await FlushPendingLapUploadsAsync(cancellationToken).ConfigureAwait(false);
         if (context.LastCompletedLap is { } completedLap &&
             completedLap.EventId != sentLapEventId &&
@@ -526,28 +561,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         lastTelemetrySentMonotonicMilliseconds = monotonicNow;
         observedVehicleFingerprint = VehicleProfileFingerprint.FromFrame(frame);
         var positionReliable = valid;
-        var localParticipant = session?.Participants.FirstOrDefault(candidate => candidate.Id == participantId);
-        var serviceBlocked = localParticipant is
-        {
-            PendingTimePenaltySeconds: > 0
-        } or { IsServingTimePenalty: true };
-        EstatePitServiceState pitService;
-        EstateRaceProjection projection;
-        RaceGripCondition gripCondition;
-        lock (telemetryStateSync)
-        {
-            gripEstimator.Observe(frame, context.CompletedLaps, positionReliable);
-            pitService = pitServiceTracker.Observe(
-                frame,
-                context.Definition.Pit,
-                positionReliable,
-                serviceBlocked);
-            projection = positionReliable && shortcutObservation.Projection.IsValid
-                ? shortcutObservation.Projection
-                : lastValidProjection ?? new EstateRaceProjection(0, 0, 0.5, 0.5);
-            if (positionReliable) lastValidProjection = projection;
-            gripCondition = gripEstimator.Current;
-        }
         var pit = context.Definition.Pit;
         var isOnPitRoute = positionReliable && pitService.IsOnPitRoute;
         var update = new RaceTelemetryUpdate(
@@ -597,8 +610,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             collision.ImpactWorldVelocity.Z,
             collision.ImpactSmashableVelDiff,
             collision.ImpactSmashableMass,
-            shortcutObservation.Evidence);
+            shortcutObservation.Evidence,
+            pitService.VisitId);
         await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
+        await FlushPendingPitServiceUploadsAsync(cancellationToken).ConfigureAwait(false);
         // Practice strategy processing is optional. Run it after the time-sensitive
         // telemetry and lap messages so it can never delay the current upload.
         ObserveTelemetryStrategySafely(context, pausedOrRewinding, pitService);
@@ -708,6 +723,93 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         lap.IsBestLapEligible,
         recoveredAfterDisconnect);
 
+    private void CapturePitServiceCompletion(
+        EstatePitServiceState pitService,
+        bool disconnected)
+    {
+        if (pitService.CompletedServices <= observedPitServiceCount) return;
+        observedPitServiceCount = pitService.CompletedServices;
+        var currentSession = session;
+        var effectiveRace = currentSession?.Phase is RaceSessionPhase.Race or RaceSessionPhase.Finished ||
+                            currentSession?.Phase == RaceSessionPhase.Suspended &&
+                            currentSession.SuspendedFromPhase == RaceSessionPhase.Race;
+        if (!effectiveRace || currentSession?.StartsAt is not DateTimeOffset startedAt ||
+            pitService.VisitId is not Guid visitId)
+            return;
+        if (disconnected && currentSession.DisconnectedLapRecoveryEnabled != true)
+            return;
+
+        var completed = new RacePitServiceCompleted(
+            Guid.NewGuid(),
+            visitId,
+            pitService.CompletedServices,
+            pitService.RequiredSeconds,
+            Math.Max(pitService.RequiredSeconds, pitService.ElapsedSeconds),
+            Math.Max(0, monotonicClock.ElapsedMilliseconds),
+            startedAt.ToUnixTimeMilliseconds(),
+            disconnected);
+        lock (pitServiceRecoverySync)
+        {
+            if (pendingPitServiceUploads.Count >= 20) pendingPitServiceUploads.RemoveAt(0);
+            pendingPitServiceUploads.Add(new PendingPitServiceUpload(completed, 0));
+        }
+    }
+
+    private async Task FlushPendingPitServiceUploadsAsync(CancellationToken cancellationToken)
+    {
+        if (connectionIsObserver) return;
+        while (true)
+        {
+            RacePitServiceCompleted? completed = null;
+            var now = monotonicClock.ElapsedMilliseconds;
+            lock (pitServiceRecoverySync)
+            {
+                var index = pendingPitServiceUploads.FindIndex(item =>
+                    item.LastAttemptMonotonicMilliseconds == 0 ||
+                    now - item.LastAttemptMonotonicMilliseconds >=
+                    RecoveredPitServiceRetryInterval.TotalMilliseconds);
+                if (index >= 0)
+                {
+                    var pending = pendingPitServiceUploads[index];
+                    completed = pending.Completed;
+                    pendingPitServiceUploads[index] = pending with
+                    {
+                        LastAttemptMonotonicMilliseconds = now
+                    };
+                }
+            }
+            if (completed is null) return;
+            await SendAsync("pitServiceCompleted", completed, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private void AcknowledgePitService(RacePitServiceAcknowledgement acknowledgement)
+    {
+        lock (pitServiceRecoverySync)
+            pendingPitServiceUploads.RemoveAll(item => item.Completed.EventId == acknowledgement.EventId);
+        if (!acknowledgement.IsAccepted && !string.IsNullOrWhiteSpace(acknowledgement.Message))
+            PublishSnapshot(EstateRaceConnectionState.Connected, acknowledgement.Message);
+    }
+
+    private void ClearPendingPitServiceUploads()
+    {
+        lock (pitServiceRecoverySync) pendingPitServiceUploads.Clear();
+    }
+
+    private void MarkPendingPitServiceUploadsForRecovery()
+    {
+        lock (pitServiceRecoverySync)
+            for (var index = 0; index < pendingPitServiceUploads.Count; index++)
+            {
+                var pending = pendingPitServiceUploads[index];
+                pendingPitServiceUploads[index] = pending with
+                {
+                    Completed = pending.Completed with { IsRecoveredAfterDisconnect = true },
+                    LastAttemptMonotonicMilliseconds = 0
+                };
+            }
+    }
+
     private async Task ReceiveLoopAsync(
         ClientWebSocket activeSocket,
         CancellationToken cancellationToken)
@@ -742,6 +844,12 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                         var acknowledgement = envelope.Payload.Deserialize<RaceLapAcknowledgement>(
                             EstateRaceWireProtocol.JsonOptions);
                         if (acknowledgement is not null) AcknowledgeLap(acknowledgement);
+                    }
+                    else if (envelope.Type == "pitServiceAcknowledged")
+                    {
+                        var acknowledgement = envelope.Payload.Deserialize<RacePitServiceAcknowledgement>(
+                            EstateRaceWireProtocol.JsonOptions);
+                        if (acknowledgement is not null) AcknowledgePitService(acknowledgement);
                     }
                     else if (envelope.Type == "error")
                     {
@@ -967,7 +1075,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             ClearPendingLapUploads();
         }
         else
+        {
             MarkPendingLapUploadsForRecovery();
+            MarkPendingPitServiceUploadsForRecovery();
+        }
         SetConnectionState(EstateRaceConnectionState.Reconnecting, "连接中断，正在尝试恢复赛事连接…");
         LogIfInitialized($"Estate race WebSocket disconnected: {exception.Message}");
         ScheduleReconnect();
@@ -1382,6 +1493,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             }
             sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
             ClearPendingLapUploads();
+            ClearPendingPitServiceUploads();
+            observedPitServiceCount = 0;
         }
         if (!value.DisconnectedLapRecoveryEnabled)
         {
@@ -1638,6 +1751,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
 
     private sealed record PendingLapUpload(
         RaceLapCompleted Lap,
+        long LastAttemptMonotonicMilliseconds);
+
+    private sealed record PendingPitServiceUpload(
+        RacePitServiceCompleted Completed,
         long LastAttemptMonotonicMilliseconds);
 
     [GeneratedRegex("^#[0-9A-Fa-f]{6}$", RegexOptions.CultureInvariant)]

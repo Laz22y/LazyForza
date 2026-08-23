@@ -378,9 +378,21 @@ public sealed record EstatePitServiceState(
     double SpeedLimitKph = 0,
     double CurrentSpeedKph = 0,
     bool IsSpeeding = false,
-    bool IsOnPitRoute = false)
+    bool IsOnPitRoute = false,
+    Guid? VisitId = null,
+    EstatePitServiceProgressState ProgressState = EstatePitServiceProgressState.None)
 {
     public static EstatePitServiceState Empty { get; } = new(false, false, 0, 0, false, 0);
+}
+
+public enum EstatePitServiceProgressState
+{
+    None,
+    WaitingForStop,
+    Counting,
+    MovementGrace,
+    Blocked,
+    Completed
 }
 
 public enum EstatePitStrategyDecision
