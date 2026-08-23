@@ -278,7 +278,8 @@ public sealed record EstateRaceParticipant(
     int? QualifyingEliminatedInSession = null,
     IReadOnlyList<double?>? QualifyingSessionBestLapSeconds = null,
     bool PracticeFinalLapPending = false,
-    IReadOnlyList<double?>? PracticeSessionBestLapSeconds = null);
+    IReadOnlyList<double?>? PracticeSessionBestLapSeconds = null,
+    IReadOnlyDictionary<Guid, double>? RaceDeltaSecondsByReference = null);
 
 public sealed record EstateRaceObserver(
     Guid Id,
