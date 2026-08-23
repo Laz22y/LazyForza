@@ -71,6 +71,43 @@ public sealed class EstateShortcutDetectorTests
     }
 
     [TestMethod]
+    public void FasterRacingLineInsideMatchingCorridorDoesNotCreateShortcutEvidence()
+    {
+        var track = CreateHairpinTrack();
+        var detector = new EstateShortcutDetector();
+        var racingLine = new (double X, double Z)[]
+        {
+            (0, 70),
+            (0, 82),
+            (2, 92),
+            (8, 98),
+            (20, 100),
+            (32, 98),
+            (38, 92),
+            (40, 82),
+            (40, 70)
+        };
+
+        long monotonic = 1_000;
+        RaceShortcutEvidence? evidence = null;
+        for (var index = 0; index < racingLine.Length; index++)
+        {
+            if (index > 0) monotonic += 200;
+            var observation = detector.Observe(
+                Frame(index + 1, racingLine[index].X, racingLine[index].Z, 25),
+                track,
+                null,
+                true,
+                monotonic);
+            evidence ??= observation.Evidence;
+        }
+
+        Assert.IsNull(
+            evidence,
+            "位于赛道匹配走廊内的外内外赛车线即使比录入中心线更短，也不能作为切弯证据。 ");
+    }
+
+    [TestMethod]
     public void TelemetryJumpAndRecordedPitBranchDoNotCreateShortcutEvidence()
     {
         var track = CreateHairpinTrack();
