@@ -292,6 +292,15 @@ internal sealed partial class MainWindow : Window
                 CaptureVisual(
                     this,
                     Path.Combine(directory, $"settings-{fileName}-{width:0}x{height:0}.png"));
+                if (category == SettingsCategory.Hud && content.Content is ScrollViewer hudSettingsScroll)
+                {
+                    hudSettingsScroll.ScrollToEnd();
+                    UpdateLayout();
+                    await Task.Delay(150);
+                    CaptureVisual(
+                        this,
+                        Path.Combine(directory, $"settings-hud-footer-{width:0}x{height:0}.png"));
+                }
                 CollectHanText(this, $"settings {category}", englishHanAudit);
             }
         }
@@ -3370,7 +3379,7 @@ internal sealed partial class MainWindow : Window
             hudTimingExpanded,
             expanded => hudTimingExpanded = expanded));
 
-        var footer = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        var footer = new Grid();
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var saveHint = Label("点击应用后立即生效。", 11, FontWeights.Normal, "MutedBrush");
@@ -3380,7 +3389,7 @@ internal sealed partial class MainWindow : Window
         {
             Content = "应用 HUD 设置",
             HorizontalAlignment = HorizontalAlignment.Right,
-            Padding = new Thickness(18, 9, 18, 9)
+            Padding = new Thickness(16, 7, 16, 7)
         };
         saveOverlay.Click += async (_, _) =>
         {
@@ -3445,7 +3454,16 @@ internal sealed partial class MainWindow : Window
         };
         Grid.SetColumn(saveOverlay, 1);
         footer.Children.Add(saveOverlay);
-        controls.Children.Add(Card(footer));
+        controls.Children.Add(new Border
+        {
+            Background = Brush("PanelBrush"),
+            BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12, 7, 12, 7),
+            Margin = new Thickness(0, 0, 10, 4),
+            Child = footer
+        });
         hudSettings.Children.Add(controls);
 
         var interfacePanel = new StackPanel();
@@ -3608,38 +3626,22 @@ internal sealed partial class MainWindow : Window
         var categories = new[]
         {
             (SettingsCategory.General,
-                AppLocalization.Text("settings.category.general", "常规"),
-                AppLocalization.Text("settings.category.generalDetail", "身份与启动")),
+                AppLocalization.Text("settings.category.general", "常规")),
             (SettingsCategory.Telemetry,
-                AppLocalization.Text("settings.category.telemetry", "遥测与录制"),
-                AppLocalization.Text("settings.category.telemetryDetail", "监听与记录")),
+                AppLocalization.Text("settings.category.telemetryTab", "遥测与录制")),
             (SettingsCategory.Hud,
-                "HUD",
-                AppLocalization.Text("settings.category.hudDetail", "布局与显示")),
+                "HUD"),
             (SettingsCategory.Maintenance,
-                AppLocalization.Text("settings.category.maintenance", "维护"),
-                AppLocalization.Text("settings.category.maintenanceDetail", "更新与数据"))
+                AppLocalization.Text("settings.category.maintenance", "维护"))
         };
         var tabs = new UniformGrid { Columns = categories.Length };
-        foreach (var (category, title, detail) in categories)
+        foreach (var (category, title) in categories)
         {
-            var copy = new StackPanel
-            {
-                HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            copy.Children.Add(Label(title, 14, FontWeights.SemiBold));
-            var detailLabel = Label(detail, 10, FontWeights.Normal, "MutedBrush");
-            detailLabel.Margin = new Thickness(0, 3, 0, 0);
-            copy.Children.Add(detailLabel);
             var tab = new ToggleButton
             {
-                Content = copy,
+                Content = title,
                 IsChecked = category == selectedSettingsCategory,
-                MinHeight = 66,
-                Margin = new Thickness(4),
-                Padding = new Thickness(14, 10, 14, 10),
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Style = (Style)FindResource("SettingsCategoryTab"),
                 Tag = category
             };
             tab.Click += (_, _) =>
@@ -3655,9 +3657,9 @@ internal sealed partial class MainWindow : Window
             Background = Brush("PanelBrush"),
             BorderBrush = Brush("BorderBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(4),
-            Margin = new Thickness(0, 8, 10, 12),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(3),
+            Margin = new Thickness(0, 7, 10, 11),
             Child = tabs
         };
     }

@@ -76,6 +76,7 @@
   "settings.category.generalDetail": "Identity & startup",
   "settings.category.general.pageDetail": "Manage your player code, interface language, data folder and window close behavior.",
   "settings.category.telemetry": "Telemetry & recording",
+  "settings.category.telemetryTab": "Telemetry",
   "settings.category.telemetryDetail": "UDP & recording",
   "settings.category.telemetry.pageDetail": "Configure FH6 telemetry input, automatic race recording and recording files.",
   "settings.category.hudDetail": "Layout & display",

@@ -188,6 +188,52 @@
         <Style x:Key="SettingsSectionExpander"
                TargetType="Expander"
                BasedOn="{StaticResource VehicleGroupExpander}" />
+        <Style x:Key="SettingsCategoryTab" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Margin" Value="2" />
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="MinHeight" Value="42" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid Background="Transparent">
+                            <Border x:Name="TabSurface"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="6"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <Border x:Name="SelectionIndicator"
+                                    Height="2"
+                                    Margin="14,0"
+                                    VerticalAlignment="Bottom"
+                                    Background="Transparent"
+                                    CornerRadius="1" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabSurface" Property="Background" Value="#182532" />
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="TabSurface" Property="Background" Value="#162A34" />
+                                <Setter TargetName="SelectionIndicator" Property="Background" Value="{StaticResource AccentBrush}" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="TabSurface" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="FontSize" Value="14" />
