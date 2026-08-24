@@ -92,7 +92,6 @@ Get-ChildItem -LiteralPath $publishPath -Filter '*.pdb' -File -ErrorAction Silen
     Remove-Item -Force
 Copy-Item -Path (Join-Path $publishPath '*') -Destination $stagePath -Recurse
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\README.txt') -Destination $stagePath
-Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\Start-Isolated.cmd') -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') `
     -Destination (Join-Path $stagePath 'THIRD_PARTY_NOTICES.txt')
 $dotnetRoot = Split-Path -Parent (Get-Command dotnet -ErrorAction Stop).Source
