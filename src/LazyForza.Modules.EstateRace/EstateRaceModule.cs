@@ -30,6 +30,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private static readonly TimeSpan RecoveredPitServiceRetryInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FingerprintRefreshInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan BackgroundFailureLogInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ReconnectStabilityWindow = TimeSpan.FromSeconds(15);
     private readonly Func<EstateRaceTrackContext?> trackContext;
     private readonly Action<Guid, bool, bool>? timingControl;
     private readonly Func<VehicleProfileFingerprint?>? vehicleFingerprint;
@@ -57,6 +58,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private Task? telemetryTask;
     private Task? receiveTask;
     private Task? heartbeatTask;
+    private Task? telemetrySendTask;
     private Task? reconnectTask;
     private ClientWebSocket? socket;
     private EstateRaceConnectionProfile? activeProfile;
@@ -83,6 +85,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private bool raceTimingEnabled;
     private bool raceTimingInvalidatesLapOnDriverIntervention = true;
     private int reconnectLoopActive;
+    private int reconnectAttemptCount;
+    private int connectionInterruptionHandled;
+    private long connectedAtMonotonicMilliseconds;
+    private LatestValueSendQueue<RaceTelemetryUpdate>? telemetrySendQueue;
     private EstateRaceOrganizerLogo? organizerLogo;
     private string? failedOrganizerLogoHash;
     private DateTimeOffset organizerLogoRetryAfter;
@@ -210,6 +216,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         string? expectedTrackPackageHash = null)
     {
         await CancelReconnectAsync().ConfigureAwait(false);
+        Interlocked.Exchange(ref reconnectAttemptCount, 0);
+        Interlocked.Exchange(ref connectedAtMonotonicMilliseconds, 0);
         requestedTrackPackageHash = string.IsNullOrWhiteSpace(expectedTrackPackageHash)
             ? null
             : expectedTrackPackageHash.Trim().ToUpperInvariant();
@@ -254,6 +262,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 throw new InvalidOperationException("请先启用地产赛事模块。");
             ValidateProfile(profile);
             await DisconnectCoreAsync(preserveSessionState: isReconnectAttempt).ConfigureAwait(false);
+            Interlocked.Exchange(ref connectionInterruptionHandled, 0);
             if (!isReconnectAttempt)
             {
                 lock (telemetryStateSync) shortcutDetector.Reset();
@@ -331,6 +340,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             if (connectionIsObserver) observerResumeToken = accepted.ResumeToken;
             else driverResumeToken = accepted.ResumeToken;
             connectionAuthenticated = true;
+            Interlocked.Exchange(ref connectedAtMonotonicMilliseconds, monotonicClock.ElapsedMilliseconds);
             ApplySessionSnapshot(NormalizeSession(accepted.Snapshot), resetForConnection: !isReconnectAttempt);
             MarkServerResponse();
             await RefreshOrganizerLogoAsync(accepted.Snapshot, timeout.Token).ConfigureAwait(false);
@@ -338,6 +348,11 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
             var connectedSocket = socket;
             var connectedCancellation = connectionCancellation;
+            var telemetryQueue = new LatestValueSendQueue<RaceTelemetryUpdate>();
+            telemetrySendQueue = telemetryQueue;
+            telemetrySendTask = Task.Run(
+                () => TelemetrySendLoopAsync(telemetryQueue, connectedCancellation.Token),
+                CancellationToken.None);
             receiveTask = Task.Run(
                 () => ReceiveLoopAsync(connectedSocket, connectedCancellation.Token),
                 CancellationToken.None);
@@ -387,6 +402,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             ClearPendingLapUploads();
             ClearPendingPitServiceUploads();
             observedPitServiceCount = 0;
+            Interlocked.Exchange(ref reconnectAttemptCount, 0);
+            Interlocked.Exchange(ref connectedAtMonotonicMilliseconds, 0);
             SetRaceTimingEnabled(false);
             SetConnectionState(EstateRaceConnectionState.Disconnected, "未连接赛事服务");
         }
@@ -455,6 +472,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         ClearPendingLapUploads();
         ClearPendingPitServiceUploads();
         observedPitServiceCount = 0;
+        Interlocked.Exchange(ref reconnectAttemptCount, 0);
+        Interlocked.Exchange(ref connectedAtMonotonicMilliseconds, 0);
         SetRaceTimingEnabled(false);
         Volatile.Write(ref snapshot, EmptySnapshot());
     }
@@ -612,7 +631,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             collision.ImpactSmashableMass,
             shortcutObservation.Evidence,
             pitService.VisitId);
-        await SendAsync("telemetry", update, cancellationToken).ConfigureAwait(false);
+        telemetrySendQueue?.TryWrite(update);
         await FlushPendingPitServiceUploadsAsync(cancellationToken).ConfigureAwait(false);
         // Practice strategy processing is optional. Run it after the time-sensitive
         // telemetry and lap messages so it can never delay the current upload.
@@ -907,6 +926,27 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         }
     }
 
+    private async Task TelemetrySendLoopAsync(
+        LatestValueSendQueue<RaceTelemetryUpdate> queue,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await queue.RunAsync(
+                (update, token) => SendAsync("telemetry", update, token),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            LogBackgroundFailure(
+                "telemetry-send",
+                exception,
+                ref lastTelemetryFailureAt,
+                ref lastTelemetryFailure);
+        }
+    }
+
     private void UpdateNetworkTiming(RaceClockPong pong)
     {
         var receivedMonotonic = monotonicClock.ElapsedMilliseconds;
@@ -943,8 +983,14 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
     }
 
-    private void MarkServerResponse() =>
+    private void MarkServerResponse()
+    {
         Interlocked.Exchange(ref lastServerResponseUtcTicks, DateTimeOffset.UtcNow.UtcDateTime.Ticks);
+        var connectedAt = Interlocked.Read(ref connectedAtMonotonicMilliseconds);
+        if (connectionAuthenticated && connectedAt > 0 &&
+            monotonicClock.ElapsedMilliseconds - connectedAt >= ReconnectStabilityWindow.TotalMilliseconds)
+            Interlocked.Exchange(ref reconnectAttemptCount, 0);
+    }
 
     private void ScheduleReconnect()
     {
@@ -958,17 +1004,12 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         reconnectCancellation = cancellation;
         reconnectTask = Task.Run(async () =>
         {
-            var attempt = 0;
             try
             {
                 while (!cancellation.IsCancellationRequested && !intentionalDisconnect)
                 {
-                    attempt++;
-                    var baseDelaySeconds = attempt == 1
-                        ? 0.5
-                        : Math.Min(10, Math.Pow(2, Math.Min(attempt - 2, 3)));
-                    var delay = TimeSpan.FromSeconds(
-                        baseDelaySeconds * (0.85 + Random.Shared.NextDouble() * 0.30));
+                    var attempt = Interlocked.Increment(ref reconnectAttemptCount);
+                    var delay = ReconnectDelay(attempt, 0.85 + Random.Shared.NextDouble() * 0.30);
                     SetConnectionState(
                         EstateRaceConnectionState.Reconnecting,
                         $"连接中断，{delay.TotalSeconds:0.#} 秒后进行第 {attempt} 次重连…");
@@ -997,6 +1038,15 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 Interlocked.Exchange(ref reconnectLoopActive, 0);
             }
         }, CancellationToken.None);
+    }
+
+    internal static TimeSpan ReconnectDelay(int attempt, double jitterFactor)
+    {
+        attempt = Math.Max(1, attempt);
+        var baseDelaySeconds = attempt == 1
+            ? 0.5
+            : Math.Min(10, Math.Pow(2, Math.Min(attempt - 2, 4)));
+        return TimeSpan.FromSeconds(baseDelaySeconds * Math.Clamp(jitterFactor, 0.85, 1.15));
     }
 
     private async Task CancelReconnectAsync()
@@ -1069,6 +1119,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private void HandleConnectionInterrupted(Exception exception)
     {
         if (intentionalDisconnect) return;
+        if (Interlocked.CompareExchange(ref connectionInterruptionHandled, 1, 0) != 0) return;
         if (session?.DisconnectedLapRecoveryEnabled != true)
         {
             sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
@@ -1119,6 +1170,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
 
     private async Task DisconnectCoreAsync(bool preserveSessionState = false)
     {
+        telemetrySendQueue = null;
         connectionCancellation?.Cancel();
         var activeSocket = socket;
         socket = null;
@@ -1127,10 +1179,17 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             try
             {
                 if (activeSocket.State == WebSocketState.Open)
+                {
+                    using var closeTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
                     await activeSocket.CloseOutputAsync(
                         WebSocketCloseStatus.NormalClosure,
                         "client disconnect",
-                        CancellationToken.None).ConfigureAwait(false);
+                        closeTimeout.Token).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                activeSocket.Abort();
             }
             catch (Exception exception)
             {
@@ -1148,6 +1207,17 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             catch (Exception exception)
             {
                 LogIfInitialized($"Estate race receive task ended with an error: {exception.Message}");
+            }
+        }
+        var currentTelemetrySend = telemetrySendTask;
+        telemetrySendTask = null;
+        if (currentTelemetrySend is not null)
+        {
+            try { await currentTelemetrySend.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch (Exception exception)
+            {
+                LogIfInitialized($"Estate race telemetry send task ended with an error: {exception.Message}");
             }
         }
         var currentHeartbeat = heartbeatTask;
