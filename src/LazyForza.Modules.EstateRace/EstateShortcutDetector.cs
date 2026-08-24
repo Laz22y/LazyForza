@@ -176,11 +176,6 @@ internal sealed class EstateShortcutDetector
         var worldDistance = slices.Sum(item => item.WorldDistanceMeters);
         if (routeDistance <= 0) return;
         var rawGain = routeDistance - worldDistance;
-        var noiseAllowance = Math.Max(1.25, routeDistance * 0.018);
-        var gain = rawGain - noiseAllowance;
-        var minimumGain = Math.Max(5, Math.Min(8, track.MatchingToleranceMeters * 0.3));
-        if (gain < minimumGain) return;
-
         var protectedRoute = Math.Min(routeDistance, slices.Sum(item => item.ProtectedRouteMeters));
         var theoreticalSaving = slices.Max(item => item.TheoreticalSavingMeters);
         var missedGates = slices.Sum(item => item.MissedCriticalGates);
@@ -189,13 +184,22 @@ internal sealed class EstateShortcutDetector
         var ambiguityRatio = routeDistance <= 0 ? 0 : ambiguousRoute / routeDistance;
         var curvatureSupport = protectedRoute >= Math.Min(20, routeDistance * 0.25) &&
                                theoreticalSaving >= 3;
-        if (missedGates == 0 && !curvatureSupport) return;
-        if (ambiguityRatio > 0.55 && (missedGates == 0 || gain < minimumGain * 2)) return;
+        if (missedGates == 0 || !curvatureSupport) return;
+
+        // The recorded trace is a reference line. A valid racing line can shorten it without leaving the course.
+        var noiseAllowance = Math.Max(1.25, routeDistance * 0.018);
+        var racingLineAllowance = Math.Max(
+            Math.Clamp(track.MatchingToleranceMeters * 0.55, 4, 12),
+            Math.Clamp(theoreticalSaving * 0.75, 4, 12));
+        var unexplainedGain = rawGain - noiseAllowance - racingLineAllowance;
+        var minimumGain = Math.Max(5, Math.Min(8, track.MatchingToleranceMeters * 0.3));
+        if (unexplainedGain < minimumGain) return;
+        if (ambiguityRatio > 0.55 && unexplainedGain < minimumGain * 2) return;
 
         var confidence = 0.58 +
-                         (missedGates > 0 ? 0.22 : 0) +
-                         (curvatureSupport ? 0.12 : 0) +
-                         Math.Min(0.12, gain / Math.Max(1, minimumGain) * 0.04) -
+                         0.22 +
+                         0.12 +
+                         Math.Min(0.12, unexplainedGain / Math.Max(1, minimumGain) * 0.04) -
                          ambiguityRatio * 0.25;
         confidence = Math.Clamp(confidence, 0, 1);
         if (confidence < 0.72) return;
@@ -264,6 +268,8 @@ internal sealed class EstateShortcutDetector
     {
         if (track.Points.Count < 10) return [];
         var candidates = new List<ProtectedArc>();
+        // Keep the complete route-matching corridor legal instead of forcing the car through its center point.
+        var gateRadius = Math.Clamp(track.MatchingToleranceMeters, 10, 24);
         const int radius = 4;
         for (var center = radius; center < track.Points.Count - radius; center++)
         {
@@ -293,7 +299,7 @@ internal sealed class EstateShortcutDetector
                 end.S,
                 gate.S,
                 new Vector3F((float)gate.X, (float)gate.Y, (float)gate.Z),
-                Math.Clamp(track.MatchingToleranceMeters * 0.35, 3.5, 7),
+                gateRadius,
                 saving));
         }
 

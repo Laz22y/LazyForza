@@ -1,5 +1,8 @@
 # 阶段 4：Fluent UI、整体验收与交付
 
+> **Status: Historical**
+> 本阶段已经结束，本文不是当前验收清单。现行验证矩阵见 [`../AGENTS.md`](../AGENTS.md)，实机状态见 [`../VALIDATION_WITH_FH6.md`](../VALIDATION_WITH_FH6.md)。
+
 ```text
 对当前 LazyForza 实现进行最后集成、UI 完成度、性能、可靠性和交付验证。此阶段不是只做“美化”：必须检查所有开关、数据管线、存储、Replay 和算法是否真正接线。
 

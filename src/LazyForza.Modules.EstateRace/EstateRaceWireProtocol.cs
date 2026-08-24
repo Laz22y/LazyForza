@@ -111,7 +111,8 @@ internal sealed record RaceTelemetryUpdate(
     double ImpactWorldVelocityZ = 0,
     double ImpactSmashableVelDiff = 0,
     double ImpactSmashableMass = 0,
-    RaceShortcutEvidence? ShortcutEvidence = null);
+    RaceShortcutEvidence? ShortcutEvidence = null,
+    Guid? PitServiceVisitId = null);
 
 internal sealed record RaceShortcutEvidence(
     Guid Id,
@@ -140,6 +141,21 @@ internal sealed record RaceLapCompleted(
     bool IsRecoveredAfterDisconnect = false);
 
 internal sealed record RaceLapAcknowledgement(
+    Guid EventId,
+    bool IsAccepted,
+    string? Message = null);
+
+internal sealed record RacePitServiceCompleted(
+    Guid EventId,
+    Guid VisitId,
+    int CompletedPitServices,
+    double RequiredSeconds,
+    double ElapsedSeconds,
+    long ClientMonotonicMilliseconds,
+    long RaceStartedAtUnixMilliseconds,
+    bool IsRecoveredAfterDisconnect = false);
+
+internal sealed record RacePitServiceAcknowledgement(
     Guid EventId,
     bool IsAccepted,
     string? Message = null);

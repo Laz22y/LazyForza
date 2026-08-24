@@ -5,6 +5,12 @@ namespace LazyForza.Modules.EstateRace;
 internal sealed class EstatePitServiceTracker
 {
     private const double GateProgressToleranceMeters = 0.35;
+    private const double StationarySpeedKph = 1.5;
+    private const double MovementResetSpeedKph = 3;
+    private const double ServiceZoneBoundaryToleranceMeters = 1;
+    private static readonly TimeSpan ServiceZoneGrace = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan MovementGrace = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan CreepingGrace = TimeSpan.FromMilliseconds(750);
     private DateTimeOffset? previousArrival;
     private bool wasEligible;
     private bool creditedThisVisit;
@@ -15,6 +21,9 @@ internal sealed class EstatePitServiceTracker
     private Vector3F? previousPosition;
     private double? previousRouteProgress;
     private DateTimeOffset? outsidePitCorridorSince;
+    private DateTimeOffset? serviceZoneLastConfirmedAt;
+    private DateTimeOffset? movementInterruptedAt;
+    private Guid? serviceVisitId;
 
     public EstatePitServiceState Current { get; private set; } = EstatePitServiceState.Empty;
 
@@ -50,7 +59,13 @@ internal sealed class EstatePitServiceTracker
                 CompletedServices = completedServices,
                 IsCounting = wasEligible,
                 CountingUpdatedAt = frame.ArrivalTime,
-                PitLaneElapsedSeconds = pitLaneElapsedSeconds
+                PitLaneElapsedSeconds = pitLaneElapsedSeconds,
+                VisitId = serviceVisitId,
+                ProgressState = creditedThisVisit
+                    ? EstatePitServiceProgressState.Completed
+                    : wasEligible
+                        ? EstatePitServiceProgressState.Counting
+                        : Current.ProgressState
             };
             return Current;
         }
@@ -103,7 +118,21 @@ internal sealed class EstatePitServiceTracker
             }
         }
         if (pitLaneActive) pitLaneElapsedSeconds += deltaSeconds;
-        var inZone = EstateRaceGeometry.IsInServiceZone(pit, frame.Raw.Position);
+        var strictlyInZone = EstateRaceGeometry.IsInServiceZone(pit, frame.Raw.Position);
+        if (strictlyInZone)
+        {
+            serviceVisitId ??= Guid.NewGuid();
+            serviceZoneLastConfirmedAt = frame.ArrivalTime;
+        }
+        var inZoneGrace = !strictlyInZone &&
+                          serviceVisitId is not null &&
+                          serviceZoneLastConfirmedAt is DateTimeOffset lastConfirmed &&
+                          frame.ArrivalTime - lastConfirmed <= ServiceZoneGrace &&
+                          EstateRaceGeometry.IsInServiceZone(
+                              pit,
+                              frame.Raw.Position,
+                              ServiceZoneBoundaryToleranceMeters);
+        var inZone = strictlyInZone || inZoneGrace;
         if (inZone) pitLaneActive = true;
         var clearlyOutsideCorridor = route.DistanceMeters > halfWidth * 1.75 + 2;
         if (pitLaneActive && !inZone && !corridorMatch && clearlyOutsideCorridor)
@@ -119,23 +148,38 @@ internal sealed class EstatePitServiceTracker
         {
             outsidePitCorridorSince = null;
         }
-        var eligible = inZone && frame.Normalized.SpeedKph <= 1.5 && !serviceBlocked;
+        var stationary = frame.Normalized.SpeedKph <= StationarySpeedKph;
+        var eligible = inZone && stationary && !serviceBlocked;
+        var movementGraceActive = false;
         if (!inZone)
         {
             elapsedSeconds = 0;
             creditedThisVisit = false;
+            movementInterruptedAt = null;
+            serviceZoneLastConfirmedAt = null;
+            serviceVisitId = null;
         }
         else if (serviceBlocked)
         {
             elapsedSeconds = 0;
             creditedThisVisit = false;
+            movementInterruptedAt = null;
         }
-        else if (!eligible)
+        else if (stationary)
         {
-            elapsedSeconds = 0;
+            movementInterruptedAt = null;
+            if (wasEligible) AccumulateUntil(frame.ArrivalTime);
         }
-        else if (wasEligible)
-            AccumulateUntil(frame.ArrivalTime);
+        else
+        {
+            movementInterruptedAt ??= frame.ArrivalTime;
+            var resetDelay = frame.Normalized.SpeedKph > MovementResetSpeedKph
+                ? MovementGrace
+                : CreepingGrace;
+            movementGraceActive = frame.ArrivalTime - movementInterruptedAt.Value < resetDelay;
+            if (!movementGraceActive && !creditedThisVisit)
+                elapsedSeconds = 0;
+        }
 
         if (eligible) CreditCompletedService(required);
 
@@ -146,6 +190,9 @@ internal sealed class EstatePitServiceTracker
             inZone = false;
             eligible = false;
             wasEligible = false;
+            serviceZoneLastConfirmedAt = null;
+            movementInterruptedAt = null;
+            serviceVisitId = null;
         }
 
         previousArrival = frame.ArrivalTime;
@@ -167,7 +214,19 @@ internal sealed class EstatePitServiceTracker
             pit.SpeedLimitKph,
             frame.Normalized.SpeedKph,
             pitLaneActive && frame.Normalized.SpeedKph > pit.SpeedLimitKph + 1,
-            corridorMatch);
+            corridorMatch,
+            serviceVisitId,
+            creditedThisVisit
+                ? EstatePitServiceProgressState.Completed
+                : !inZone
+                    ? EstatePitServiceProgressState.None
+                    : serviceBlocked
+                        ? EstatePitServiceProgressState.Blocked
+                        : eligible
+                            ? EstatePitServiceProgressState.Counting
+                            : movementGraceActive
+                                ? EstatePitServiceProgressState.MovementGrace
+                                : EstatePitServiceProgressState.WaitingForStop);
         return Current;
     }
 
@@ -183,6 +242,9 @@ internal sealed class EstatePitServiceTracker
         previousPosition = null;
         previousRouteProgress = null;
         outsidePitCorridorSince = null;
+        serviceZoneLastConfirmedAt = null;
+        movementInterruptedAt = null;
+        serviceVisitId = null;
         Current = EstatePitServiceState.Empty;
     }
 

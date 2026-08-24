@@ -200,6 +200,90 @@ public sealed class EstateRaceGeometryTests
     }
 
     [TestMethod]
+    public void BriefMovementPausesServiceTimerButSustainedMovementResetsIt()
+    {
+        var pit = new EstatePitDefinition(
+            Gate(0, 0, 1, 0),
+            Gate(30, 0, 1, 0),
+            [new EstateGatePoint(0, 2, 0), new EstateGatePoint(30, 2, 0)],
+            new EstateGatePoint(15, 2, 0),
+            4,
+            80,
+            3,
+            3.5,
+            [
+                new EstateGatePoint(12, 2, -2),
+                new EstateGatePoint(18, 2, -2),
+                new EstateGatePoint(18, 2, 2),
+                new EstateGatePoint(12, 2, 2)
+            ]);
+        var tracker = new EstatePitServiceTracker();
+
+        var started = tracker.Observe(Frame(1_000, 15, 0), pit, true);
+        var counted = tracker.Observe(Frame(2_000, 15, 0), pit, true);
+        var movementSpike = tracker.Observe(Frame(2_200, 15, 0, 4), pit, true);
+        Assert.AreEqual(started.VisitId, movementSpike.VisitId);
+        Assert.AreEqual(1, counted.ElapsedSeconds, .001);
+        Assert.AreEqual(1, movementSpike.ElapsedSeconds, .001);
+        Assert.AreEqual(EstatePitServiceProgressState.MovementGrace, movementSpike.ProgressState);
+
+        var stoppedAgain = tracker.Observe(Frame(2_500, 15, 0), pit, true);
+        Assert.AreEqual(1, stoppedAgain.ElapsedSeconds, .001,
+            "短暂速度毛刺只应暂停计时，不能清空已经确认的停车时间。");
+        _ = tracker.Observe(Frame(3_500, 15, 0), pit, true);
+        _ = tracker.Observe(Frame(4_500, 15, 0), pit, true);
+        var completed = tracker.Observe(Frame(5_500, 15, 0), pit, true);
+        Assert.IsTrue(completed.RequirementMet);
+        Assert.AreEqual(1, completed.CompletedServices);
+
+        tracker.Reset();
+        _ = tracker.Observe(Frame(10_000, 15, 0), pit, true);
+        _ = tracker.Observe(Frame(11_000, 15, 0), pit, true);
+        _ = tracker.Observe(Frame(11_100, 15, 0, 4), pit, true);
+        var sustainedMovement = tracker.Observe(Frame(11_700, 15, 0, 4), pit, true);
+        Assert.AreEqual(0, sustainedMovement.ElapsedSeconds, .001,
+            "持续移动车辆仍必须重新完成整段最低停车时间。");
+        Assert.AreEqual(EstatePitServiceProgressState.WaitingForStop, sustainedMovement.ProgressState);
+    }
+
+    [TestMethod]
+    public void ServiceZoneBoundaryJitterKeepsTheSameVisitWithinTheGraceWindow()
+    {
+        var pit = new EstatePitDefinition(
+            Gate(0, 0, 1, 0),
+            Gate(30, 0, 1, 0),
+            [new EstateGatePoint(0, 2, 0), new EstateGatePoint(30, 2, 0)],
+            new EstateGatePoint(15, 2, 0),
+            4,
+            80,
+            3,
+            3.5,
+            [
+                new EstateGatePoint(12, 2, -2),
+                new EstateGatePoint(18, 2, -2),
+                new EstateGatePoint(18, 2, 2),
+                new EstateGatePoint(12, 2, 2)
+            ]);
+        var tracker = new EstatePitServiceTracker();
+
+        var entered = tracker.Observe(Frame(1_000, 15, 0), pit, true);
+        _ = tracker.Observe(Frame(2_000, 15, 0), pit, true);
+        var boundaryJitter = tracker.Observe(Frame(2_300, 18.6f, 0), pit, true);
+        Assert.IsTrue(boundaryJitter.IsInServiceZone);
+        Assert.AreEqual(entered.VisitId, boundaryJitter.VisitId);
+        Assert.IsTrue(boundaryJitter.ElapsedSeconds > 1);
+
+        var returned = tracker.Observe(Frame(2_600, 15, 0), pit, true);
+        Assert.AreEqual(entered.VisitId, returned.VisitId);
+        Assert.IsTrue(returned.ElapsedSeconds > boundaryJitter.ElapsedSeconds);
+
+        var clearlyLeft = tracker.Observe(Frame(3_500, 19.2f, 0), pit, true);
+        Assert.IsFalse(clearlyLeft.IsInServiceZone);
+        Assert.IsNull(clearlyLeft.VisitId);
+        Assert.AreEqual(0, clearlyLeft.ElapsedSeconds, .001);
+    }
+
+    [TestMethod]
     public void RecordedPitBranchShowsLimiterBeforeEntryAndClearsItAtExitLine()
     {
         var pit = new EstatePitDefinition(

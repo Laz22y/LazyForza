@@ -261,6 +261,47 @@ public sealed class EstateRaceClientModuleTests
     }
 
     [TestMethod]
+    public void RaceLeaderboardPrefersDirectDriverDeltaOverSubtractingDifferentLeaderAnchors()
+    {
+        var leader = Participant(Guid.NewGuid()) with
+        {
+            Position = 1,
+            GapToLeaderSeconds = 0
+        };
+        var local = Participant(Guid.NewGuid()) with
+        {
+            Position = 2,
+            GapToLeaderSeconds = 8
+        };
+        var trailing = Participant(Guid.NewGuid()) with
+        {
+            Position = 3,
+            GapToLeaderSeconds = 5,
+            RaceDeltaSecondsByReference = new Dictionary<Guid, double>
+            {
+                [local.Id] = 3
+            }
+        };
+
+        Assert.AreEqual("+3.000", EstateRaceLeaderboardFormatter.Format(
+            trailing, local, qualifying: false, race: true, 0, leaderParticipant: leader),
+            "两车直接秒差不能再由不同赛道位置上的榜首差相减得到。 ");
+        var json = JsonSerializer.Serialize(trailing, EstateRaceWireProtocol.JsonOptions);
+        var roundTrip = JsonSerializer.Deserialize<EstateRaceParticipant>(
+            json, EstateRaceWireProtocol.JsonOptions)!;
+        Assert.AreEqual(3, roundTrip.RaceDeltaSecondsByReference![local.Id], .001,
+            "两车直接秒差表必须能够通过房间 JSON 协议完整传输。 ");
+
+        var unavailable = trailing with
+        {
+            RaceDeltaSecondsByReference = new Dictionary<Guid, double>()
+        };
+        Assert.AreEqual("—", EstateRaceLeaderboardFormatter.Format(
+            unavailable, local, qualifying: false, race: true, 0, leaderParticipant: leader),
+            "新服务端尚无可比较的共同轨迹时，应等待直接结果，不能退回错误的间接计算。 ");
+    }
+
+    [TestMethod]
     public void PitHudUsesServerAnchoredTimersAndCountsEveryConnectedPitParticipant()
     {
         var serverNow = new DateTimeOffset(2026, 8, 11, 12, 0, 0, TimeSpan.Zero);

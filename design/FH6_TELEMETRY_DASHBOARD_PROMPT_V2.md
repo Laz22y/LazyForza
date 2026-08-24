@@ -1,5 +1,8 @@
 # FH6 极简遥测仪表盘 V2 ImageGen 提示词
 
+> **Status: Historical visual-generation material**
+> 本文仅保留早期设计稿生成过程，不是当前代码修改指令。现行 HUD 以实现和测试为准。
+
 以下提示词用于生成/复现 V2 视觉稿。生成模式为内置 ImageGen 的参考图编辑模式；最终透明图通过纯色技术背景提取 alpha。
 
 ## 主设计提示词

@@ -85,10 +85,20 @@ public static class EstateRaceLeaderboardFormatter
         if (localParticipant is null)
             return FormatLeaderComparison(participant, leaderParticipant, leaderCompletedLaps);
 
-        var participantGap = GapToLeader(participant);
-        var localGap = GapToLeader(localParticipant);
-        if (participantGap is double otherGap && localGap is double referenceGap)
-            return FormatDelta(otherGap - referenceGap);
+        if (participant.RaceDeltaSecondsByReference is { } directDeltas)
+        {
+            if (directDeltas.TryGetValue(localParticipant.Id, out var directDelta) &&
+                double.IsFinite(directDelta))
+                return FormatDelta(directDelta);
+        }
+        else
+        {
+            // Compatibility with servers that predate direct pairwise race Delta.
+            var participantGap = GapToLeader(participant);
+            var localGap = GapToLeader(localParticipant);
+            if (participantGap is double otherGap && localGap is double referenceGap)
+                return FormatDelta(otherGap - referenceGap);
+        }
 
         var lapDelta = WholeLapDelta(localParticipant, participant);
         if (lapDelta != 0)

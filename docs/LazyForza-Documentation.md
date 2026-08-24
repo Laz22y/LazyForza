@@ -9,6 +9,8 @@ LazyForza 是面向 Forza Horizon 6 的本地遥测、驾驶分析与地产赛�
 - 客户端仓库：<https://github.com/Laz22y/LazyForza>
 - 服务端仓库：<https://github.com/Laz22y/LazyForza.RaceServer>
 
+参与开发或使用 Coding Agent 时，从仓库根目录的 [`AGENTS.md`](../AGENTS.md) 开始；它列出当前模块边界、跨仓库同步范围和验证矩阵。
+
 ## 1. 快速开始
 
 ### 1.1 下载与安装

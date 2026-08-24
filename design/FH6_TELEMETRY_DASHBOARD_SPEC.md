@@ -1,5 +1,8 @@
 # FH6 极简遥测仪表盘 V2 复刻规格
 
+> **Status: Historical visual reference**
+> 本文解释初始 Dashboard 视觉来源，不是当前 UI 实施规范。修改现有 HUD 时以 `LazyForza.Overlay`、布局持久化模型、相关测试和实际 Windows 画面为准；开发入口见 [`../AGENTS.md`](../AGENTS.md)。
+
 ![V2 透明背景设计稿](./FH6_TELEMETRY_DASHBOARD_DESIGN_V2_TRANSPARENT.png)
 
 ## 1. 目标与交付形态

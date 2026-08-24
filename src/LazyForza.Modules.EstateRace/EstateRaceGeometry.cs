@@ -301,15 +301,21 @@ internal static class EstateRaceGeometry
         return ProjectPitRoute(pit, center).ProgressMeters;
     }
 
-    public static bool IsInServiceZone(EstatePitDefinition? pit, Vector3F position)
+    public static bool IsInServiceZone(
+        EstatePitDefinition? pit,
+        Vector3F position,
+        double boundaryToleranceMeters = 0)
     {
         if (pit is null) return false;
+        var tolerance = Math.Clamp(boundaryToleranceMeters, 0, 3);
         if (pit.ServiceZoneBoundary is { Count: >= 3 } polygon)
-            return PointInPolygon(polygon, position.X, position.Z) &&
-                   Math.Abs(position.Y - polygon.Average(point => point.Y)) <= 3;
+            return Math.Abs(position.Y - polygon.Average(point => point.Y)) <= 3 &&
+                   (PointInPolygon(polygon, position.X, position.Z) ||
+                    tolerance > 0 && DistanceToPolygon(polygon, position.X, position.Z) <= tolerance);
         var dx = position.X - pit.ServiceCenter.X;
         var dz = position.Z - pit.ServiceCenter.Z;
-        return dx * dx + dz * dz <= pit.ServiceRadiusMeters * pit.ServiceRadiusMeters &&
+        var radius = Math.Max(0, pit.ServiceRadiusMeters) + tolerance;
+        return dx * dx + dz * dz <= radius * radius &&
                Math.Abs(position.Y - pit.ServiceCenter.Y) <= 3;
     }
 
@@ -447,5 +453,28 @@ internal static class EstateRaceGeometry
             if (x < crossingX) inside = !inside;
         }
         return inside;
+    }
+
+    private static double DistanceToPolygon(
+        IReadOnlyList<EstateGatePoint> polygon,
+        double x,
+        double z)
+    {
+        var bestSquared = double.PositiveInfinity;
+        for (int index = 0, previous = polygon.Count - 1; index < polygon.Count; previous = index++)
+        {
+            var start = polygon[previous];
+            var end = polygon[index];
+            var dx = end.X - start.X;
+            var dz = end.Z - start.Z;
+            var lengthSquared = dx * dx + dz * dz;
+            var amount = lengthSquared <= 1e-9
+                ? 0
+                : Math.Clamp(((x - start.X) * dx + (z - start.Z) * dz) / lengthSquared, 0, 1);
+            var offsetX = x - (start.X + dx * amount);
+            var offsetZ = z - (start.Z + dz * amount);
+            bestSquared = Math.Min(bestSquared, offsetX * offsetX + offsetZ * offsetZ);
+        }
+        return Math.Sqrt(bestSquared);
     }
 }

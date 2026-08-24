@@ -9,9 +9,13 @@ FH6 UDP / Deterministic Simulator / .lfztelemetry Replay
         -> TelemetryHub (reference-counted source, bounded subscriber channels)
              -> DashboardModule -> ShiftLearner -> Dashboard HUD state
              -> LapAnalysisModule -> Track matcher/lap state -> Lap HUD state
+             -> EstateRaceModule -> estate timing/network -> race HUD state
              -> Recorder -> versioned raw packet file
         -> WPF/Win32 Overlay (render only)
         -> winsqlite3 metadata/derived-data store
+
+EstateRaceModule <-> LazyForza.RaceServer protocol v2
+                 <-> ASP.NET native server / Cloudflare Durable Object
 ```
 
 `TelemetryHub` 只有存在订阅者时运行数据源；HUD/实时分析订阅是 bounded、`DropOldest` 的 latest-wins 通道。模块停用会取消自己的 Task、释放订阅并移除 HUD contribution。所有业务模块关闭后主窗口、模块管理与诊断仍能运行。
@@ -25,10 +29,13 @@ FH6 UDP / Deterministic Simulator / .lfztelemetry Replay
 - `LazyForza.Modules.Abstractions`：模块、遥测订阅、HUD contribution 与持久化契约；
 - `LazyForza.Modules.Dashboard`：Dashboard 生命周期、状态快照和学习器编排；
 - `LazyForza.Modules.LapAnalysis`：路线/圈状态机、存储与 Lap HUD 状态；
+- `LazyForza.Modules.EstateRace`：地产环道几何、计时、维修区、赛事网络客户端与赛事 HUD 状态；
 - `LazyForza.Overlay`：WPF 矢量 HUD 和 Win32 窗口样式；不解析 UDP、不计算业务算法；
-- `LazyForza.App`：WPF Fluent 风格主壳、编译期可信模块目录、导航、设置与诊断。
+- `LazyForza.Update`：更新查询、下载和更新包完整性验证；
+- `LazyForza.App`：WPF Fluent 风格主壳、编译期可信模块目录、导航、设置与诊断；
+- `tools/*`：官方赛道目录生成、性能门禁和地产诊断工具，不参与产品运行时依赖。
 
-模块之间不使用全局静态服务定位器。`BuiltInModuleCatalog` 只注册可信编译期模块，后续可增加受信任程序集发现边界，但 MVP 不执行未知 DLL。
+模块之间不使用全局静态服务定位器。`BuiltInModuleCatalog` 只注册可信编译期模块，当前产品不执行未知 DLL。
 
 ## Overlay
 
@@ -66,6 +73,14 @@ cueRpm = targetRpm - rpmRiseRate * totalLatency
 
 ## 存储
 
-SchemaVersion 8 包含 AppSettings、ModuleSettings、Sessions、VehicleProfiles、EngineCurveBins、GearModels、ShiftTargets、TrackTemplates、TrackPoints、SectorDefinitions、Laps、LapSegments 与 LapSamples，并加入定点布局、官方目录分类、车辆自定义名称、推荐挡位开关和兼容车辆配置合并。圈速显式保存官方 CarClass/PI；升级前缺失的 CarClass 会先从旧车辆指纹恢复 PI，再按 D 100–400、C 401–500、B 501–600、A 601–700、S1 701–800、S2 801–900、R 901–998、X 999 的规范区间补齐。
+当前 `LazyForzaStore.CurrentSchemaVersion` 为 12。基础表包含 AppSettings、ModuleSettings、Sessions、VehicleProfiles、EngineCurveBins、GearModels、ShiftTargets、TrackTemplates、TrackPoints、SectorDefinitions、Laps、LapSegments 与 LapSamples；后续迁移加入动态遥测、地产赛道定义/检查点/维修区/计时类型、地产策略样本和圈速玩家代号。圈速显式保存官方 CarClass/PI；升级前缺失的 CarClass 会先从旧车辆指纹恢复 PI，再按 D 100–400、C 401–500、B 501–600、A 601–700、S1 701–800、S2 801–900、R 901–998、X 999 的规范区间补齐。
 
 圈速列表使用两次批量查询读取圈元数据与所有分段，不再逐圈查询；只有图表确认显示的圈才批量读取 `LapSamples`。兼容用的 `LoadLaps` 也改为固定次数的批量查询。写入使用事务，开启外键与 WAL；高频原始包不写 SQLite，而是顺序写入版本化 `.lfztelemetry`。
+
+迁移必须按版本顺序追加并能直接升级旧用户库。备份、导入导出和兼容读取属于结构变更的同一影响面；详细修改检查见 [`AGENTS.md`](AGENTS.md)。
+
+## 地产赛事跨仓库边界
+
+客户端在 `LazyForza.Modules.EstateRace` 内维护协议 v2 的本地 DTO 和赛事快照模型；服务端仓库在 .NET Protocol 与 Cloudflare TypeScript 中各有一份协议实现。三份模型没有代码生成器，字段、枚举、默认值、可空性和 JSON 名称必须人工保持兼容。
+
+客户端上传本机轨迹和可靠圈/维修事件；服务端权威管理圈数、排名、阶段、旗语、处罚、调查和结果。连续遥测可以 latest-wins，圈完成与维修完成事件必须通过事件 ID、确认和去重可靠传递。完整同步文件和验证命令见客户端与 RaceServer 两边的 `AGENTS.md`。
