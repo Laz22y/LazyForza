@@ -1071,11 +1071,18 @@ internal sealed class HudSurface : FrameworkElement
             dc.DrawRectangle(BrushWithOpacity(signalColor, 0.92), null,
                 new Rect(signalLeft, topHeaderHeight - 2, signalWidth, 2));
             var signalText = RaceHeaderSignalText(targetSignal);
-            RaceTitleText(dc, signalText, width * (0.64 - 0.03 * (1 - transitionProgress)),
+            var signalPanelBounds = new Rect(
+                width * 0.805,
+                topHeaderHeight * 0.13,
+                width * 0.16,
+                topHeaderHeight * 0.74);
+            var signalTextLeft = width * 0.18;
+            var signalTextRight = signalPanelBounds.Left - width * 0.04;
+            var signalTextCenter = (signalTextLeft + signalTextRight) / 2 -
+                                   width * 0.03 * (1 - transitionProgress);
+            RaceTitleText(dc, signalText, signalTextCenter,
                 topHeaderHeight * 0.52, Math.Max(13, topHeaderHeight * 0.34), White, TextAlignment.Center);
-            DrawRaceMarshalPanels(dc, targetSignal,
-                new Rect(width * 0.805, topHeaderHeight * 0.13, width * 0.16, topHeaderHeight * 0.74),
-                transitionProgress);
+            DrawRaceMarshalPanels(dc, targetSignal, signalPanelBounds, transitionProgress);
         }
 
         // The lower strip is reserved for session progress. Flag animations are
