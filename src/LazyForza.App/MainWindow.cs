@@ -292,15 +292,6 @@ internal sealed partial class MainWindow : Window
                 CaptureVisual(
                     this,
                     Path.Combine(directory, $"settings-{fileName}-{width:0}x{height:0}.png"));
-                if (category == SettingsCategory.Hud && content.Content is ScrollViewer hudSettingsScroll)
-                {
-                    hudSettingsScroll.ScrollToEnd();
-                    UpdateLayout();
-                    await Task.Delay(150);
-                    CaptureVisual(
-                        this,
-                        Path.Combine(directory, $"settings-hud-footer-{width:0}x{height:0}.png"));
-                }
                 CollectHanText(this, $"settings {category}", englishHanAudit);
             }
         }
@@ -3454,14 +3445,14 @@ internal sealed partial class MainWindow : Window
         };
         Grid.SetColumn(saveOverlay, 1);
         footer.Children.Add(saveOverlay);
-        controls.Children.Add(new Border
+        controls.Children.Insert(0, new Border
         {
             Background = Brush("PanelBrush"),
             BorderBrush = Brush("BorderBrush"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(12, 7, 12, 7),
-            Margin = new Thickness(0, 0, 10, 4),
+            Margin = new Thickness(0, 0, 10, 8),
             Child = footer
         });
         hudSettings.Children.Add(controls);
