@@ -51,6 +51,7 @@ New-Item -ItemType Directory -Force -Path $publishPath, $stagePath | Out-Null
     -r $Runtime `
     --self-contained true `
     -p:Version=$Version `
+    -p:IncludeSourceRevisionInInformationalVersion=false `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -p:PublishTrimmed=false `
