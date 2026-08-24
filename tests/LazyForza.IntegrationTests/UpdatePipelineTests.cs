@@ -110,6 +110,79 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
+    public void InstallerCacheCleanupRemovesCompletedUpdateAndKeepsDiagnosticLog()
+    {
+        var root = CreateTempDirectory("lazyforza-installer-cleanup");
+        var logs = Path.Combine(root, "Logs");
+        var updates = Path.Combine(root, "Updates");
+        var work = Path.Combine(updates, "1.5.0-test");
+        try
+        {
+            Directory.CreateDirectory(work);
+            Directory.CreateDirectory(logs);
+            File.WriteAllText(
+                Path.Combine(work, "LazyForza-1.5.0-win-x64-setup.exe"),
+                "setup");
+            var logPath = Path.Combine(logs, "update-install-1.5.0.log");
+            File.WriteAllText(logPath, "diagnostic log");
+            File.WriteAllText(
+                Path.Combine(work, "installer-update.pending.json"),
+                JsonSerializer.Serialize(new
+                {
+                    targetVersion = "1.5.0",
+                    logPath,
+                    startedAt = "2026-08-24T00:00:00Z"
+                }));
+
+            WindowsInstallerUpdateLauncher.CleanupUpdateCache(
+                updates,
+                new Version(1, 5, 0));
+
+            Assert.IsFalse(Directory.Exists(work));
+            Assert.IsTrue(File.Exists(logPath));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
+    public void InstallerCacheCleanupPreservesRecentFailedUpdateAndExpiresOldSetup()
+    {
+        var root = CreateTempDirectory("lazyforza-installer-stale-cleanup");
+        var updates = Path.Combine(root, "Updates");
+        var recent = Path.Combine(updates, "recent");
+        var stale = Path.Combine(updates, "stale");
+        var now = new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero);
+        try
+        {
+            Directory.CreateDirectory(recent);
+            Directory.CreateDirectory(stale);
+            File.WriteAllText(
+                Path.Combine(recent, "LazyForza-1.5.0-win-x64-setup.exe"),
+                "setup");
+            File.WriteAllText(
+                Path.Combine(stale, "LazyForza-1.5.0-win-x64-setup.exe"),
+                "setup");
+            Directory.SetLastWriteTimeUtc(recent, now.UtcDateTime.AddDays(-1));
+            Directory.SetLastWriteTimeUtc(stale, now.UtcDateTime.AddDays(-31));
+
+            WindowsInstallerUpdateLauncher.CleanupUpdateCache(
+                updates,
+                new Version(1, 4, 10),
+                now: now);
+
+            Assert.IsTrue(Directory.Exists(recent));
+            Assert.IsFalse(Directory.Exists(stale));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
     public async Task GitCodeReleaseParsesExplicitFeatureUpdateType()
     {
         var json = GitCodeReleaseJson(

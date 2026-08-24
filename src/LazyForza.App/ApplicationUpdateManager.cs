@@ -27,6 +27,10 @@ internal sealed class ApplicationUpdateManager : IDisposable
         this.log = log;
         client = new MultiSourceUpdateClient(PreferredSource, log);
         WindowsUpdateLauncher.CleanupCompletedUpdates(directories.UpdatesPath);
+        WindowsInstallerUpdateLauncher.CleanupUpdateCache(
+            directories.UpdatesPath,
+            CurrentVersion,
+            log);
     }
 
     public Version CurrentVersion
@@ -112,7 +116,10 @@ internal sealed class ApplicationUpdateManager : IDisposable
         log($"Automatic pre-update data backup created: {backup}");
 
         var process = distribution.IsInstalled
-            ? WindowsInstallerUpdateLauncher.Launch(update, AppContext.BaseDirectory)
+            ? WindowsInstallerUpdateLauncher.Launch(
+                update,
+                AppContext.BaseDirectory,
+                directories.LogsPath)
             : WindowsUpdateLauncher.Launch(
                 update,
                 AppContext.BaseDirectory,
