@@ -3,6 +3,8 @@
 - 状态：已接受
 - 日期：2026-07-22
 
+> 当前实现说明（2026-08-24）：WPF/Win32 Overlay 的决定仍有效；仓库当前固定使用 .NET SDK 9.0.316 和 `net9.0` / `net9.0-windows`。下文的 .NET 10 是早期目标，不是现行迁移计划。当前技术栈以 `global.json`、项目文件和根目录 `AGENTS.md` 为准。
+
 ## 背景
 
 LazyForza 是只消费 FH6 官方单向 UDP Data Out 的 Windows 桌面工具。核心要求包括 324 字节低延迟解析、可测试的换挡/路线算法、SQLite 持久化、Fluent 风格主界面，以及逐像素透明、置顶、可点击穿透、不抢焦点的 60 Hz HUD。
@@ -20,9 +22,9 @@ LazyForza 是只消费 FH6 官方单向 UDP Data Out 的 Windows 桌面工具。
 
 ## 决策
 
-长期基线仍为 **C# + .NET 10 LTS**。由于本机没有 .NET 10，本次源码暂以 `net9.0` / `net9.0-windows` 构建，代码不使用阻碍升级的 .NET 9 专属 API；安装 .NET 10 后统一改 TFM 并复跑全部测试。
+本次决策采用 C#、`net9.0` / `net9.0-windows` 与 WPF/Win32。早期曾把 .NET 10 LTS 作为后续目标；该目标不构成当前任务，任何框架升级都必须根据当时的项目配置和明确需求单独评估。
 
-MVP 采用 WPF 主程序和独立的 WPF/Win32 layered Overlay 项目。领域、遥测、算法、存储和模块契约不引用 WPF；Overlay 只消费 HUD 状态快照并渲染，不承载解析或业务算法。未来切换 WinUI 3 主程序时这些层无需改动。
+本次采用 WPF 主程序和独立的 WPF/Win32 layered Overlay 项目。领域、遥测、算法、存储和模块契约不引用 WPF；Overlay 只消费 HUD 状态快照并渲染，不承载解析或业务算法。该分层也保留了当时评估其他主壳技术的边界，但不表示当前存在迁移计划。
 
 SQLite 通过 Windows 自带的 `winsqlite3.dll` 薄封装使用，避免给每帧绑定 ORM；原始高频包写入版本化 `.lfztelemetry` 文件，SQLite 只保存设置、元数据和派生结果。
 
@@ -43,6 +45,5 @@ SQLite 通过 Windows 自带的 `winsqlite3.dll` 薄封装使用，避免给每�
 ## 后果
 
 - 优点：当前机器可构建；透明 HUD 的 Win32 行为明确；核心可测试且 UI 无关。
-- 代价：主程序不是 WinUI 3 原生控件，需要用集中 token 和 WPF 控件模板复刻 Fluent；未来迁移主壳时保留 Overlay 或换成 Composition 均可。
+- 代价：主程序不是 WinUI 3 原生控件，需要用集中 token 和 WPF 控件模板复刻 Fluent；更换主壳或 Overlay 技术不属于本 ADR 的现行工作项。
 - 约束：只监听官方 UDP，不读取游戏内存、不注入 DLL、不修改 FH6 进程。
-

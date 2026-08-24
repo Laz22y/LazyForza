@@ -1,5 +1,8 @@
 # 阶段 3：赛道学习、分段 HUD 与逐圈分析
 
+> **Status: Historical**
+> 本阶段已经结束，当前赛道、圈速与存储行为以代码和测试为准。现行开发入口见 [`../AGENTS.md`](../AGENTS.md)。
+
 ```text
 继续当前 LazyForza 工程，完成 LapAnalysis 模块。先检查已有实现、阶段 1/2 的测试和数据库迁移；复用 Telemetry、Storage、Overlay 和模块契约，不创建第二套接收器或设置系统。
 

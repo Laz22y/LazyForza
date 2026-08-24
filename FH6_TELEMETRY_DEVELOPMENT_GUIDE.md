@@ -564,11 +564,8 @@ UDP Receiver
 - [V1 设计图（历史参考）](./design/FH6_TELEMETRY_DASHBOARD_DESIGN.png)
 - [V1 ImageGen 提示词（历史参考）](./design/FH6_TELEMETRY_DASHBOARD_PROMPT.md)
 
-## 14. LazyForza 开发 Agent 提示词
+## 14. 当前开发入口与历史资料
 
-- [开发提示词套装说明](./LAZYFORZA_AGENT_PROMPT_PACK.md)
-- [总控实施提示词](./prompts/00_MASTER_IMPLEMENTATION_PROMPT.md)
-- [阶段 1：技术选型、模块底座与遥测核心](./prompts/01_FOUNDATION_AND_TELEMETRY.md)
-- [阶段 2：仪表盘与自动换挡学习](./prompts/02_DASHBOARD_AND_SHIFT_LEARNING.md)
-- [阶段 3：赛道学习、分段 HUD 与逐圈分析](./prompts/03_TRACK_AND_LAP_ANALYSIS.md)
-- [阶段 4：Fluent UI、整体验收与交付](./prompts/04_FLUENT_UI_INTEGRATION_AND_QA.md)
+当前 Coding Agent 应从 [`AGENTS.md`](./AGENTS.md) 开始，并按任务阅读本指南、对应源码和测试。
+
+[`LAZYFORZA_AGENT_PROMPT_PACK.md`](./LAZYFORZA_AGENT_PROMPT_PACK.md) 与 `prompts/*` 记录项目初始实现阶段，包含已经完成或被当前代码取代的技术选型和任务清单，仅供追溯，不再作为实施指令。

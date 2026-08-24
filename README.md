@@ -72,6 +72,7 @@ dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --replay "C:\path
 
 ## 开发资料
 
+- [Coding Agent 开发入口](AGENTS.md)
 - [完整用户与开发者文档](docs/LazyForza-Documentation.md)
 - [架构](ARCHITECTURE.md)
 - [FH6 遥测开发参考](FH6_TELEMETRY_DEVELOPMENT_GUIDE.md)

@@ -1,5 +1,8 @@
 # 阶段 2：仪表盘与自动换挡学习
 
+> **Status: Historical**
+> 本阶段已经结束，内容只用于追溯早期实现目标。不要把其中参数或任务清单当作当前规范。现行开发入口见 [`../AGENTS.md`](../AGENTS.md)。
+
 ```text
 继续当前 LazyForza 工程，完成 Dashboard 模块和自动换挡学习。不要重新搭一套平行架构，不要破坏阶段 1 的模块契约、TelemetryFrame、录制回放与测试。
 

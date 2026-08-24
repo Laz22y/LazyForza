@@ -1,5 +1,8 @@
 # FH6 极简遥测仪表盘生成提示词
 
+> **Status: Historical visual-generation material**
+> 本文仅保留早期设计稿生成过程，不是当前代码修改指令。现行 HUD 以实现和测试为准。
+
 以下为 `FH6_TELEMETRY_DASHBOARD_DESIGN.png` 使用的最终内置 ImageGen 提示词。
 
 ```text
@@ -21,4 +24,3 @@ Spacing: symmetrical, generous negative space, strong alignment, clear visual hi
 Text (verbatim only): "4", "184", "km/h", "6,820 RPM", "318 kW", "472 N·m", "42%", "BRAKE", "76%", "THROTTLE", "TYRES", "91° 0.82", "94° 0.79", "88° 0.91", "89° 0.89", "CLASS / PI", "S1", "766".
 Constraints: practical enough for an agent to reproduce in HTML/CSS, Canvas, Qt, or Flutter; readable typography; exact left brake/right throttle placement; arc geometry is the dominant structural idea; no perspective, no steering wheel, no cockpit, no car photo, no scenery, no map, no lap timer, no decorative gauges, no logos, no trademarks, no watermark, no extra text, no excessive glow, no cyberpunk clutter.
 ```
-
