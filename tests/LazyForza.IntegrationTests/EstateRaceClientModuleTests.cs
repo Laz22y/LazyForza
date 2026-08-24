@@ -1310,18 +1310,28 @@ public sealed class EstateRaceClientModuleTests
                 await module.ConnectAsync(new EstateRaceConnectionProfile(
                     address, "secret-race-password", "有效性车手", "#42D7E8", null), CancellationToken.None);
                 var firstArrival = DateTimeOffset.UtcNow;
-                feed.Publish(Frame(1, 10_000, 50, 2, 3, firstArrival));
-                feed.Publish(Frame(2, 11_000, 51, 2, 3, firstArrival.AddSeconds(3)));
-                feed.Publish(Frame(3, 8_000, 52, 2, 3, firstArrival.AddSeconds(3.2)));
-                feed.Publish(Frame(4, 8_100, 53, 2, 3, firstArrival.AddSeconds(3.4), isRaceOn: false));
-
                 var updates = new List<RaceTelemetryUpdate>();
-                while (updates.Count < 4)
+
+                async Task PublishAndReadTelemetryAsync(TelemetryFrame frame)
                 {
-                    var envelope = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
-                    if (envelope.Type == "telemetry")
+                    feed.Publish(frame);
+                    while (true)
+                    {
+                        var envelope = await received.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                        if (envelope.Type != "telemetry") continue;
                         updates.Add(envelope.Payload.Deserialize<RaceTelemetryUpdate>(EstateRaceWireProtocol.JsonOptions)!);
+                        return;
+                    }
                 }
+
+                // Telemetry intentionally uses a latest-value queue. Read each transition before publishing
+                // the next one so this test verifies validity semantics instead of requiring obsolete frames.
+                await PublishAndReadTelemetryAsync(Frame(1, 10_000, 50, 2, 3, firstArrival));
+                await PublishAndReadTelemetryAsync(Frame(2, 11_000, 51, 2, 3, firstArrival.AddSeconds(3)));
+                await PublishAndReadTelemetryAsync(Frame(3, 8_000, 52, 2, 3, firstArrival.AddSeconds(3.2)));
+                await PublishAndReadTelemetryAsync(
+                    Frame(4, 8_100, 53, 2, 3, firstArrival.AddSeconds(3.4), isRaceOn: false));
+
                 Assert.IsTrue(updates[0].IsTelemetryValid);
                 Assert.IsTrue(updates[1].IsTelemetryValid, "UDP 到包间隔不能被当作暂停。");
                 Assert.IsFalse(updates[1].IsPausedOrRewinding);
