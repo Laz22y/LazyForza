@@ -69,7 +69,20 @@ internal sealed partial class MainWindow : Window
     private Action? refreshVisiblePage;
     private bool changingModule;
     private bool showDiagnosticsNavigation;
+    private SettingsCategory selectedSettingsCategory;
+    private bool hudAppearanceExpanded = true;
+    private bool hudComponentsExpanded;
+    private bool hudOpacityExpanded;
+    private bool hudTimingExpanded;
     private string CurrentTrackSource => TelemetryDataPartition.TrackSource(sourceKind);
+
+    private enum SettingsCategory
+    {
+        General,
+        Telemetry,
+        Hud,
+        Maintenance
+    }
 
     public MainWindow(
         ModuleManager moduleManager,
@@ -257,26 +270,33 @@ internal sealed partial class MainWindow : Window
         CaptureVisual(this, Path.Combine(directory, "lap-analysis-exchange-1440x900.png"));
 
         navigation.SelectedIndex = 8;
-        UpdateLayout();
-        if (content.Content is ScrollViewer settingsScroll)
+        var settingsCategories = new[]
         {
-            settingsScroll.ScrollToHome();
-            await Task.Delay(200);
-            CaptureVisual(this, Path.Combine(directory, "settings-player-1440x900.png"));
-            settingsScroll.ScrollToVerticalOffset(520);
+            (SettingsCategory.General, "general"),
+            (SettingsCategory.Telemetry, "telemetry"),
+            (SettingsCategory.Hud, "hud"),
+            (SettingsCategory.Maintenance, "maintenance")
+        };
+        foreach (var (width, height) in new[] { (1440d, 900d), (960d, 640d) })
+        {
+            Width = width;
+            Height = height;
+            foreach (var (category, fileName) in settingsCategories)
+            {
+                selectedSettingsCategory = category;
+                RenderSelectedPage();
+                UpdateLayout();
+                if (content.Content is ScrollViewer settingsScroll)
+                    settingsScroll.ScrollToHome();
+                await Task.Delay(200);
+                CaptureVisual(
+                    this,
+                    Path.Combine(directory, $"settings-{fileName}-{width:0}x{height:0}.png"));
+                CollectHanText(this, $"settings {category}", englishHanAudit);
+            }
         }
-        await Task.Delay(250);
-        CaptureVisual(this, Path.Combine(directory, "estate-hud-settings-1440x900.png"));
-
-        if (content.Content is ScrollViewer interfaceScroll)
-            interfaceScroll.ScrollToVerticalOffset(1320);
-        await Task.Delay(200);
-        CaptureVisual(this, Path.Combine(directory, "diagnostics-navigation-setting-1440x900.png"));
-
-        if (content.Content is ScrollViewer dataScroll)
-            dataScroll.ScrollToEnd();
-        await Task.Delay(200);
-        CaptureVisual(this, Path.Combine(directory, "settings-data-1440x900.png"));
+        Width = 1440;
+        Height = 900;
 
         for (var pageIndex = 0; pageIndex < PrimaryPages.Length; pageIndex++)
         {
@@ -2941,7 +2961,14 @@ internal sealed partial class MainWindow : Window
 
     private UIElement SettingsPage()
     {
-        var stack = PageStack("设置", "管理 Live UDP、HUD、界面、录制、更新与本地数据。监听设置重启后生效。");
+        var stack = PageStack(
+            "设置",
+            SettingsCategoryDescription(selectedSettingsCategory));
+        stack.Children.Add(BuildSettingsCategoryNavigation());
+        var generalSettings = new StackPanel();
+        var telemetrySettings = new StackPanel();
+        var hudSettings = new StackPanel();
+        var maintenanceSettings = new StackPanel();
         var identity = new Grid();
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
@@ -2982,9 +3009,9 @@ internal sealed partial class MainWindow : Window
         playerCode.TextChanged += (_, _) => saveIdentity.Content = "保存";
         Grid.SetColumn(saveIdentity, 2);
         identity.Children.Add(saveIdentity);
-        stack.Children.Add(Card(identity));
+        generalSettings.Children.Add(Card(identity));
 
-        stack.Children.Add(BuildStartupSettingsCard());
+        generalSettings.Children.Add(BuildStartupSettingsCard());
 
         var network = new Grid();
         network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
@@ -3016,7 +3043,7 @@ internal sealed partial class MainWindow : Window
         Grid.SetColumnSpan(saveNetwork, 2);
         network.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         network.Children.Add(saveNetwork);
-        stack.Children.Add(Card(network));
+        telemetrySettings.Children.Add(Card(network));
 
         var current = overlay.CurrentLayout;
         var currentDashboardBounds = OverlayLayoutGeometry.Bounds(
@@ -3039,6 +3066,10 @@ internal sealed partial class MainWindow : Window
         var visibleEstateRaceWidgetCount = estateRaceWidgetKinds
             .Count(kind => currentEstateRaceWidgets.Get(kind).IsVisible);
         var controls = new StackPanel();
+        var hudAppearance = new StackPanel();
+        var hudComponents = new StackPanel();
+        var hudOpacity = new StackPanel();
+        var hudTiming = new StackPanel();
 
         var overlayHeader = new Grid { Margin = new Thickness(0, 0, 0, 14) };
         overlayHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -3112,7 +3143,7 @@ internal sealed partial class MainWindow : Window
         headerActions.Children.Add(resetDefaults);
         Grid.SetColumn(headerActions, 1);
         overlayHeader.Children.Add(headerActions);
-        controls.Children.Add(overlayHeader);
+        hudAppearance.Children.Add(overlayHeader);
 
         var primarySettings = new Grid { Margin = new Thickness(0, 0, 0, 10) };
         primarySettings.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -3202,7 +3233,7 @@ internal sealed partial class MainWindow : Window
             interaction);
         Grid.SetColumn(interactionGroup, 2);
         primarySettings.Children.Add(interactionGroup);
-        controls.Children.Add(primarySettings);
+        hudAppearance.Children.Add(primarySettings);
 
         var dashboardComponentItems = new[]
         {
@@ -3232,7 +3263,7 @@ internal sealed partial class MainWindow : Window
             componentToggles[kind] = toggle;
             componentPanel.Children.Add(toggle);
         }
-        controls.Children.Add(SettingGroup(
+        hudComponents.Children.Add(SettingGroup(
             "主仪表盘部件",
             "各部件可独立开关；位置请在 Overlay 布局编辑器中拖动，并可一键恢复当前默认布局。",
             componentPanel));
@@ -3269,7 +3300,7 @@ internal sealed partial class MainWindow : Window
             estateRaceToggles[kind] = toggle;
             estateRaceComponentPanel.Children.Add(toggle);
         }
-        controls.Children.Add(SettingGroup(
+        hudComponents.Children.Add(SettingGroup(
             "地产赛事 HUD 部件",
             "十一个部件可独立开关；进入 Overlay 布局编辑器后可直接选择、拖动、缩放或恢复赛事默认布局。",
             estateRaceComponentPanel));
@@ -3289,7 +3320,7 @@ internal sealed partial class MainWindow : Window
                 value => $"{value:P0}");
             estateRaceOpacityPanel.Children.Add(opacityItem);
         }
-        controls.Children.Add(SettingGroup(
+        hudOpacity.Children.Add(SettingGroup(
             "地产赛事 HUD 透明度",
             "十一个赛事部件分别保存透明度，互不影响。",
             estateRaceOpacityPanel));
@@ -3301,10 +3332,43 @@ internal sealed partial class MainWindow : Window
         var noMatchConfirmation = AddTimeSlider(timingItems, "无匹配赛道确认", current.LapNoMatchConfirmationSeconds, 1, 30, 0.5);
         var noMatchFade = AddTimeSlider(timingItems, "无匹配圈速 HUD 淡出", current.LapNoMatchFadeSeconds, 0.1, 3, 0.1);
         var liveHudStale = AddTimeSlider(timingItems, "Live HUD 断流隐藏", current.LiveHudStaleSeconds, 0.1, 3, 0.1);
-        controls.Children.Add(SettingGroup(
+        hudTiming.Children.Add(SettingGroup(
             "HUD 时间",
             "调整 HUD 的等待、保留和淡入淡出时间。",
             timingItems));
+
+        controls.Children.Add(SettingsSectionExpander(
+            AppLocalization.Text("settings.hud.appearance", "外观与动态"),
+            AppLocalization.Text(
+                "settings.hud.appearanceDetail",
+                "布局、缩放、不透明度和动态效果。"),
+            hudAppearance,
+            hudAppearanceExpanded,
+            expanded => hudAppearanceExpanded = expanded));
+        controls.Children.Add(SettingsSectionExpander(
+            AppLocalization.Text("settings.hud.components", "部件显示"),
+            AppLocalization.Text(
+                "settings.hud.componentsDetail",
+                "管理仪表盘与地产赛事 HUD 的显示内容。"),
+            hudComponents,
+            hudComponentsExpanded,
+            expanded => hudComponentsExpanded = expanded));
+        controls.Children.Add(SettingsSectionExpander(
+            AppLocalization.Text("settings.hud.opacity", "赛事部件透明度"),
+            AppLocalization.Text(
+                "settings.hud.opacityDetail",
+                "分别调整每个地产赛事部件的可见度。"),
+            hudOpacity,
+            hudOpacityExpanded,
+            expanded => hudOpacityExpanded = expanded));
+        controls.Children.Add(SettingsSectionExpander(
+            AppLocalization.Text("settings.hud.timing", "显示时序"),
+            AppLocalization.Text(
+                "settings.hud.timingDetail",
+                "调整 HUD 的等待、保留和淡入淡出时间。"),
+            hudTiming,
+            hudTimingExpanded,
+            expanded => hudTimingExpanded = expanded));
 
         var footer = new Grid { Margin = new Thickness(0, 10, 0, 0) };
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -3381,8 +3445,8 @@ internal sealed partial class MainWindow : Window
         };
         Grid.SetColumn(saveOverlay, 1);
         footer.Children.Add(saveOverlay);
-        controls.Children.Add(footer);
-        stack.Children.Add(Card(controls));
+        controls.Children.Add(Card(footer));
+        hudSettings.Children.Add(controls);
 
         var interfacePanel = new StackPanel();
         interfacePanel.Children.Add(Label("界面与诊断", 17, FontWeights.SemiBold));
@@ -3417,11 +3481,19 @@ internal sealed partial class MainWindow : Window
             "MutedBrush");
         diagnosticsHelp.Margin = new Thickness(0, 8, 0, 0);
         interfacePanel.Children.Add(diagnosticsHelp);
-        stack.Children.Add(Card(interfacePanel));
+        maintenanceSettings.Children.Add(Card(interfacePanel));
 
-        stack.Children.Add(BuildRecordingSettingsCard());
-        stack.Children.Add(BuildUpdateSettingsCard());
-        stack.Children.Add(BuildDataProtectionSettings());
+        telemetrySettings.Children.Add(BuildRecordingSettingsCard());
+        maintenanceSettings.Children.Add(BuildUpdateSettingsCard());
+        maintenanceSettings.Children.Add(BuildDataProtectionSettings());
+
+        stack.Children.Add(selectedSettingsCategory switch
+        {
+            SettingsCategory.Telemetry => telemetrySettings,
+            SettingsCategory.Hud => hudSettings,
+            SettingsCategory.Maintenance => maintenanceSettings,
+            _ => generalSettings
+        });
 
         return Scroll(stack);
 
@@ -3513,6 +3585,105 @@ internal sealed partial class MainWindow : Window
             network.Children.Add(label);
             network.Children.Add(editor);
         }
+    }
+
+    private string SettingsCategoryDescription(SettingsCategory category) => category switch
+    {
+        SettingsCategory.Telemetry => AppLocalization.Text(
+            "settings.category.telemetry.pageDetail",
+            "配置 FH6 遥测监听、比赛自动录制与录制文件管理。"),
+        SettingsCategory.Hud => AppLocalization.Text(
+            "settings.category.hud.pageDetail",
+            "调整 Overlay 布局、显示部件、透明度、动态与显示时序。"),
+        SettingsCategory.Maintenance => AppLocalization.Text(
+            "settings.category.maintenance.pageDetail",
+            "管理应用更新、数据备份迁移与诊断入口。"),
+        _ => AppLocalization.Text(
+            "settings.category.general.pageDetail",
+            "管理玩家代号、界面语言、数据目录和窗口关闭行为。")
+    };
+
+    private Border BuildSettingsCategoryNavigation()
+    {
+        var categories = new[]
+        {
+            (SettingsCategory.General,
+                AppLocalization.Text("settings.category.general", "常规"),
+                AppLocalization.Text("settings.category.generalDetail", "身份与启动")),
+            (SettingsCategory.Telemetry,
+                AppLocalization.Text("settings.category.telemetry", "遥测与录制"),
+                AppLocalization.Text("settings.category.telemetryDetail", "监听与记录")),
+            (SettingsCategory.Hud,
+                "HUD",
+                AppLocalization.Text("settings.category.hudDetail", "布局与显示")),
+            (SettingsCategory.Maintenance,
+                AppLocalization.Text("settings.category.maintenance", "维护"),
+                AppLocalization.Text("settings.category.maintenanceDetail", "更新与数据"))
+        };
+        var tabs = new UniformGrid { Columns = categories.Length };
+        foreach (var (category, title, detail) in categories)
+        {
+            var copy = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            copy.Children.Add(Label(title, 14, FontWeights.SemiBold));
+            var detailLabel = Label(detail, 10, FontWeights.Normal, "MutedBrush");
+            detailLabel.Margin = new Thickness(0, 3, 0, 0);
+            copy.Children.Add(detailLabel);
+            var tab = new ToggleButton
+            {
+                Content = copy,
+                IsChecked = category == selectedSettingsCategory,
+                MinHeight = 66,
+                Margin = new Thickness(4),
+                Padding = new Thickness(14, 10, 14, 10),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Tag = category
+            };
+            tab.Click += (_, _) =>
+            {
+                selectedSettingsCategory = (SettingsCategory)tab.Tag;
+                RenderSelectedPage();
+            };
+            tabs.Children.Add(tab);
+        }
+
+        return new Border
+        {
+            Background = Brush("PanelBrush"),
+            BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(4),
+            Margin = new Thickness(0, 8, 10, 12),
+            Child = tabs
+        };
+    }
+
+    private Expander SettingsSectionExpander(
+        string title,
+        string description,
+        UIElement content,
+        bool isExpanded,
+        Action<bool> updateState)
+    {
+        var header = new StackPanel();
+        header.Children.Add(Label(title, 15, FontWeights.SemiBold));
+        var detail = Label(description, 10, FontWeights.Normal, "MutedBrush");
+        detail.Margin = new Thickness(0, 3, 20, 0);
+        header.Children.Add(detail);
+        var expander = new Expander
+        {
+            Header = header,
+            Content = content,
+            IsExpanded = isExpanded,
+            Style = (Style)FindResource("SettingsSectionExpander")
+        };
+        expander.Expanded += (_, _) => updateState(true);
+        expander.Collapsed += (_, _) => updateState(false);
+        return expander;
     }
 
     private static string CurrentApplicationVersion()

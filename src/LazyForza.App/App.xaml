@@ -185,6 +185,9 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="SettingsSectionExpander"
+               TargetType="Expander"
+               BasedOn="{StaticResource VehicleGroupExpander}" />
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="FontSize" Value="14" />
