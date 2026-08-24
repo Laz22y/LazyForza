@@ -57,8 +57,11 @@ internal sealed class EstateStartFinishRevisionWindow : Window
         {
             if (existingLapCount > 0 && MessageBox.Show(
                     this,
-                    $"更新起终点线会删除这条赛道已有的 {existingLapCount} 圈本地成绩，其他赛道不受影响。确认保存吗？",
-                    "保存起终点线",
+                    AppLocalization.Format(
+                        "estate.startFinish.confirmSave",
+                        "更新起终点线会删除这条赛道已有的 {0} 圈本地成绩，其他赛道不受影响。确认保存吗？",
+                        existingLapCount),
+                    AppLocalization.Literal("保存起终点线"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes)
                 return;
@@ -72,6 +75,7 @@ internal sealed class EstateStartFinishRevisionWindow : Window
         timer.Start();
         Closed += (_, _) => timer.Stop();
         Refresh();
+        AppLocalization.ApplyTo(this);
     }
 
     private UIElement BuildContent(TrackTemplate track, EstateTrackDefinition definition)
@@ -83,7 +87,11 @@ internal sealed class EstateStartFinishRevisionWindow : Window
         var header = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
         header.Children.Add(Text("重设起终点线", 24, FontWeights.SemiBold));
         header.Children.Add(Text(
-            $"{track.Name} · 修订 {definition.MapRevision}。只替换起终点门和比赛方向；路线、检查点、维修区与赛道标识不变。新线必须位于原路线起点附近。",
+            AppLocalization.Format(
+                "estate.startFinish.description",
+                "{0} · 修订 {1}。只替换起终点门和比赛方向；路线、检查点、维修区与赛道标识不变。新线必须位于原路线起点附近。",
+                track.Name,
+                definition.MapRevision),
             12, FontWeights.Normal, "MutedBrush"));
         root.Children.Add(header);
 
@@ -99,7 +107,10 @@ internal sealed class EstateStartFinishRevisionWindow : Window
             12, FontWeights.Normal, "MutedBrush"));
         if (existingLapCount > 0)
             controls.Children.Add(Text(
-                $"保存后将清除旧起终点线下的 {existingLapCount} 圈本地成绩。",
+                AppLocalization.Format(
+                    "estate.startFinish.deleteWarning",
+                    "保存后将清除旧起终点线下的 {0} 圈本地成绩。",
+                    existingLapCount),
                 12, FontWeights.SemiBold, "WarningBrush"));
         trace.Margin = new Thickness(0, 14, 0, 0);
         direction.Margin = new Thickness(0, 8, 0, 0);
@@ -173,7 +184,8 @@ internal sealed class EstateStartFinishRevisionWindow : Window
         try { action(); }
         catch (Exception exception)
         {
-            MessageBox.Show(this, exception.Message, "重设起终点线", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                AppLocalization.Literal("重设起终点线"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         Refresh();
     }
@@ -181,7 +193,9 @@ internal sealed class EstateStartFinishRevisionWindow : Window
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (saved || !module.State.IsEnrollmentActive) return;
-        if (MessageBox.Show(this, "放弃本次起终点线重设？原定义不会改变。", "取消重设",
+        if (MessageBox.Show(this,
+                AppLocalization.Literal("放弃本次起终点线重设？原定义不会改变。"),
+                AppLocalization.Literal("取消重设"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
         {
             e.Cancel = true;

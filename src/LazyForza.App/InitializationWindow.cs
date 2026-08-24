@@ -712,7 +712,7 @@ internal sealed class InitializationWindow : Window
                 AppLocalization.Text("wizard.telemetry.failed", "无法开始监听"),
                 exception is SocketException socket && socket.SocketErrorCode == SocketError.AddressAlreadyInUse
                     ? AppLocalization.Text("wizard.telemetry.inUse", "该端口已被其他程序占用，请更换端口或关闭占用程序。")
-                    : exception.Message);
+                    : AppLocalization.Literal(exception.Message));
         }
     }
 

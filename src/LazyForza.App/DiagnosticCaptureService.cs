@@ -152,7 +152,9 @@ internal sealed class DiagnosticCaptureService : IAsyncDisposable
             applicationVersion,
             schemaVersion,
             Environment.OSVersion.VersionString,
-            "用户名、用户目录、数据目录及原始 UDP 字节未写入；遥测仅保留问题回放所需字段。",
+            AppLocalization.Text(
+                "diagnostics.package.privacy",
+                "用户名、用户目录、数据目录及原始 UDP 字节未写入；遥测仅保留问题回放所需字段。"),
             sampleSnapshot.Length,
             eventSnapshot.Length,
             anomalySnapshot.Length,
@@ -160,7 +162,9 @@ internal sealed class DiagnosticCaptureService : IAsyncDisposable
 
         var fullTargetPath = Path.GetFullPath(targetPath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullTargetPath)
-                                  ?? throw new InvalidOperationException("诊断包路径无效。"));
+                                  ?? throw new InvalidOperationException(AppLocalization.Text(
+                                      "diagnostics.package.invalidPath",
+                                      "诊断包路径无效。")));
         var temporaryPath = fullTargetPath + $".{Guid.NewGuid():N}.tmp";
         try
         {
@@ -206,7 +210,10 @@ internal sealed class DiagnosticCaptureService : IAsyncDisposable
             {
                 RecordSignal(new DiagnosticSignal(
                     "udp.long-gap",
-                    $"UDP 数据中断 {arrivalGap.TotalSeconds:0.00} 秒后恢复。",
+                    AppLocalization.Format(
+                        "diagnostics.signal.udpGap",
+                        "UDP 数据中断 {0:0.00} 秒后恢复。",
+                        arrivalGap.TotalSeconds),
                     true,
                     frame.ArrivalTime,
                     new Dictionary<string, string>
@@ -236,7 +243,9 @@ internal sealed class DiagnosticCaptureService : IAsyncDisposable
                 {
                     RecordSignal(new DiagnosticSignal(
                         "vehicle.configuration-switch",
-                        "比赛遥测中的车辆或性能指数发生突变。",
+                        AppLocalization.Text(
+                            "diagnostics.signal.vehicleSwitch",
+                            "比赛遥测中的车辆或性能指数发生突变。"),
                         true,
                         frame.ArrivalTime,
                         new Dictionary<string, string>
@@ -292,12 +301,19 @@ internal sealed class DiagnosticCaptureService : IAsyncDisposable
         if (current < previous)
         {
             if (previous > 0xF0000000u && current < 0x0FFFFFFFu) return null;
-            return $"FH6 时间戳从 {previous} 回退到 {current}。";
+            return AppLocalization.Format(
+                "diagnostics.signal.timestampRollback",
+                "FH6 时间戳从 {0} 回退到 {1}。",
+                previous,
+                current);
         }
 
         var delta = current - previous;
         return delta > 1_000
-            ? $"FH6 时间戳向前跳变 {delta} ms。"
+            ? AppLocalization.Format(
+                "diagnostics.signal.timestampJump",
+                "FH6 时间戳向前跳变 {0} ms。",
+                delta)
             : null;
     }
 

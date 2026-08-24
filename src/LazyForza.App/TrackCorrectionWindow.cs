@@ -124,6 +124,7 @@ internal sealed class TrackCorrectionWindow : Window
 
         search.TextChanged += (_, _) => RebuildList(search.Text);
         RebuildList(string.Empty);
+        AppLocalization.ApplyTo(this);
     }
 
     public Guid? SelectedTrackId =>
@@ -142,15 +143,23 @@ internal sealed class TrackCorrectionWindow : Window
         trackList.Items.Clear();
         foreach (var candidate in filtered)
         {
-            var layout = candidate.LayoutKind == TrackLayoutKind.Circuit ? "环道" : "定点";
+            var layout = AppLocalization.Literal(
+                candidate.LayoutKind == TrackLayoutKind.Circuit ? "环道" : "定点");
             var prefix = candidate.SuggestedRank is int rank
-                ? $"候选 {rank} · "
-                : candidate.IsCurrentTrack ? "当前识别 · " : string.Empty;
+                ? AppLocalization.Format("track.correction.candidate", "候选 {0} · ", rank)
+                : candidate.IsCurrentTrack ? AppLocalization.Literal("当前识别 · ") : string.Empty;
             trackList.Items.Add(new ListBoxItem
             {
                 Tag = candidate,
                 Padding = new Thickness(9, 7, 9, 7),
-                Content = $"{prefix}{candidate.TrackName} · {layout}/{candidate.Category ?? "未分类"} · {candidate.LengthMeters:0} m"
+                Content = AppLocalization.Format(
+                    "track.correction.item",
+                    "{0}{1} · {2}/{3} · {4:0} m",
+                    prefix,
+                    AppLocalization.Literal(candidate.TrackName),
+                    layout,
+                    AppLocalization.Literal(candidate.Category ?? "未分类"),
+                    candidate.LengthMeters)
             });
         }
 
@@ -168,13 +177,13 @@ internal sealed class TrackCorrectionWindow : Window
     {
         if (trackList.SelectedItem is not ListBoxItem { Tag: TrackCorrectionCandidate selected })
         {
-            evidence.Text = candidates.Count == 0
+            evidence.Text = AppLocalization.Literal(candidates.Count == 0
                 ? "当前没有与 Live 数据分区兼容的官方赛道。"
-                : "请选择实际参加的官方赛事。";
+                : "请选择实际参加的官方赛事。");
             apply.IsEnabled = false;
             return;
         }
-        evidence.Text = selected.Evidence;
+        evidence.Text = AppLocalization.Literal(selected.Evidence);
         apply.IsEnabled = true;
     }
 

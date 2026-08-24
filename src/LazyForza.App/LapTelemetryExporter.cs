@@ -19,21 +19,29 @@ internal static class LapTelemetryExporter
             Path.GetFullPath(path),
             append: false,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        writer.WriteLine("LazyForza 圈速遥测导出");
-        WriteMetadata(writer, "赛道", trackName);
-        WriteMetadata(writer, "圈速 ID", lap.Id.ToString());
-        WriteMetadata(writer, "开始时间", lap.StartedAt.ToString("O"));
-        WriteMetadata(writer, "总用时（秒）", Number(lap.TotalSeconds));
-        WriteMetadata(writer, "性能等级", PerformanceClassCatalog.Name(lap.Vehicle.CarClass));
-        WriteMetadata(writer, "性能指数", lap.Vehicle.PerformanceIndex.ToString(Invariant));
-        WriteMetadata(writer, "车辆序号", lap.Vehicle.CarOrdinal.ToString(Invariant));
-        WriteMetadata(writer, "有效性", lap.IsValid ? "有效" : $"无效：{lap.InvalidReason ?? "原因未知"}");
+        writer.WriteLine(AppLocalization.Literal("LazyForza 圈速遥测导出"));
+        WriteMetadata(writer, AppLocalization.Literal("赛道"), trackName);
+        WriteMetadata(writer, AppLocalization.Literal("圈速 ID"), lap.Id.ToString());
+        WriteMetadata(writer, AppLocalization.Literal("开始时间"), lap.StartedAt.ToString("O"));
+        WriteMetadata(writer, AppLocalization.Literal("总用时（秒）"), Number(lap.TotalSeconds));
+        WriteMetadata(writer, AppLocalization.Literal("性能等级"), PerformanceClassCatalog.Name(lap.Vehicle.CarClass));
+        WriteMetadata(writer, AppLocalization.Literal("性能指数"), lap.Vehicle.PerformanceIndex.ToString(Invariant));
+        WriteMetadata(writer, AppLocalization.Literal("车辆序号"), lap.Vehicle.CarOrdinal.ToString(Invariant));
         WriteMetadata(
             writer,
-            "动态遥测",
+            AppLocalization.Literal("有效性"),
+            lap.IsValid
+                ? AppLocalization.Literal("有效")
+                : AppLocalization.Format(
+                    "telemetry.export.invalid",
+                    "无效：{0}",
+                    AppLocalization.Literal(lap.InvalidReason ?? "原因未知")));
+        WriteMetadata(
+            writer,
+            AppLocalization.Literal("动态遥测"),
             lap.Samples.Any(sample => sample.Dynamics is not null)
-                ? "包含方向与轮胎滑移"
-                : "旧版圈速，不包含方向与轮胎滑移");
+                ? AppLocalization.Literal("包含方向与轮胎滑移")
+                : AppLocalization.Literal("旧版圈速，不包含方向与轮胎滑移"));
         writer.WriteLine();
         writer.WriteLine(
             "elapsed_s,distance_m,speed_kph,rpm,gear,throttle,brake,delta_s," +

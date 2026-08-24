@@ -4506,7 +4506,7 @@ internal sealed class HudSurface : FrameworkElement
             true);
         Text(
             dc,
-            "侧滑角",
+            OverlayTextLocalization.Text("侧滑角"),
             leftCenter.X,
             leftCenter.Y + radius * 0.48,
             radius * 0.15,
@@ -4523,7 +4523,7 @@ internal sealed class HudSurface : FrameworkElement
             true);
         Text(
             dc,
-            "控车余量",
+            OverlayTextLocalization.Text("控车余量"),
             rightCenter.X,
             rightCenter.Y + radius * 0.48,
             radius * 0.16,
@@ -4576,7 +4576,7 @@ internal sealed class HudSurface : FrameworkElement
                 width * 0.25,
                 height * 0.032),
             state.Throttle,
-            "油门",
+            OverlayTextLocalization.Text("油门"),
             BrushOf(0x28, 0xC6, 0x78));
         DrawDriftLevelBar(
             dc,
@@ -4586,7 +4586,7 @@ internal sealed class HudSurface : FrameworkElement
                 width * 0.25,
                 height * 0.032),
             Math.Clamp(state.RearSlip / 1.35, 0, 1),
-            "后轮滑移",
+            OverlayTextLocalization.Text("后轮滑移"),
             BrushOf(0xF2, 0xB8, 0x27));
         DrawSpinRiskBand(
             dc,
@@ -4661,7 +4661,7 @@ internal sealed class HudSurface : FrameworkElement
         }
         Text(
             dc,
-            "方向",
+            OverlayTextLocalization.Text("方向"),
             bounds.Left + bounds.Width * 0.07,
             bounds.Top + bounds.Height * 0.25,
             bounds.Height * 0.22,
@@ -4792,7 +4792,7 @@ internal sealed class HudSurface : FrameworkElement
         const int segmentCount = 7;
         Text(
             dc,
-            "积分速度",
+            OverlayTextLocalization.Text("积分速度"),
             bounds.Left,
             bounds.Top + bounds.Height * 0.50,
             bounds.Height * 0.55,

@@ -84,6 +84,7 @@ internal sealed class DriftDashboardIntroductionWindow : Window
         buttons.Children.Add(enable);
         stack.Children.Add(buttons);
         Content = stack;
+        AppLocalization.ApplyTo(this);
     }
 
     public bool AutoCloseDashboard =>
@@ -94,7 +95,7 @@ internal sealed class DriftDashboardIntroductionWindow : Window
         var stack = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
         stack.Children.Add(new TextBlock
         {
-            Text = title,
+            Text = AppLocalization.Literal(title),
             FontSize = 14,
             FontWeight = FontWeights.SemiBold,
             Foreground = new SolidColorBrush(Color.FromRgb(32, 184, 207))
@@ -109,7 +110,7 @@ internal sealed class DriftDashboardIntroductionWindow : Window
         string text,
         Thickness margin) => new()
     {
-        Text = text,
+        Text = AppLocalization.Literal(text),
         Margin = margin,
         FontSize = 12.5,
         LineHeight = 21,

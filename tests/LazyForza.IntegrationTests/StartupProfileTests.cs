@@ -200,6 +200,32 @@ public sealed class StartupProfileTests
     }
 
     [TestMethod]
+    public void EnglishLocalizationCoversRuntimeStatusAndErrorTemplates()
+    {
+        try
+        {
+            AppLocalization.UseLanguage("en");
+            Assert.AreEqual(
+                "Starting sequence in 4 s",
+                AppLocalization.Literal("4 秒后启动发车程序"));
+            Assert.AreEqual(
+                "Estate circuit saved: reference 72.315 s, validation 72.601 s.",
+                AppLocalization.Literal("地产环道已保存：参考圈 72.315 s，验证圈 72.601 s。"));
+            Assert.AreEqual(
+                "At least 2 valid pit stops are required; 1 still required. Staying out leaves too few laps to complete them.",
+                AppLocalization.Literal("本场至少要求 2 次有效维修停留，目前还差 1 次；若继续留在赛道，将没有足够圈数完成规定进站。"));
+            Assert.AreEqual(
+                "GitHub returned HTTP 503; updates cannot be checked right now.",
+                AppLocalization.Literal("GitHub 返回了 HTTP 503，暂时无法检查更新。"));
+            Assert.AreEqual("Player One", AppLocalization.Literal("Player One"));
+        }
+        finally
+        {
+            AppLocalization.UseLanguage("zh-Hans");
+        }
+    }
+
+    [TestMethod]
     public void LanguageCanSwitchBothDirectionsWithoutLosingTranslations()
     {
         try

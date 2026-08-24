@@ -13,7 +13,7 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
 {
     private readonly EstateCircuitModule module;
     private readonly EstateEnrollmentDraftStore draftStore;
-    private readonly TextBox mapName = Input("我的地产环道");
+    private readonly TextBox mapName = Input(AppLocalization.Literal("我的地产环道"));
     private readonly TextBox creator = Input(string.Empty);
     private readonly TextBox shareCode = Input(string.Empty);
     private readonly TextBox revision = Input("1");
@@ -65,7 +65,8 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
             if (module.State.Phase is EstateCircuitPhase.CapturingFirstTrace or EstateCircuitPhase.CapturingSecondTrace)
             {
                 var result = module.StopLineTrace();
-                if (result.Gate is not null || result.SampleCount > 0) status.Text = result.Explanation;
+                if (result.Gate is not null || result.SampleCount > 0)
+                    status.Text = AppLocalization.Literal(result.Explanation);
             }
             else module.StartLineTrace();
         });
@@ -87,6 +88,7 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
         Closed += (_, _) => refreshTimer.Stop();
         RefreshDraftCard();
         Refresh();
+        AppLocalization.ApplyTo(this);
     }
 
     private UIElement BuildContent()
@@ -237,7 +239,9 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
     {
         if (draftStore.Exists && !module.State.IsEnrollmentActive)
         {
-            if (MessageBox.Show(this, "开始新的录入会删除现有暂存。继续吗？", "开始新录入",
+            if (MessageBox.Show(this,
+                    AppLocalization.Literal("开始新的录入会删除现有暂存。继续吗？"),
+                    AppLocalization.Literal("开始新录入"),
                     MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             draftStore.Delete();
         }
@@ -261,14 +265,17 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, exception.Message, "无法恢复暂存", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                AppLocalization.Literal("无法恢复暂存"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         Refresh();
     }
 
     private void DiscardSavedDraft()
     {
-        if (MessageBox.Show(this, "确认删除这份未完成的录入暂存？", "删除暂存",
+        if (MessageBox.Show(this,
+                AppLocalization.Literal("确认删除这份未完成的录入暂存？"),
+                AppLocalization.Literal("删除暂存"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         draftStore.Delete();
         RefreshDraftCard();
@@ -284,13 +291,16 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, exception.Message, "无法暂存录入", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                AppLocalization.Literal("无法暂存录入"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
     private void CancelEnrollment()
     {
-        if (MessageBox.Show(this, "确认放弃当前录入？已完成但尚未保存的步骤会丢失。", "放弃录入",
+        if (MessageBox.Show(this,
+                AppLocalization.Literal("确认放弃当前录入？已完成但尚未保存的步骤会丢失。"),
+                AppLocalization.Literal("放弃录入"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         module.CancelEnrollment();
         draftStore.Delete();
@@ -301,29 +311,48 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
     private void Refresh()
     {
         var current = module.State;
-        phase.Text = $"当前阶段 · {PhaseText(current.Phase)}";
-        status.Text = current.Status;
-        instruction.Text = current.Instruction;
-        metrics.Text = $"描摹样本  {current.FirstTraceSamples} / {current.SecondTraceSamples}" +
+        phase.Text = AppLocalization.Format(
+            "estate.enrollment.phase", "当前阶段 · {0}", PhaseText(current.Phase));
+        status.Text = AppLocalization.Literal(current.Status);
+        instruction.Text = AppLocalization.Literal(current.Instruction);
+        metrics.Text = AppLocalization.Format(
+            "estate.enrollment.traceSamples",
+            "描摹样本  {0} / {1}",
+            current.FirstTraceSamples,
+            current.SecondTraceSamples) +
             (current.GateWidthMeters is double width
-                ? $"    起终点线 {width:0.00} m    拟合误差 {current.FitRmsMeters:0.00} m" : string.Empty) +
+                ? AppLocalization.Format(
+                    "estate.enrollment.gateMetrics",
+                    "    起终点线 {0:0.00} m    拟合误差 {1:0.00} m",
+                    width,
+                    current.FitRmsMeters)
+                : string.Empty) +
             (current.TotalCheckpoints > 0
-                ? $"\n路线覆盖 {current.ProjectionRatio:P0}    检查点 {current.PassedCheckpoints}/{current.TotalCheckpoints}    当前 {current.CurrentLapSeconds:0.0} s"
+                ? AppLocalization.Format(
+                    "estate.enrollment.routeMetrics",
+                    "\n路线覆盖 {0:P0}    检查点 {1}/{2}    当前 {3:0.0} s",
+                    current.ProjectionRatio,
+                    current.PassedCheckpoints,
+                    current.TotalCheckpoints,
+                    current.CurrentLapSeconds)
                 : string.Empty);
         preview.Update(module.EnrollmentPreview);
         prepare.IsEnabled = !current.IsEnrollmentActive && !current.IsTimingActive;
         SetMetadataEnabled(prepare.IsEnabled);
         trace.IsEnabled = current.IsEnrollmentActive && current.Phase is EstateCircuitPhase.Idle or
             EstateCircuitPhase.CapturingFirstTrace or EstateCircuitPhase.CapturingSecondTrace or EstateCircuitPhase.AwaitingDirection;
-        trace.Content = current.Phase switch
+        trace.Content = AppLocalization.Literal(current.Phase switch
         {
             EstateCircuitPhase.CapturingFirstTrace => "停止第一次描摹",
             EstateCircuitPhase.CapturingSecondTrace => "停止第二次描摹并拟合",
             _ when current.FirstTraceSamples > 0 => "开始第二次反向描摹",
             _ => "开始第一次描摹"
-        };
+        });
         direction.IsEnabled = current.Phase is EstateCircuitPhase.AwaitingDirection or EstateCircuitPhase.CapturingDirection;
-        direction.Content = current.Phase == EstateCircuitPhase.CapturingDirection ? "停止并确认比赛方向" : "开始比赛方向采样";
+        direction.Content = AppLocalization.Literal(
+            current.Phase == EstateCircuitPhase.CapturingDirection
+                ? "停止并确认比赛方向"
+                : "开始比赛方向采样");
         reference.IsEnabled = current.Phase == EstateCircuitPhase.AwaitingReferenceLap;
         retryValidation.Visibility = current.Phase == EstateCircuitPhase.ValidationFailed ? Visibility.Visible : Visibility.Collapsed;
         pause.IsEnabled = current.IsEnrollmentActive;
@@ -341,10 +370,15 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
         if (draftCard is null) return;
         EstateEnrollmentDraft? draft = null;
         try { draft = draftStore.Load(); }
-        catch (InvalidDataException exception) { draftNotice.Text = exception.Message; }
+        catch (InvalidDataException exception) { draftNotice.Text = AppLocalization.Literal(exception.Message); }
         draftCard.Visibility = draftStore.Exists && !module.State.IsEnrollmentActive ? Visibility.Visible : Visibility.Collapsed;
         if (draft is not null)
-            draftNotice.Text = $"{draft.Enrollment.MapName} · 修订 {draft.Enrollment.MapRevision} · 暂存于 {draft.SavedAt.ToLocalTime():MM-dd HH:mm}";
+            draftNotice.Text = AppLocalization.Format(
+                "estate.enrollment.draft",
+                "{0} · 修订 {1} · 暂存于 {2:MM-dd HH:mm}",
+                draft.Enrollment.MapName,
+                draft.Enrollment.MapRevision,
+                draft.SavedAt.ToLocalTime());
     }
 
     private void Execute(Action action)
@@ -352,7 +386,8 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
         try { action(); }
         catch (Exception exception)
         {
-            MessageBox.Show(this, exception.Message, "地产环道录入", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                AppLocalization.Literal("地产环道录入"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         Refresh();
     }
@@ -361,15 +396,16 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
     {
         if (acceptedClose || !module.State.IsEnrollmentActive) return;
         var result = MessageBox.Show(this,
-            "录入尚未完成。\n\n选择“是”暂存并关闭；选择“否”放弃录入；选择“取消”返回向导。",
-            "关闭录入向导", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            AppLocalization.Literal("录入尚未完成。\n\n选择“是”暂存并关闭；选择“否”放弃录入；选择“取消”返回向导。"),
+            AppLocalization.Literal("关闭录入向导"), MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (result == MessageBoxResult.Cancel) { e.Cancel = true; return; }
         if (result == MessageBoxResult.Yes)
         {
             try { draftStore.Save(module.PauseEnrollmentForDraft()); }
             catch (Exception exception)
             {
-                MessageBox.Show(this, exception.Message, "无法暂存录入", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                    AppLocalization.Literal("无法暂存录入"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 e.Cancel = true;
             }
             return;
@@ -439,17 +475,17 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
 
     private static Button ActionButton(string content) => new()
     {
-        Content = content, MinHeight = 42, Padding = new Thickness(16, 8, 16, 8), FontWeight = FontWeights.SemiBold
+        Content = AppLocalization.Literal(content), MinHeight = 42, Padding = new Thickness(16, 8, 16, 8), FontWeight = FontWeights.SemiBold
     };
 
     private static TextBlock Text(string value, double size, FontWeight weight, string brush = "TextBrush") => new()
     {
-        Text = value, FontSize = size, FontWeight = weight, Foreground = Brush(brush), TextWrapping = TextWrapping.Wrap
+        Text = AppLocalization.Literal(value), FontSize = size, FontWeight = weight, Foreground = Brush(brush), TextWrapping = TextWrapping.Wrap
     };
 
     private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];
 
-    private static string PhaseText(EstateCircuitPhase value) => value switch
+    private static string PhaseText(EstateCircuitPhase value) => AppLocalization.Literal(value switch
     {
         EstateCircuitPhase.Idle => "准备",
         EstateCircuitPhase.CapturingFirstTrace => "第一次横线描摹",
@@ -464,5 +500,5 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
         EstateCircuitPhase.Ready => "录入完成",
         EstateCircuitPhase.Faulted => "异常",
         _ => value.ToString()
-    };
+    });
 }

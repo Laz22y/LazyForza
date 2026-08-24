@@ -171,13 +171,20 @@ internal sealed partial class MainWindow
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 var protection = entry.IsPinned
-                    ? " · 已固定"
+                    ? AppLocalization.Literal(" · 已固定")
                     : entry.IsProtected(DateTimeOffset.UtcNow)
-                        ? $" · {entry.ProtectionReason}"
+                        ? AppLocalization.Format(
+                            "settings.recording.protection", " · {0}", AppLocalization.Literal(entry.ProtectionReason ?? string.Empty))
                         : string.Empty;
                 row.Children.Add(Label(
-                    $"{entry.CreatedAt.ToLocalTime():MM-dd HH:mm} · {entry.TrackName ?? "未识别赛道"} · " +
-                    $"{FormatDuration(entry.DurationSeconds)} · {FormatFileSize(entry.RecordingPath)}{protection}",
+                    AppLocalization.Format(
+                        "settings.recording.recentItem",
+                        "{0:MM-dd HH:mm} · {1} · {2} · {3}{4}",
+                        entry.CreatedAt.ToLocalTime(),
+                        AppLocalization.Literal(entry.TrackName ?? "未识别赛道"),
+                        FormatDuration(entry.DurationSeconds),
+                        FormatFileSize(entry.RecordingPath),
+                        protection),
                     11));
                 var pin = new Button
                 {
@@ -205,9 +212,9 @@ internal sealed partial class MainWindow
                 : $"{bytes / (1024d * 1024):0.0} MiB";
 
         static string FormatDuration(double seconds) =>
-            seconds <= 0 ? "时长待读取" : TimeSpan.FromSeconds(seconds).ToString(@"hh\:mm\:ss");
+            seconds <= 0 ? AppLocalization.Literal("时长待读取") : TimeSpan.FromSeconds(seconds).ToString(@"hh\:mm\:ss");
 
         static string FormatFileSize(string path) =>
-            File.Exists(path) ? FormatBytes(new FileInfo(path).Length) : "文件缺失";
+            File.Exists(path) ? FormatBytes(new FileInfo(path).Length) : AppLocalization.Literal("文件缺失");
     }
 }

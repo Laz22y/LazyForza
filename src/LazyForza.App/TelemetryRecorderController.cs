@@ -63,7 +63,8 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
     public AutomaticRecordingOptions AutomaticOptions => options;
     public IReadOnlyList<RecordingCatalogEntry> Recordings => catalog.List();
     public long RecordingBytes => capacity.TotalBytes();
-    public string AutomaticStatus { get; private set; } = "自动比赛录制未启用。";
+    public string AutomaticStatus { get; private set; } =
+        AppLocalization.Literal("自动比赛录制未启用。");
     public string? CurrentPath { get; private set; }
     public long FramesWritten { get; private set; }
 
@@ -71,7 +72,7 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
     {
         if (sourceKind != TelemetrySourceKind.Live)
         {
-            AutomaticStatus = "Simulator / Replay 不参与自动比赛录制。";
+            AutomaticStatus = AppLocalization.Literal("Simulator / Replay 不参与自动比赛录制。");
             return;
         }
         monitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -79,7 +80,8 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
         monitorTask = Task.Run(
             () => MonitorCompetitionsAsync(monitorCancellation.Token),
             CancellationToken.None);
-        AutomaticStatus = options.Enabled ? "等待比赛开始。" : "自动比赛录制未启用。";
+        AutomaticStatus = AppLocalization.Literal(
+            options.Enabled ? "等待比赛开始。" : "自动比赛录制未启用。");
     }
 
     public async ValueTask SetAutomaticOptionsAsync(
@@ -97,11 +99,11 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
         if (!options.Enabled)
         {
             await FinalizeAutomaticAsync("用户关闭自动录制", cancellationToken);
-            AutomaticStatus = "自动比赛录制未启用。";
+            AutomaticStatus = AppLocalization.Literal("自动比赛录制未启用。");
         }
         else if (sourceKind == TelemetrySourceKind.Live)
         {
-            AutomaticStatus = "等待比赛开始。";
+            AutomaticStatus = AppLocalization.Literal("等待比赛开始。");
         }
     }
 
@@ -210,7 +212,7 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
                 {
                     blockedSessionId = automaticSessionId;
                     await FinalizeAutomaticAsync("达到容量或磁盘保留空间限制", cancellationToken);
-                    AutomaticStatus = "本场自动录制已因容量限制停止。";
+                    AutomaticStatus = AppLocalization.Literal("本场自动录制已因容量限制停止。");
                     continue;
                 }
             }
@@ -222,7 +224,7 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
                 postRollCancellation.Cancel();
                 postRollCancellation.Dispose();
                 postRollCancellation = null;
-                AutomaticStatus = "正在自动录制比赛。";
+                AutomaticStatus = AppLocalization.Literal("正在自动录制比赛。");
             }
         }
     }
@@ -244,7 +246,7 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
         if (!result.CanStart)
         {
             blockedSessionId = lapAnalysis.CurrentSessionId;
-            AutomaticStatus = result.Message;
+            AutomaticStatus = AppLocalization.Literal(result.Message);
             log($"Automatic recording skipped: {result.Message}");
             return false;
         }
@@ -272,7 +274,10 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
             await automaticWriter.WriteAsync(buffered, cancellationToken);
             automaticFrames++;
         }
-        AutomaticStatus = $"正在自动录制比赛；已包含赛前 {options.PreRollSeconds} 秒缓冲。";
+        AutomaticStatus = AppLocalization.Format(
+            "template.automaticRecordingBuffer",
+            "正在自动录制比赛；已包含赛前 {0} 秒缓冲。",
+            options.PreRollSeconds);
         CurrentPath = automaticFinalPath;
         log($"Automatic competition recording started: {automaticPartialPath}");
         return true;
@@ -282,7 +287,10 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
     {
         postRollCancellation = new CancellationTokenSource();
         var token = postRollCancellation.Token;
-        AutomaticStatus = $"比赛结束，继续记录 {options.PostRollSeconds} 秒。";
+        AutomaticStatus = AppLocalization.Format(
+            "template.automaticRecordingPostRoll",
+            "比赛结束，继续记录 {0} 秒。",
+            options.PostRollSeconds);
         _ = Task.Run(async () =>
         {
             try
@@ -353,7 +361,10 @@ internal sealed class TelemetryRecorderController : IAsyncDisposable
                 protectionReason,
                 protectedUntil));
             log($"Automatic competition recording finalized: {automaticFinalPath}; reason={reason}; frames={automaticFrames}.");
-            AutomaticStatus = $"自动录制已保存：{Path.GetFileName(automaticFinalPath)}";
+            AutomaticStatus = AppLocalization.Format(
+                "template.automaticRecordingSaved",
+                "自动录制已保存：{0}",
+                Path.GetFileName(automaticFinalPath));
         }
         finally
         {

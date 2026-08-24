@@ -277,7 +277,7 @@ internal sealed partial class MainWindow
             {
                 fileStatus.Text = AppLocalization.Text("replay.readFailed", "无法读取该录制文件。");
                 MessageBox.Show(
-                    exception.Message,
+                    AppLocalization.Literal(exception.Message),
                     AppLocalization.Text("replay.invalidFile", "回放文件无效"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -360,7 +360,13 @@ internal sealed partial class MainWindow
             speedValue = Label("0 km/h", 20, FontWeights.SemiBold);
             inputValue = Label("油门 0% · 制动 0%", 15, FontWeights.SemiBold);
             dynamicsValue = Label("动态遥测待载入", 13, FontWeights.SemiBold);
-            metrics.Children.Add(MetricCard("回放时间", timeValue, Label($"总计 {AnalysisTime(currentLap.TotalSeconds, false)}", 11, FontWeights.Normal, "MutedBrush")));
+            metrics.Children.Add(MetricCard(
+                "回放时间",
+                timeValue,
+                Label(AppLocalization.Format(
+                    "replay.totalTime",
+                    "总计 {0}",
+                    AnalysisTime(currentLap.TotalSeconds, false)), 11, FontWeights.Normal, "MutedBrush")));
             metrics.Children.Add(MetricCard("速度 / 挡位", speedValue, Label("逐样本回放", 11, FontWeights.Normal, "MutedBrush")));
             metrics.Children.Add(MetricCard("驾驶输入", inputValue, Label("保存圈速中的输入", 11, FontWeights.Normal, "MutedBrush")));
             metrics.Children.Add(MetricCard("轮胎动态", dynamicsValue, Label(

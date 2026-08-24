@@ -997,6 +997,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         restoreEditorChrome.Click += (_, _) => SetEditorChromeVisible(true);
         root.Children.Add(restoreEditorChrome);
         Content = root;
+        ApplyLocalization(this);
 
         SourceInitialized += (_, _) =>
         {
@@ -1020,6 +1021,31 @@ internal sealed class OverlayLayoutEditorWindow : Window
 
     private const string DefaultAlignmentText =
         "HUD 可临时隐藏后重叠摆放；地产赛事各部件可在整个游戏窗口内独立调整";
+
+    private static string T(string value) => OverlayTextLocalization.Text(value);
+
+    private static void ApplyLocalization(DependencyObject root)
+    {
+        if (root is Window window)
+            window.Title = T(window.Title);
+        if (root is TextBlock textBlock)
+            textBlock.Text = T(textBlock.Text);
+        if (root is ContentControl { Content: string content } contentControl)
+            contentControl.Content = T(content);
+        if (root is HeaderedContentControl { Header: string header } headered)
+            headered.Header = T(header);
+        if (root is ItemsControl { ItemsSource: null } itemsControl)
+        {
+            for (var index = 0; index < itemsControl.Items.Count; index++)
+                if (itemsControl.Items[index] is string item)
+                    itemsControl.Items[index] = T(item);
+        }
+
+        if (root is FrameworkElement element && element.ToolTip is string tooltip)
+            element.ToolTip = T(tooltip);
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+            ApplyLocalization(child);
+    }
 
     public OverlayLayout? Result { get; private set; }
 
@@ -1203,13 +1229,13 @@ internal sealed class OverlayLayoutEditorWindow : Window
         estateRaceHud.Frame.BorderThickness = new Thickness(0);
         var name = selectedHud.Kind switch
         {
-            EditorHudKind.Dashboard => "仪表盘 HUD",
-            EditorHudKind.Lap => "圈速 HUD",
-            EditorHudKind.Drift => "漂移 HUD · 实验性",
-            _ => $"地产赛事 · {EstateRaceWidgetName(selectedEstateRaceWidget)}"
+            EditorHudKind.Dashboard => T("仪表盘 HUD"),
+            EditorHudKind.Lap => T("圈速 HUD"),
+            EditorHudKind.Drift => T("漂移 HUD · 实验性"),
+            _ => $"{T("地产赛事")} · {EstateRaceWidgetName(selectedEstateRaceWidget)}"
         };
         var attachment = selectedHud.Kind == EditorHudKind.Lap && lapAttached
-            ? " · 已吸附"
+            ? T(" · 已吸附")
             : string.Empty;
         metricsText.Text =
             $"{name}{attachment} · {SelectedScale():P1} · " +
@@ -1269,21 +1295,21 @@ internal sealed class OverlayLayoutEditorWindow : Window
         else estateRacePreviewVisible = isVisible;
 
         dashboardPreviewVisibility.IsChecked = dashboardPreviewVisible;
-        dashboardPreviewVisibility.Content = dashboardPreviewVisible
+        dashboardPreviewVisibility.Content = T(dashboardPreviewVisible
             ? "仪表盘：显示"
-            : "仪表盘：隐藏";
+            : "仪表盘：隐藏");
         lapPreviewVisibility.IsChecked = lapPreviewVisible;
-        lapPreviewVisibility.Content = lapPreviewVisible
+        lapPreviewVisibility.Content = T(lapPreviewVisible
             ? "圈速：显示"
-            : "圈速：隐藏";
+            : "圈速：隐藏");
         driftPreviewVisibility.IsChecked = driftPreviewVisible;
-        driftPreviewVisibility.Content = driftPreviewVisible
+        driftPreviewVisibility.Content = T(driftPreviewVisible
             ? "漂移：显示"
-            : "漂移：隐藏";
+            : "漂移：隐藏");
         estateRacePreviewVisibility.IsChecked = estateRacePreviewVisible;
-        estateRacePreviewVisibility.Content = estateRacePreviewVisible
+        estateRacePreviewVisibility.Content = T(estateRacePreviewVisible
             ? "赛事：显示"
-            : "赛事：隐藏";
+            : "赛事：隐藏");
 
         if (!isVisible && selectedHud == hud)
         {
@@ -1298,9 +1324,9 @@ internal sealed class OverlayLayoutEditorWindow : Window
     {
         var placement = dashboardWidgets.Get(selectedDashboardWidget);
         dashboardWidgetVisibility.IsChecked = placement.IsVisible;
-        dashboardWidgetVisibility.Content = placement.IsVisible
+        dashboardWidgetVisibility.Content = T(placement.IsVisible
             ? "部件：显示"
-            : "部件：隐藏";
+            : "部件：隐藏");
         dashboardWidgetFrame.Visibility =
             selectedHud == dashboardHud &&
             dashboardPreviewVisible &&
@@ -1406,8 +1432,8 @@ internal sealed class OverlayLayoutEditorWindow : Window
             VerticalGuide = snapped.VerticalGuide is double x ? dashboardHud.Left + x : null,
             HorizontalGuide = snapped.HorizontalGuide is double y ? dashboardHud.Top + y : null,
             AlignmentText = string.IsNullOrWhiteSpace(snapped.AlignmentText)
-                ? $"{DashboardWidgetName(selectedDashboardWidget)} · 双击恢复默认位置"
-                : $"{DashboardWidgetName(selectedDashboardWidget)} · {snapped.AlignmentText}"
+                ? $"{DashboardWidgetName(selectedDashboardWidget)} · {T("双击恢复默认位置")}"
+                : $"{DashboardWidgetName(selectedDashboardWidget)} · {T(snapped.AlignmentText)}"
         });
         eventArgs.Handled = true;
     }
@@ -1429,7 +1455,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         RefreshDashboardWidgetControls();
         PositionDashboardWidgetFrame();
         InvalidateDashboardPreview();
-        alignmentText.Text = "仪表盘部件已恢复当前默认布局";
+        alignmentText.Text = T("仪表盘部件已恢复当前默认布局");
         alignmentText.Foreground = new SolidColorBrush(
             Color.FromRgb(61, 232, 143));
     }
@@ -1438,7 +1464,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         (dashboardHud.Frame.Child as HudSurface)?.InvalidateVisual();
 
     private static string DashboardWidgetName(DashboardWidgetKind kind) =>
-        kind switch
+        T(kind switch
         {
             DashboardWidgetKind.RpmArc => "转速灯带",
             DashboardWidgetKind.SpeedGear => "速度 / 挡位",
@@ -1447,15 +1473,15 @@ internal sealed class OverlayLayoutEditorWindow : Window
             DashboardWidgetKind.Pedals => "油门 / 制动",
             DashboardWidgetKind.Steering => "方向指示",
             _ => "等级 / PI"
-        };
+        });
 
     private void RefreshEstateRaceWidgetControls()
     {
         var placement = estateRaceWidgets.Get(selectedEstateRaceWidget);
         estateRaceWidgetVisibility.IsChecked = placement.IsVisible;
-        estateRaceWidgetVisibility.Content = placement.IsVisible
+        estateRaceWidgetVisibility.Content = T(placement.IsVisible
             ? "部件：显示"
-            : "部件：隐藏";
+            : "部件：隐藏");
         estateRaceWidgetFrame.Visibility =
             selectedHud == estateRaceHud &&
             estateRacePreviewVisible &&
@@ -1602,8 +1628,8 @@ internal sealed class OverlayLayoutEditorWindow : Window
         ShowGuides(snapped with
         {
             AlignmentText = string.IsNullOrWhiteSpace(snapped.AlignmentText)
-                ? $"{EstateRaceWidgetName(selectedEstateRaceWidget)} · 双击恢复默认位置与大小"
-                : $"{EstateRaceWidgetName(selectedEstateRaceWidget)} · {snapped.AlignmentText}"
+                ? $"{EstateRaceWidgetName(selectedEstateRaceWidget)} · {T("双击恢复默认位置与大小")}"
+                : $"{EstateRaceWidgetName(selectedEstateRaceWidget)} · {T(snapped.AlignmentText)}"
         });
         eventArgs.Handled = true;
     }
@@ -1626,7 +1652,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         PositionEstateRaceWidgetFrame();
         PositionHandles();
         InvalidateEstateRacePreview();
-        alignmentText.Text = "地产赛事 HUD 已恢复默认布局";
+        alignmentText.Text = T("地产赛事 HUD 已恢复默认布局");
         alignmentText.Foreground = new SolidColorBrush(Color.FromRgb(180, 99, 255));
     }
 
@@ -1634,7 +1660,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
         (estateRaceHud.Frame.Child as HudSurface)?.InvalidateVisual();
 
     private static string EstateRaceWidgetName(EstateRaceHudWidgetKind kind) =>
-        kind switch
+        T(kind switch
         {
             EstateRaceHudWidgetKind.Leaderboard => "比赛排行榜",
             EstateRaceHudWidgetKind.TrackMap => "赛道一览",
@@ -1647,7 +1673,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
             EstateRaceHudWidgetKind.PracticeProgram => "练习项目提示",
             EstateRaceHudWidgetKind.PitWindowSuggestion => "进站窗口建议",
             _ => "整场进站策略"
-        };
+        });
 
     private static Size EstateRaceWidgetBaseSize(
         EstateRaceHudWidgetKind kind,
@@ -1985,9 +2011,9 @@ internal sealed class OverlayLayoutEditorWindow : Window
             horizontalGuide.Y1 = y;
             horizontalGuide.Y2 = y;
         }
-        alignmentText.Text = string.IsNullOrWhiteSpace(result.AlignmentText)
+        alignmentText.Text = T(string.IsNullOrWhiteSpace(result.AlignmentText)
             ? DefaultAlignmentText
-            : result.AlignmentText;
+            : result.AlignmentText);
         alignmentText.Foreground = string.IsNullOrWhiteSpace(result.AlignmentText)
             ? new SolidColorBrush(Color.FromRgb(179, 192, 201))
             : new SolidColorBrush(Color.FromRgb(73, 211, 235));
@@ -1997,7 +2023,7 @@ internal sealed class OverlayLayoutEditorWindow : Window
     {
         verticalGuide.Visibility = Visibility.Collapsed;
         horizontalGuide.Visibility = Visibility.Collapsed;
-        alignmentText.Text = DefaultAlignmentText;
+        alignmentText.Text = T(DefaultAlignmentText);
         alignmentText.Foreground = new SolidColorBrush(Color.FromRgb(179, 192, 201));
     }
 

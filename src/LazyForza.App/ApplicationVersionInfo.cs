@@ -20,7 +20,7 @@ internal static class ApplicationVersionInfo
 
             var version = assembly.GetName().Version;
             return version is null
-                ? "未知"
+                ? AppLocalization.Literal("未知")
                 : version.Build >= 0
                     ? version.ToString(3)
                     : version.ToString(2);

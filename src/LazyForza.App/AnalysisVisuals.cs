@@ -570,18 +570,37 @@ internal sealed class LapTelemetryChart : FrameworkElement
         var performanceIndex = lap.Vehicle.PerformanceIndex >= 0
             ? lap.Vehicle.PerformanceIndex.ToString()
             : "—";
-        var validity = lap.IsValid ? "有效" : $"无效 · {lap.InvalidReason ?? "原因未知"}";
+        var validity = lap.IsValid
+            ? AppLocalization.Literal("有效")
+            : AppLocalization.Format(
+                "analysis.tooltip.invalid",
+                "无效 · {0}",
+                AppLocalization.Literal(lap.InvalidReason ?? "原因未知"));
         var position = includePosition
-            ? $"\n位置 X {sample.X:0.0} · Z {sample.Z:0.0}"
+            ? AppLocalization.Format(
+                "analysis.tooltip.position",
+                "\n位置 X {0:0.0} · Z {1:0.0}",
+                sample.X,
+                sample.Z)
             : string.Empty;
         return new TextBlock
         {
-            Text =
-                $"圈速 {FormatTime(lap.TotalSeconds)}  ·  {PerformanceClassCatalog.Name(lap.Vehicle.CarClass)} {performanceIndex}\n" +
-                $"{lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss}  ·  {validity}\n" +
-                $"当前 {FormatTime(sample.ElapsedSeconds)}  ·  距离 {sample.S / 1000:0.000} km\n" +
-                $"速度 {sample.SpeedMps * 3.6:0.0} km/h  ·  {GearText(sample.Gear)} 挡  ·  {sample.Rpm:0} RPM\n" +
-                $"油门 {sample.Accel:P0}  ·  制动 {sample.Brake:P0}{position}",
+            Text = AppLocalization.Format(
+                "analysis.tooltip.lapSample",
+                "圈速 {0}  ·  {1} {2}\n{3:MM-dd HH:mm:ss}  ·  {4}\n当前 {5}  ·  距离 {6:0.000} km\n速度 {7:0.0} km/h  ·  {8} 挡  ·  {9:0} RPM\n油门 {10:P0}  ·  制动 {11:P0}{12}",
+                FormatTime(lap.TotalSeconds),
+                PerformanceClassCatalog.Name(lap.Vehicle.CarClass),
+                performanceIndex,
+                lap.StartedAt.ToLocalTime(),
+                validity,
+                FormatTime(sample.ElapsedSeconds),
+                sample.S / 1000,
+                sample.SpeedMps * 3.6,
+                GearText(sample.Gear),
+                sample.Rpm,
+                sample.Accel,
+                sample.Brake,
+                position),
             FontFamily = new FontFamily("Microsoft YaHei UI"),
             FontSize = 13,
             Foreground = new SolidColorBrush(Color.FromRgb(244, 247, 250)),
@@ -777,7 +796,7 @@ internal sealed class LapInputChart : FrameworkElement
                 new Point(x, bounds.Top + 14),
                 new Point(x + 17, bounds.Top + 14));
             var formatted = new FormattedText(
-                text,
+                AppLocalization.Literal(text),
                 System.Globalization.CultureInfo.CurrentUICulture,
                 FlowDirection.LeftToRight,
                 new Typeface("Microsoft YaHei UI"),
@@ -812,13 +831,18 @@ internal sealed class LapInputChart : FrameworkElement
         {
             var steering = sample.Dynamics is { } dynamics
                 ? $"{dynamics.Steering:+0.00;-0.00;0.00}"
-                : "旧圈无数据";
+                : AppLocalization.Literal("旧圈无数据");
             hoverToolTip.Content = new TextBlock
             {
-                Text =
-                    $"距离 {sample.S / 1000:0.000} km · 时间 {TimeSpan.FromSeconds(sample.ElapsedSeconds):m\\:ss\\.fff}\n" +
-                    $"速度 {sample.SpeedMps * 3.6:0.0} km/h · 油门 {sample.Accel:P0} · 制动 {sample.Brake:P0}\n" +
-                    $"方向 {steering}",
+                Text = AppLocalization.Format(
+                    "analysis.tooltip.inputs",
+                    "距离 {0:0.000} km · 时间 {1:m\\:ss\\.fff}\n速度 {2:0.0} km/h · 油门 {3:P0} · 制动 {4:P0}\n方向 {5}",
+                    sample.S / 1000,
+                    TimeSpan.FromSeconds(sample.ElapsedSeconds),
+                    sample.SpeedMps * 3.6,
+                    sample.Accel,
+                    sample.Brake,
+                    steering),
                 FontFamily = new FontFamily("Microsoft YaHei UI"),
                 FontSize = 13,
                 Foreground = new SolidColorBrush(Color.FromRgb(244, 247, 250)),
@@ -1553,7 +1577,7 @@ internal sealed class TrackMapView : FrameworkElement
             8,
             8);
         var title = new FormattedText(
-            DrivingDynamicsAnalyzer.LayerName(dynamicsLayer),
+            AppLocalization.Literal(DrivingDynamicsAnalyzer.LayerName(dynamicsLayer)),
             System.Globalization.CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
             new Typeface(
@@ -1597,7 +1621,8 @@ internal sealed class TrackMapView : FrameworkElement
             new Point(1, 0));
         drawingContext.DrawRoundedRectangle(brush, null, gradientBounds, 3, 3);
         var scale = new FormattedText(
-            dynamicsLayer == DrivingDynamicsLayer.Steering ? "左  ↔  右" : "低  →  高",
+            AppLocalization.Literal(
+                dynamicsLayer == DrivingDynamicsLayer.Steering ? "左  ↔  右" : "低  →  高"),
             System.Globalization.CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
             new Typeface(
@@ -1623,7 +1648,7 @@ internal sealed class TrackMapView : FrameworkElement
     {
         drawingContext.DrawEllipse(new SolidColorBrush(color), null, new Point(x + 4, y + 6), 4, 4);
         var formatted = new FormattedText(
-            text,
+            AppLocalization.Literal(text),
             System.Globalization.CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
             new Typeface(
@@ -1642,7 +1667,7 @@ internal sealed class TrackMapView : FrameworkElement
         Rect bounds)
     {
         var text = new FormattedText(
-            "该圈由旧版本记录，未包含此图层所需的动态遥测。",
+            AppLocalization.Literal("该圈由旧版本记录，未包含此图层所需的动态遥测。"),
             System.Globalization.CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
             new Typeface(
@@ -1672,28 +1697,36 @@ internal sealed class TrackMapView : FrameworkElement
         VehicleProfileFingerprint vehicle)
     {
         var point = DrivingDynamicsAnalyzer.Evaluate(sample, vehicle, dynamicsLayer);
-        if (!point.IsAvailable) return "当前圈没有此图层所需的动态遥测";
+        if (!point.IsAvailable) return AppLocalization.Literal("当前圈没有此图层所需的动态遥测");
         return dynamicsLayer switch
         {
-            DrivingDynamicsLayer.Throttle => $"图层 · 油门 {sample.Accel:P0}",
-            DrivingDynamicsLayer.Brake => $"图层 · 制动 {sample.Brake:P0}",
+            DrivingDynamicsLayer.Throttle => AppLocalization.Format(
+                "analysis.layer.throttle", "图层 · 油门 {0:P0}", sample.Accel),
+            DrivingDynamicsLayer.Brake => AppLocalization.Format(
+                "analysis.layer.brake", "图层 · 制动 {0:P0}", sample.Brake),
             DrivingDynamicsLayer.Steering =>
-                $"图层 · 方向输入 {point.SignedValue:+0.00;-0.00;0.00}",
+                AppLocalization.Format(
+                    "analysis.layer.steering", "图层 · 方向输入 {0:+0.00;-0.00;0.00}", point.SignedValue),
             DrivingDynamicsLayer.TireSlip =>
-                $"图层 · 轮胎滑移强度 {point.Intensity:P0}",
+                AppLocalization.Format(
+                    "analysis.layer.tireSlip", "图层 · 轮胎滑移强度 {0:P0}", point.Intensity),
             DrivingDynamicsLayer.HandlingBalance => point.Balance switch
             {
                 HandlingBalanceState.SuspectedUndersteer =>
-                    $"图层 · 疑似转向不足 · 证据强度 {point.Intensity:P0}",
+                    AppLocalization.Format(
+                        "analysis.layer.understeer", "图层 · 疑似转向不足 · 证据强度 {0:P0}", point.Intensity),
                 HandlingBalanceState.SuspectedOversteer =>
-                    $"图层 · 疑似转向过度 · 证据强度 {point.Intensity:P0}",
-                _ => "图层 · 未发现明显转向平衡异常"
+                    AppLocalization.Format(
+                        "analysis.layer.oversteer", "图层 · 疑似转向过度 · 证据强度 {0:P0}", point.Intensity),
+                _ => AppLocalization.Literal("图层 · 未发现明显转向平衡异常")
             },
             DrivingDynamicsLayer.ExitWheelspin =>
-                $"图层 · 出弯空转证据 {point.Intensity:P0}",
+                AppLocalization.Format(
+                    "analysis.layer.wheelspin", "图层 · 出弯空转证据 {0:P0}", point.Intensity),
             DrivingDynamicsLayer.BrakingInstability =>
-                $"图层 · 制动轮胎失稳证据 {point.Intensity:P0}",
-            _ => DrivingDynamicsAnalyzer.LayerName(dynamicsLayer)
+                AppLocalization.Format(
+                    "analysis.layer.braking", "图层 · 制动轮胎失稳证据 {0:P0}", point.Intensity),
+            _ => AppLocalization.Literal(DrivingDynamicsAnalyzer.LayerName(dynamicsLayer))
         };
     }
 
@@ -2334,7 +2367,7 @@ internal sealed class TrackMapView : FrameworkElement
         double pixelsPerDip)
     {
         var text = new FormattedText(
-            label,
+            AppLocalization.Literal(label),
             System.Globalization.CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
             new Typeface(

@@ -240,7 +240,7 @@ internal sealed class EstateGeometryPreview : FrameworkElement
     private static void DrawEmptyState(DrawingContext context, Rect bounds)
     {
         var text = new FormattedText(
-            "开始录入后，这里会实时显示采样轨迹",
+            AppLocalization.Literal("开始录入后，这里会实时显示采样轨迹"),
             CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
             new Typeface("Microsoft YaHei UI"),

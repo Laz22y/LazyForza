@@ -14,7 +14,7 @@ internal sealed partial class MainWindow
         EstateRaceParticipant participant)
     {
         if (session.Phase is not (RaceSessionPhase.Grid or RaceSessionPhase.Finished))
-            throw new InvalidOperationException("只有排位赛冻结后或正赛结束后才能导出成绩。");
+            throw new InvalidOperationException(AppLocalization.Literal("只有排位赛冻结后或正赛结束后才能导出成绩。"));
 
         var isQualifying = session.Phase == RaceSessionPhase.Grid;
         var accent = ParseResultBrush(participant.ThemeColor);
@@ -39,7 +39,7 @@ internal sealed partial class MainWindow
         content.Children.Add(brand);
         content.Children.Add(new TextBlock
         {
-            Text = isQualifying ? "排位赛成绩" : "正赛成绩",
+            Text = AppLocalization.Literal(isQualifying ? "排位赛成绩" : "正赛成绩"),
             Foreground = Brushes.White,
             FontSize = 42,
             FontWeight = FontWeights.Bold,
@@ -47,7 +47,7 @@ internal sealed partial class MainWindow
         });
         content.Children.Add(new TextBlock
         {
-            Text = $"{session.SessionName} · {session.TrackName ?? "地产环道"}",
+            Text = $"{AppLocalization.Literal(session.SessionName)} · {session.TrackName ?? AppLocalization.Literal("地产环道")}",
             Foreground = new SolidColorBrush(Color.FromRgb(171, 184, 198)),
             FontSize = 18,
             Margin = new Thickness(0, 0, 0, 34)
@@ -85,7 +85,7 @@ internal sealed partial class MainWindow
         {
             Text = session.AllowTeams && !string.IsNullOrWhiteSpace(participant.TeamName)
                 ? participant.TeamName
-                : "个人参赛",
+                : AppLocalization.Literal("个人参赛"),
             Foreground = accent,
             FontSize = 17,
             Margin = new Thickness(0, 6, 0, 0)
@@ -95,24 +95,32 @@ internal sealed partial class MainWindow
         content.Children.Add(identity);
 
         var metrics = new UniformGrid { Columns = 4 };
-        metrics.Children.Add(ResultMetric("最终名次", $"P{participant.Position} / {session.Participants.Count}"));
+        metrics.Children.Add(ResultMetric(AppLocalization.Literal("最终名次"), $"P{participant.Position} / {session.Participants.Count}"));
         metrics.Children.Add(ResultMetric(
-            isQualifying ? "最快圈" : "正赛总时间",
+            AppLocalization.Literal(isQualifying ? "最快圈" : "正赛总时间"),
             isQualifying
                 ? FormatEstateRaceResultTime(participant.BestLapSeconds)
                 : FormatEstateRaceResultTime(participant.AdjustedRaceTotalSeconds ?? participant.RaceTotalSeconds, raceTime: true)));
-        metrics.Children.Add(ResultMetric("完成圈数", participant.CompletedLaps.ToString(CultureInfo.InvariantCulture)));
+        metrics.Children.Add(ResultMetric(AppLocalization.Literal("完成圈数"), participant.CompletedLaps.ToString(CultureInfo.InvariantCulture)));
         metrics.Children.Add(ResultMetric(
-            participant.Position == 1 ? "领先状态" : "与第一名",
+            AppLocalization.Literal(participant.Position == 1 ? "领先状态" : "与第一名"),
             participant.Position == 1 ? "LEADER" : FormatEstateRaceResultDelta(participant.GapToLeaderSeconds)));
         content.Children.Add(metrics);
 
         var penalty = participant.TimePenaltySeconds > 0 || participant.PendingTimePenaltySeconds > 0
-            ? $"判罚：+{participant.TimePenaltySeconds + participant.PendingTimePenaltySeconds:0} 秒"
-            : "判罚：无计时罚时";
+            ? AppLocalization.Format(
+                "png.estateRace.penalty",
+                "判罚：+{0:0} 秒",
+                participant.TimePenaltySeconds + participant.PendingTimePenaltySeconds)
+            : AppLocalization.Literal("判罚：无计时罚时");
         content.Children.Add(new TextBlock
         {
-            Text = $"{penalty}   ·   最佳单圈 {FormatEstateRaceResultTime(participant.BestLapSeconds)}   ·   导出于 {DateTime.Now:yyyy-MM-dd HH:mm}",
+            Text = AppLocalization.Format(
+                "png.estateRace.footer",
+                "{0}   ·   最佳单圈 {1}   ·   导出于 {2:yyyy-MM-dd HH:mm}",
+                penalty,
+                FormatEstateRaceResultTime(participant.BestLapSeconds),
+                DateTime.Now),
             Foreground = new SolidColorBrush(Color.FromRgb(142, 154, 168)),
             FontSize = 15,
             Margin = new Thickness(0, 34, 0, 0)

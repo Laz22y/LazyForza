@@ -616,13 +616,15 @@ public partial class App : Application
                     new ShiftTarget(5, 6, 7_250, 6_900, 5_885, confidence, false)
                 ],
                 new Dictionary<string, int>(),
-                "示例调校已就绪。")
+                AppLocalization.Text("demo.vehicle.ready", "示例调校已就绪。"))
             {
                 AcceptedSamples = 480,
                 ReadyBins = 10,
                 RequiredBins = 10,
                 ReadyGears = 3,
-                Guidance = "这是隔离 Demo 数据，仅用于检查车辆配置管理界面。"
+                Guidance = AppLocalization.Text(
+                    "demo.vehicle.guidance",
+                    "这是隔离 Demo 数据，仅用于检查车辆配置管理界面。")
             };
 
         await store.SaveShiftLearningAsync(
@@ -634,8 +636,12 @@ public partial class App : Application
 
         var streetId = VehicleProfileIdentity.Create(streetFingerprint);
         var raceId = VehicleProfileIdentity.Create(raceFingerprint);
-        store.RenameVehicleProfile(streetId, "公路调校（Demo）");
-        store.RenameVehicleProfile(raceId, "赛事调校（Demo）");
+        store.RenameVehicleProfile(
+            streetId,
+            AppLocalization.Text("demo.vehicle.streetTune", "公路调校（Demo）"));
+        store.RenameVehicleProfile(
+            raceId,
+            AppLocalization.Text("demo.vehicle.raceTune", "赛事调校（Demo）"));
         store.SetShiftRecommendationsEnabled(raceId, false);
     }
 

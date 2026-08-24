@@ -28,7 +28,7 @@ internal sealed class UpdateProgressWindow : Window
         var stack = new StackPanel { Margin = new Thickness(24, 20, 24, 18) };
         stack.Children.Add(new TextBlock
         {
-            Text = $"正在准备 LazyForza {version}",
+            Text = AppLocalization.Format("update.progress.preparing", "正在准备 LazyForza {0}", version),
             FontSize = 17,
             FontWeight = FontWeights.SemiBold
         });
@@ -63,16 +63,17 @@ internal sealed class UpdateProgressWindow : Window
             if (completed) return;
             cancellation.Cancel();
             args.Cancel = true;
-            status.Text = "正在取消…";
+            status.Text = AppLocalization.Literal("正在取消…");
             cancel.IsEnabled = false;
         };
+        AppLocalization.ApplyTo(this);
     }
 
     public CancellationToken CancellationToken => cancellation.Token;
 
     public IProgress<UpdateProgress> Progress => new Progress<UpdateProgress>(value =>
     {
-        status.Text = value.Stage;
+        status.Text = AppLocalization.Literal(value.Stage);
         if (value.Fraction is { } fraction)
         {
             progressBar.IsIndeterminate = false;

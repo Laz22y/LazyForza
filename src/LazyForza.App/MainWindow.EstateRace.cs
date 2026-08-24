@@ -142,13 +142,13 @@ internal sealed partial class MainWindow
                     }
                     if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackPackageHash) &&
                         !identity.Matches(descriptor.ActiveTrackPackageHash))
-                        throw new InvalidOperationException("下载后的赛道摘要仍与服务端不一致，已阻止连接。请房主重新上传赛道文件并核对 SHA-256。");
+                        throw new InvalidOperationException(AppLocalization.Literal("下载后的赛道摘要仍与服务端不一致，已阻止连接。请房主重新上传赛道文件并核对 SHA-256。"));
                     if (estate.ActiveDefinition?.TrackId != trackId || !estate.State.IsTimingActive)
                         estate.StartTiming(trackId);
                 }
                 else if (!estate.State.IsTimingActive || estate.ActiveDefinition is null)
                 {
-                    throw new InvalidOperationException("服务端尚未指定赛道。请先在“赛道”页面手动选择地产环道并开始计时，或请房主在总控中填写赛道标识和 SHA-256。");
+                    throw new InvalidOperationException(AppLocalization.Literal("服务端尚未指定赛道。请先在“赛道”页面手动选择地产环道并开始计时，或请房主在总控中填写赛道标识和 SHA-256。"));
                 }
                 if (module.Status.State != ModuleRuntimeState.Running)
                     await moduleActivation.SetEnabledAsync(EstateRaceModule.ModuleId, true, lifetimeCancellation.Token);
@@ -160,7 +160,7 @@ internal sealed partial class MainWindow
             }
             catch (Exception exception)
             {
-                MessageBox.Show(this, exception.Message, "无法连接地产赛事", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法连接地产赛事"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             finally
             {
@@ -173,20 +173,25 @@ internal sealed partial class MainWindow
             try
             {
                 var state = module.State;
-                var session = state.Session ?? throw new InvalidOperationException("当前没有可导出的赛事结果。");
+                var session = state.Session ?? throw new InvalidOperationException(AppLocalization.Literal("当前没有可导出的赛事结果。"));
                 var participant = session.Participants.FirstOrDefault(item => item.Id == state.LocalParticipantId) ??
-                                  throw new InvalidOperationException("没有找到你的车手成绩。");
+                                  throw new InvalidOperationException(AppLocalization.Literal("没有找到你的车手成绩。"));
                 var report = BuildEstateRacePersonalResultReport(session, participant);
-                var phaseName = session.Phase == RaceSessionPhase.Grid ? "排位赛" : "正赛";
+                var phaseName = AppLocalization.Literal(session.Phase == RaceSessionPhase.Grid ? "排位赛" : "正赛");
                 var path = PngReportExporter.Export(
                     this, report,
-                    $"LazyForza-{phaseName}成绩-{participant.DisplayName}-{DateTime.Now:yyyyMMdd-HHmm}.png");
+                    AppLocalization.Format(
+                        "png.estateRace.fileName",
+                        "LazyForza-{0}成绩-{1}-{2:yyyyMMdd-HHmm}.png",
+                        phaseName,
+                        participant.DisplayName,
+                        DateTime.Now));
                 if (path is not null)
-                    MessageBox.Show(this, $"已导出：\n{path}", "导出完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show(this, AppLocalization.Format("common.exportedPath", "已导出：\n{0}", path), AppLocalization.Literal("导出完成"), MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception exception)
             {
-                MessageBox.Show(this, exception.Message, "无法导出成绩", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法导出成绩"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         };
 
@@ -271,7 +276,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, exception.Message, "无法更新练习测试", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法更新练习测试"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             };
             Grid.SetColumn(action, 1);
@@ -364,13 +369,13 @@ internal sealed partial class MainWindow
             statusText.Text = AppLocalization.Literal(state.ConnectionText);
             statusText.Foreground = Brush(ConnectionBrush(state.ConnectionState));
             statusTitle.Text = roomAttached
-                ? state.Session?.SessionName ?? AppLocalization.Literal("已进入房间")
+                ? AppLocalization.Literal(state.Session?.SessionName ?? "已进入房间")
                 : AppLocalization.Literal("尚未进入房间");
             enterRoom.Content = AppLocalization.Literal(roomAttached ? "退出房间" : "进入房间");
             connectedProfile.Text = roomAttached && module.ActiveProfile is { } profile
                 ? profile.IsObserver
-                    ? $"{profile.DisplayName} · OB 转播 · {profile.ServerAddress}"
-                    : $"{profile.DisplayName} · {profile.TeamName ?? "个人参赛"} · {profile.ServerAddress}"
+                    ? AppLocalization.Format("estate.race.connectedObserver", "{0} · OB 转播 · {1}", profile.DisplayName, profile.ServerAddress)
+                    : AppLocalization.Format("estate.race.connectedDriver", "{0} · {1} · {2}", profile.DisplayName, profile.TeamName ?? AppLocalization.Literal("个人参赛"), profile.ServerAddress)
                 : AppLocalization.Literal("进入房间时会读取服务端指定的赛道，并自动启用本机相同的地产环道。");
             connectedContent.Visibility = roomAttached ? Visibility.Visible : Visibility.Collapsed;
             hostingGuide.Visibility = roomAttached ? Visibility.Collapsed : Visibility.Visible;
@@ -378,16 +383,14 @@ internal sealed partial class MainWindow
             phaseValue.Text = session is null
                 ? "—"
                 : session.Phase == RaceSessionPhase.Practice && session.PracticeSessionCount > 1
-                    ? $"练习赛 FP{session.PracticeSessionNumber}/{session.PracticeSessionCount}" +
-                      (session.PracticeTimeExpired ? " · 已结束" : string.Empty)
+                    ? AppLocalization.Format("estate.race.practicePhase", "练习赛 FP{0}/{1}{2}", session.PracticeSessionNumber, session.PracticeSessionCount, session.PracticeTimeExpired ? AppLocalization.Literal(" · 已结束") : string.Empty)
                 : session.Phase == RaceSessionPhase.Qualifying && session.QualifyingSessionCount > 1
-                    ? $"排位赛 Q{session.QualifyingSessionNumber}/{session.QualifyingSessionCount}" +
-                      (session.QualifyingTimeExpired ? " · 已结束" : string.Empty)
+                    ? AppLocalization.Format("estate.race.qualifyingPhase", "排位赛 Q{0}/{1}{2}", session.QualifyingSessionNumber, session.QualifyingSessionCount, session.QualifyingTimeExpired ? AppLocalization.Literal(" · 已结束") : string.Empty)
                     : RacePhaseLabel(session.Phase);
             flagValue.Text = session is null
                 ? "—"
                 : session.ChequeredImminent && session.Flag == RaceControlFlag.Green
-                    ? "方格旗准备"
+                    ? AppLocalization.Literal("方格旗准备")
                     : RaceFlagLabel(session.Flag);
             flagValue.Foreground = Brush(session?.ChequeredImminent == true && session.Flag == RaceControlFlag.Green
                 ? "TextBrush"
@@ -529,19 +532,19 @@ internal sealed partial class MainWindow
         {
             throw new InvalidOperationException(
                 replaceExisting
-                    ? "本机赛道与服务端的 SHA-256 不一致，而且房主没有在服务端托管赛道文件。请从房主处重新获取正确的 .lfzestate 文件。"
-                    : $"本机没有服务端指定的地产环道“{descriptor.ActiveTrackName ?? descriptor.ActiveTrackId}”，而且房主没有在服务端托管赛道文件。请先手动导入房主提供的 .lfzestate 文件。");
+                    ? AppLocalization.Literal("本机赛道与服务端的 SHA-256 不一致，而且房主没有在服务端托管赛道文件。请从房主处重新获取正确的 .lfzestate 文件。")
+                    : AppLocalization.Format("estate.race.missingHostedTrack", "本机没有服务端指定的地产环道“{0}”，而且房主没有在服务端托管赛道文件。请先手动导入房主提供的 .lfzestate 文件。", descriptor.ActiveTrackName ?? descriptor.ActiveTrackId));
         }
 
         var sizeText = descriptor.TrackPackageSizeBytes is > 0
-            ? $"（{descriptor.TrackPackageSizeBytes.Value / 1024d:0.#} KiB）"
+            ? AppLocalization.Format("estate.race.packageSize", "（{0:0.#} KiB）", descriptor.TrackPackageSizeBytes.Value / 1024d)
             : string.Empty;
         var message = replaceExisting
-            ? $"本机的“{descriptor.ActiveTrackName ?? descriptor.ActiveTrackId}”与本场赛道摘要不同。\n\n是否从服务端下载并替换？{sizeText}\n\n替换会删除这条本地赛道及其已有圈速记录，其他赛道和用户数据不受影响。"
-            : $"本机没有“{descriptor.ActiveTrackName ?? descriptor.ActiveTrackId}”。\n\n是否从赛事服务端下载并导入？{sizeText}\n下载完成并校验 SHA-256 后才会进入房间。";
-        if (MessageBox.Show(this, message, "下载赛事赛道", MessageBoxButton.YesNo,
+            ? AppLocalization.Format("estate.race.replaceHostedTrack", "本机的“{0}”与本场赛道摘要不同。\n\n是否从服务端下载并替换？{1}\n\n替换会删除这条本地赛道及其已有圈速记录，其他赛道和用户数据不受影响。", descriptor.ActiveTrackName ?? descriptor.ActiveTrackId, sizeText)
+            : AppLocalization.Format("estate.race.downloadHostedTrack", "本机没有“{0}”。\n\n是否从赛事服务端下载并导入？{1}\n下载完成并校验 SHA-256 后才会进入房间。", descriptor.ActiveTrackName ?? descriptor.ActiveTrackId, sizeText);
+        if (MessageBox.Show(this, message, AppLocalization.Literal("下载赛事赛道"), MessageBoxButton.YesNo,
                 replaceExisting ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes)
-            throw new InvalidOperationException("你已取消下载赛事赛道，未进入房间。");
+            throw new InvalidOperationException(AppLocalization.Literal("你已取消下载赛事赛道，未进入房间。"));
 
         const long maximumHostedPackageBytes = 1_572_864;
         var temporaryPath = Path.Combine(Path.GetTempPath(), $"LazyForza-{Guid.NewGuid():N}.lfzestate");
@@ -553,7 +556,7 @@ internal sealed partial class MainWindow
                 downloadUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength is > maximumHostedPackageBytes)
-                throw new InvalidDataException("服务端返回的赛道文件超过 1.5 MiB 托管上限。");
+                throw new InvalidDataException(AppLocalization.Literal("服务端返回的赛道文件超过 1.5 MiB 托管上限。"));
             await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
             await using (var output = new FileStream(
                              temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
@@ -567,7 +570,7 @@ internal sealed partial class MainWindow
                     if (read == 0) break;
                     total += read;
                     if (total > maximumHostedPackageBytes)
-                        throw new InvalidDataException("服务端返回的赛道文件超过 1.5 MiB 托管上限。");
+                        throw new InvalidDataException(AppLocalization.Literal("服务端返回的赛道文件超过 1.5 MiB 托管上限。"));
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 }
             }
@@ -577,20 +580,20 @@ internal sealed partial class MainWindow
                 await using var file = File.OpenRead(temporaryPath);
                 var fileHash = Convert.ToHexString(await SHA256.HashDataAsync(file, cancellationToken));
                 if (!string.Equals(fileHash, descriptor.TrackPackageFileSha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("下载文件的 SHA-256 与服务端描述不一致。");
+                    throw new InvalidDataException(AppLocalization.Literal("下载文件的 SHA-256 与服务端描述不一致。"));
             }
             var preview = packageService.Preview(temporaryPath, cancellationToken);
             if (!Guid.TryParse(descriptor.ActiveTrackId, out var expectedTrackId) ||
                 preview.Manifest.TrackId != expectedTrackId ||
                 !PackageMatchesHash(preview.Manifest, descriptor.ActiveTrackPackageHash))
-                throw new InvalidDataException("下载文件中的赛道标识或数据摘要与房间配置不一致。");
+                throw new InvalidDataException(AppLocalization.Literal("下载文件中的赛道标识或数据摘要与房间配置不一致。"));
 
             if (replaceExisting && estate.ActiveDefinition?.TrackId == expectedTrackId)
                 estate.StopTiming();
             var imported = packageService.Import(
                 temporaryPath, CurrentTrackSource, replaceExisting, cancellationToken);
             if (!imported.Imported && !imported.AlreadyExists)
-                throw new InvalidOperationException("赛事赛道未能导入本机数据库。");
+                throw new InvalidOperationException(AppLocalization.Literal("赛事赛道未能导入本机数据库。"));
         }
         finally
         {
@@ -612,7 +615,7 @@ internal sealed partial class MainWindow
         var normalized = serverAddress.Trim();
         if (!normalized.Contains("://", StringComparison.Ordinal)) normalized = "http://" + normalized;
         if (!Uri.TryCreate(normalized, UriKind.Absolute, out var server))
-            throw new InvalidOperationException("服务端地址无效。");
+            throw new InvalidOperationException(AppLocalization.Literal("服务端地址无效。"));
         var builder = new UriBuilder(server)
         {
             Scheme = server.Scheme switch { "ws" => "http", "wss" => "https", _ => server.Scheme },
@@ -689,7 +692,7 @@ internal sealed partial class MainWindow
         try { Process.Start(new ProcessStartInfo(address) { UseShellExecute = true }); }
         catch (Exception exception)
         {
-            MessageBox.Show(exception.Message, "无法打开链接", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法打开链接"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -736,14 +739,14 @@ internal sealed partial class MainWindow
         grid.Children.Add(position);
         var identity = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         identity.Children.Add(Label(
-            participant.DisplayName + (participant.Id == localParticipantId ? "  ·  我" : string.Empty),
+            participant.DisplayName + (participant.Id == localParticipantId ? AppLocalization.Literal("  ·  我") : string.Empty),
             14, FontWeights.SemiBold));
         if (allowTeams && !string.IsNullOrWhiteSpace(participant.TeamName))
             identity.Children.Add(Label(participant.TeamName, 11, FontWeights.Normal, "MutedBrush"));
         Grid.SetColumn(identity, 1);
         grid.Children.Add(identity);
         var statusText = qualifyingPhase && participant.QualifyingEliminatedInSession is int eliminatedIn
-            ? $"Q{eliminatedIn} 淘汰"
+            ? AppLocalization.Format("estate.race.eliminated", "Q{0} 淘汰", eliminatedIn)
             : RaceParticipantStatusLabel(participant);
         var status = Label(statusText, 12, FontWeights.SemiBold,
             participant.IsInPitLane ? "WarningBrush" : "MutedBrush");
@@ -753,8 +756,8 @@ internal sealed partial class MainWindow
         var racePhase = session.RaceElapsedSeconds is not null;
         var total = Label(
             racePhase
-                ? $"总时 {RaceTotalTime(participant.AdjustedRaceTotalSeconds)}" +
-                  (participant.TimePenaltySeconds > 0 ? $"  待执行 +{participant.TimePenaltySeconds:0.#}s" : string.Empty)
+                ? AppLocalization.Format("estate.race.totalTime", "总时 {0}", RaceTotalTime(participant.AdjustedRaceTotalSeconds)) +
+                  (participant.TimePenaltySeconds > 0 ? AppLocalization.Format("estate.race.pendingPenalty", "  待执行 +{0:0.#}s", participant.TimePenaltySeconds) : string.Empty)
                 : string.Empty,
             12,
             FontWeights.Normal,
@@ -867,27 +870,27 @@ internal sealed partial class MainWindow
 
     private static string RaceParticipantStatusLabel(EstateRaceParticipant participant)
     {
-        if (!participant.IsConnected) return "已掉线";
+        if (!participant.IsConnected) return AppLocalization.Literal("已掉线");
         if (participant.IsInServiceZone)
         {
             if (participant.IsServingTimePenalty)
-                return $"执行罚时 {participant.PenaltyServiceElapsedSeconds:0.0}/{participant.PenaltyServiceRequiredSeconds:0.#} 秒";
+                return AppLocalization.Format("estate.race.servingPenalty", "执行罚时 {0:0.0}/{1:0.#} 秒", participant.PenaltyServiceElapsedSeconds, participant.PenaltyServiceRequiredSeconds);
             if (participant.PenaltyServiceCompleted)
-                return "罚时已完成，可以开始换胎";
+                return AppLocalization.Literal("罚时已完成，可以开始换胎");
             return participant.PitServiceRequirementMet
-                ? $"维修停留完成 · {participant.CompletedPitServices} 次"
+                ? AppLocalization.Format("estate.race.pitServiceComplete", "维修停留完成 · {0} 次", participant.CompletedPitServices)
                 : participant.PitServiceElapsedSeconds > 0
-                    ? $"维修停留 {participant.PitServiceElapsedSeconds:0.0} 秒"
-                    : "正在维修区服务";
+                    ? AppLocalization.Format("estate.race.pitServiceElapsed", "维修停留 {0:0.0} 秒", participant.PitServiceElapsedSeconds)
+                    : AppLocalization.Literal("正在维修区服务");
         }
-        if (participant.IsInPitLane) return "维修区通道";
-        return participant.Status switch
+        if (participant.IsInPitLane) return AppLocalization.Literal("维修区通道");
+        return AppLocalization.Literal(participant.Status switch
         {
             RaceParticipantStatus.Ready => "已准备",
             RaceParticipantStatus.Finished => "已完赛",
             RaceParticipantStatus.DidNotFinish => "退赛",
             RaceParticipantStatus.Disqualified => "取消资格",
             _ => "赛道上"
-        };
+        });
     }
 }

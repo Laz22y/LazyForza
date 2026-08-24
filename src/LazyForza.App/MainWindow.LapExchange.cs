@@ -96,7 +96,7 @@ internal sealed partial class MainWindow
             DefaultExt = ".lfzlap",
             AddExtension = true,
             FileName =
-                $"LazyForza-圈速-{SafeFileName(saved.Track.Name)}-" +
+                $"LazyForza-{AppLocalization.Text("lap.exchange.fileStem", "圈速")}-{SafeFileName(saved.Track.Name)}-" +
                 $"{DateTime.Now:yyyyMMdd-HHmm}.lfzlap"
         };
         if (dialog.ShowDialog(this) != true) return;
@@ -237,7 +237,7 @@ internal sealed partial class MainWindow
         {
             MessageBox.Show(
                 this,
-                exception.Message,
+                AppLocalization.Literal(exception.Message),
                 AppLocalization.Text("lap.exchange.importFailed", "无法导入圈速"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);

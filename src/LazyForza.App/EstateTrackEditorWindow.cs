@@ -37,7 +37,7 @@ internal sealed class EstateTrackEditorWindow : Window
         this.sectors = sectors;
         this.definition = definition;
         trackId = track.Id;
-        Title = $"编辑地产环道 · {track.Name}";
+        Title = AppLocalization.Format("estate.editor.windowTitle", "编辑地产环道 · {0}", track.Name);
         Width = 1040;
         Height = 720;
         MinWidth = 900;
@@ -48,6 +48,7 @@ internal sealed class EstateTrackEditorWindow : Window
         FontFamily = new FontFamily("Microsoft YaHei UI");
         Content = BuildContent();
         RefreshData();
+        AppLocalization.ApplyTo(this);
     }
 
     private UIElement BuildContent()
@@ -137,7 +138,11 @@ internal sealed class EstateTrackEditorWindow : Window
         componentList.Children.Add(Text("可单独重设", 17, FontWeights.SemiBold));
         componentList.Children.Add(Component(
             "起终点线",
-            $"宽 {GateWidth(definition.StartFinishGate):0.0} m · RMS {definition.StartFinishGate.FitRmsMeters:0.00} m",
+            AppLocalization.Format(
+                "estate.editor.startFinishSummary",
+                "宽 {0:0.0} m · RMS {1:0.00} m",
+                GateWidth(definition.StartFinishGate),
+                definition.StartFinishGate.FitRmsMeters),
             "重设",
             () => OpenStartFinish()));
         if (definition.Pit is null)
@@ -151,16 +156,23 @@ internal sealed class EstateTrackEditorWindow : Window
         }
 
         var pit = definition.Pit;
-        componentList.Children.Add(Component("维修区通道", $"{pit.CenterLine.Count} 个点 · 半宽 {pit.LaneHalfWidthMeters:0.0} m", "重录",
+        componentList.Children.Add(Component("维修区通道", AppLocalization.Format(
+                "estate.editor.laneSummary", "{0} 个点 · 半宽 {1:0.0} m", pit.CenterLine.Count, pit.LaneHalfWidthMeters), "重录",
             () => OpenPit(EstatePitEditScope.Lane)));
         componentList.Children.Add(Component("维修区入口线", "保留通道、出口线和换胎区", "重设",
             () => OpenPit(EstatePitEditScope.EntryGate)));
         componentList.Children.Add(Component("维修区出口线", "保留通道、入口线和换胎区", "重设",
             () => OpenPit(EstatePitEditScope.ExitGate)));
         componentList.Children.Add(Component("换胎区", pit.ServiceZoneBoundary is { Count: > 0 } boundary
-                ? $"{boundary.Count} 个边界点" : $"旧版圆形区域 · 半径 {pit.ServiceRadiusMeters:0.0} m", "重录",
+                ? AppLocalization.Format("estate.editor.serviceBoundary", "{0} 个边界点", boundary.Count)
+                : AppLocalization.Format(
+                    "estate.editor.legacyServiceZone", "旧版圆形区域 · 半径 {0:0.0} m", pit.ServiceRadiusMeters), "重录",
             () => OpenPit(EstatePitEditScope.ServiceZone)));
-        componentList.Children.Add(Component("维修区规则", $"限速 {pit.SpeedLimitKph:0} km/h · 最短停留 {pit.MinimumServiceSeconds:0.#} s", "修改",
+        componentList.Children.Add(Component("维修区规则", AppLocalization.Format(
+                "estate.editor.rulesSummary",
+                "限速 {0:0} km/h · 最短停留 {1:0.#} s",
+                pit.SpeedLimitKph,
+                pit.MinimumServiceSeconds), "修改",
             () => OpenPit(EstatePitEditScope.Settings)));
     }
 
@@ -202,11 +214,19 @@ internal sealed class EstateTrackEditorWindow : Window
             {
                 removedLapCount = store.CountLaps(trackId);
                 var message = removedLapCount > 0
-                    ? $"修订号将从“{definition.MapRevision}”改为“{nextRevision}”。\n\n" +
-                      $"这会删除当前赛道旧修订下的 {removedLapCount} 圈本地成绩，其他赛道不受影响。确认继续吗？"
-                    : $"修订号将从“{definition.MapRevision}”改为“{nextRevision}”。\n\n" +
-                      "修订号应对应 FH6 地图的实际版本。确认继续吗？";
-                if (MessageBox.Show(this, message, "更新地图修订", MessageBoxButton.YesNo, MessageBoxImage.Warning) !=
+                    ? AppLocalization.Format(
+                        "estate.editor.revisionWithLaps",
+                        "修订号将从“{0}”改为“{1}”。\n\n这会删除当前赛道旧修订下的 {2} 圈本地成绩，其他赛道不受影响。确认继续吗？",
+                        definition.MapRevision,
+                        nextRevision,
+                        removedLapCount)
+                    : AppLocalization.Format(
+                        "estate.editor.revisionWithoutLaps",
+                        "修订号将从“{0}”改为“{1}”。\n\n修订号应对应 FH6 地图的实际版本。确认继续吗？",
+                        definition.MapRevision,
+                        nextRevision);
+                if (MessageBox.Show(this, message, AppLocalization.Literal("更新地图修订"),
+                        MessageBoxButton.YesNo, MessageBoxImage.Warning) !=
                     MessageBoxResult.Yes)
                     return;
             }
@@ -224,14 +244,18 @@ internal sealed class EstateTrackEditorWindow : Window
             store.SaveTrack(nextTrack, sectors, nextDefinition, clearExistingLaps: revisionChanged);
             metadataStatus.Text = revisionChanged
                 ? removedLapCount > 0
-                    ? $"地图修订已更新，已清除 {removedLapCount} 圈旧成绩。"
-                    : "地图修订已更新。"
-                : "地图信息已保存。";
+                    ? AppLocalization.Format(
+                        "estate.editor.revisionSavedWithLaps",
+                        "地图修订已更新，已清除 {0} 圈旧成绩。",
+                        removedLapCount)
+                    : AppLocalization.Literal("地图修订已更新。")
+                : AppLocalization.Literal("地图信息已保存。");
             RefreshData();
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, exception.Message, "无法保存地图信息", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                AppLocalization.Literal("无法保存地图信息"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -244,7 +268,8 @@ internal sealed class EstateTrackEditorWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, exception.Message, "无法重设起终点线", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                AppLocalization.Literal("无法重设起终点线"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -257,7 +282,8 @@ internal sealed class EstateTrackEditorWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, exception.Message, "无法编辑维修区", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                AppLocalization.Literal("无法编辑维修区"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -273,14 +299,27 @@ internal sealed class EstateTrackEditorWindow : Window
         revision.Text = definition.MapRevision;
         preview.Update(track, definition);
         var id = track.Id.ToString("N");
-        summary.Text = $"赛道 ID {id[..8]}…{id[^5..]} · 修订 {definition.MapRevision} · {track.LengthMeters / 1000:0.00} km · {sectors.Count} 个分段 · {definition.Checkpoints.Count} 个检查点";
+        summary.Text = AppLocalization.Format(
+            "estate.editor.summary",
+            "赛道 ID {0}…{1} · 修订 {2} · {3:0.00} km · {4} 个分段 · {5} 个检查点",
+            id[..8],
+            id[^5..],
+            definition.MapRevision,
+            track.LengthMeters / 1000,
+            sectors.Count,
+            definition.Checkpoints.Count);
         BuildComponents();
     }
 
     private static string? NullIfWhiteSpace(string value, int maximum, string name)
     {
         var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        if (normalized?.Length > maximum) throw new InvalidOperationException($"{name}不能超过 {maximum} 个字符。");
+        if (normalized?.Length > maximum)
+            throw new InvalidOperationException(AppLocalization.Format(
+                "common.maximumCharacters",
+                "{0}不能超过 {1} 个字符。",
+                AppLocalization.Literal(name),
+                maximum));
         return normalized;
     }
 
@@ -324,12 +363,12 @@ internal sealed class EstateTrackEditorWindow : Window
 
     private static Button ActionButton(string content) => new()
     {
-        Content = content, MinHeight = 38, Padding = new Thickness(14, 7, 14, 7), FontWeight = FontWeights.SemiBold
+        Content = AppLocalization.Literal(content), MinHeight = 38, Padding = new Thickness(14, 7, 14, 7), FontWeight = FontWeights.SemiBold
     };
 
     private static TextBlock Text(string value, double size, FontWeight weight, string brush = "TextBrush") => new()
     {
-        Text = value, FontSize = size, FontWeight = weight, Foreground = Brush(brush), TextWrapping = TextWrapping.Wrap
+        Text = AppLocalization.Literal(value), FontSize = size, FontWeight = weight, Foreground = Brush(brush), TextWrapping = TextWrapping.Wrap
     };
 
     private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];

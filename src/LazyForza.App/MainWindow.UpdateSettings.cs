@@ -117,7 +117,7 @@ internal sealed partial class MainWindow
             }
             catch (OperationCanceledException)
             {
-                updateStatus.Text = "已取消检查。";
+                updateStatus.Text = AppLocalization.Literal("已取消检查。");
             }
             catch (Exception exception)
             {
@@ -125,7 +125,7 @@ internal sealed partial class MainWindow
                 updateStatus.Text = AppLocalization.Format(
                     "settings.update.failed",
                     "检查失败：{0}",
-                    exception.Message);
+                    AppLocalization.Literal(exception.Message));
             }
             finally
             {

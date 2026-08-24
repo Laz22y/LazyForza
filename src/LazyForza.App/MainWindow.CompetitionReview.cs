@@ -58,13 +58,21 @@ internal sealed partial class MainWindow
                 var path = PngReportExporter.Export(
                     this,
                     report,
-                    $"LazyForza-赛后复盘-{trackName}-{DateTime.Now:yyyyMMdd-HHmm}.png");
+                    $"LazyForza-{AppLocalization.Text("png.competitionReview.fileStem", "赛后复盘")}-{trackName}-{DateTime.Now:yyyyMMdd-HHmm}.png");
                 if (path is not null)
-                    MessageBox.Show($"已导出：\n{path}", "导出完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show(
+                        AppLocalization.Format("common.exportedPath", "已导出：\n{0}", path),
+                        AppLocalization.Text("common.exportComplete", "导出完成"),
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
             }
             catch (Exception exception)
             {
-                MessageBox.Show($"无法导出 PNG：{exception.Message}", "导出失败", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(
+                    AppLocalization.Format("png.export.failedMessage", "无法导出 PNG：{0}", exception.Message),
+                    AppLocalization.Text("common.exportFailed", "导出失败"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
             }
         };
         Grid.SetColumn(export, 1);
@@ -87,12 +95,18 @@ internal sealed partial class MainWindow
     {
         var review = RaceReviewAnalyzer.Analyze(laps);
         var stack = new StackPanel();
-        stack.Children.Add(Label("LazyForza · 赛后复盘与稳定性", 28, FontWeights.Bold));
+        stack.Children.Add(Label(AppLocalization.Literal("LazyForza · 赛后复盘与稳定性"), 28, FontWeights.Bold));
         var classText = performanceClass is int classCode
             ? $"{PerformanceClassName(classCode)} {performanceIndex?.ToString() ?? "—"}"
-            : "性能等级未知";
+            : AppLocalization.Literal("性能等级未知");
         var subtitle = Label(
-            $"{trackName} · {classText} · {(isCompleted ? "比赛已结束" : "比赛进行中")} · 导出于 {DateTime.Now:yyyy-MM-dd HH:mm}",
+            AppLocalization.Format(
+                "png.competitionReview.subtitle",
+                "{0} · {1} · {2} · 导出于 {3:yyyy-MM-dd HH:mm}",
+                trackName,
+                classText,
+                AppLocalization.Literal(isCompleted ? "比赛已结束" : "比赛进行中"),
+                DateTime.Now),
             13,
             FontWeights.Normal,
             "MutedBrush");
@@ -137,25 +151,25 @@ internal sealed partial class MainWindow
             Margin = new Thickness(0, compact ? 14 : 0, 0, compact ? 12 : 0)
         };
         grid.Children.Add(ReviewMetric(
-            "有效圈",
+            AppLocalization.Literal("有效圈"),
             $"{review.ValidLaps} / {review.TotalLaps}",
-            review.ValidLaps < 3 ? "样本较少" : "用于统计"));
+            AppLocalization.Literal(review.ValidLaps < 3 ? "样本较少" : "用于统计")));
         grid.Children.Add(ReviewMetric(
-            "本场最快",
+            AppLocalization.Literal("本场最快"),
             AnalysisTime(review.BestLapSeconds, approximateTiming),
-            "有效圈"));
+            AppLocalization.Literal("有效圈")));
         grid.Children.Add(ReviewMetric(
-            "稳定性",
+            AppLocalization.Literal("稳定性"),
             review.ConsistencyPercent is double consistency ? $"{consistency:0}%" : "—",
             review.StandardDeviationSeconds is double deviation
-                ? $"标准差 {deviation:0.000} 秒"
-                : "等待有效圈"));
+                ? AppLocalization.Format("png.review.standardDeviation", "标准差 {0:0.000} 秒", deviation)
+                : AppLocalization.Literal("等待有效圈")));
         grid.Children.Add(ReviewMetric(
-            "组合最佳",
+            AppLocalization.Literal("组合最佳"),
             AnalysisTime(review.TheoreticalBestSeconds, approximateTiming),
             review.TheoreticalGainSeconds is double gain
-                ? $"相对最快 -{gain:0.000} 秒"
-                : "等待完整分段"));
+                ? AppLocalization.Format("png.review.gain", "相对最快 -{0:0.000} 秒", gain)
+                : AppLocalization.Literal("等待完整分段")));
         return grid;
     }
 
@@ -189,7 +203,7 @@ internal sealed partial class MainWindow
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             var marker = Label("•", 13, FontWeights.Bold, "AccentBrush");
             row.Children.Add(marker);
-            var text = Label(finding, 12);
+            var text = Label(AppLocalization.Literal(finding), 12);
             text.TextWrapping = TextWrapping.Wrap;
             Grid.SetColumn(text, 1);
             row.Children.Add(text);
@@ -213,15 +227,16 @@ internal sealed partial class MainWindow
         var grid = new Grid { Margin = new Thickness(0, 8, 0, 0) };
         foreach (var width in new[] { 0.7, 1.2, 1.2, 1.2, 1.2 })
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width, GridUnitType.Star) });
-        AddRow(["分段", "最快", "中位数", "标准差", "可组合空间"], true);
+        AddRow(new[] { "分段", "最快", "中位数", "标准差", "可组合空间" }
+            .Select(AppLocalization.Literal).ToArray(), true);
         foreach (var sector in sectors)
         {
             AddRow([
                 $"S{sector.Index + 1}",
                 AnalysisTime(sector.BestSeconds, approximateTiming),
                 AnalysisTime(sector.MedianSeconds, approximateTiming),
-                $"{sector.StandardDeviationSeconds:0.000} 秒",
-                $"{sector.OpportunitySeconds:0.000} 秒"
+                AppLocalization.Format("common.seconds3", "{0:0.000} 秒", sector.StandardDeviationSeconds),
+                AppLocalization.Format("common.seconds3", "{0:0.000} 秒", sector.OpportunitySeconds)
             ], false);
         }
         return grid;
@@ -253,7 +268,8 @@ internal sealed partial class MainWindow
         var grid = new Grid();
         foreach (var width in new[] { 0.6, 1.2, 1.2, 3.0 })
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width, GridUnitType.Star) });
-        AddRow(["排名", "圈速", "时间", "分段"], true);
+        AddRow(new[] { "排名", "圈速", "时间", "分段" }
+            .Select(AppLocalization.Literal).ToArray(), true);
         for (var index = 0; index < valid.Length; index++)
         {
             var lap = valid[index];

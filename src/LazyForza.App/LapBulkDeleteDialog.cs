@@ -35,7 +35,12 @@ internal sealed class LapBulkDeleteDialog : Window
 
         var root = new StackPanel { Margin = new Thickness(24) };
         root.Children.Add(Text("删除赛道记录", 21, FontWeights.SemiBold));
-        root.Children.Add(Text($"{trackName} · {laps.Count}/50 圈", 12, FontWeights.Normal, Color.FromRgb(155, 170, 188), new Thickness(0, 4, 0, 18)));
+        root.Children.Add(Text(
+            AppLocalization.Format("lap.delete.summary", "{0} · {1}/50 圈", trackName, laps.Count),
+            12,
+            FontWeights.Normal,
+            Color.FromRgb(155, 170, 188),
+            new Thickness(0, 4, 0, 18)));
 
         selectedClassesOnly = new CheckBox
         {
@@ -51,7 +56,11 @@ internal sealed class LapBulkDeleteDialog : Window
         root.Children.Add(Text(
             this.selectedPerformanceClasses.Count == 0
                 ? "当前没有筛选性能等级。"
-                : $"已筛选：{string.Join("、", this.selectedPerformanceClasses.Order().Select(PerformanceClassName))}；不勾选则删除全部等级。",
+                : AppLocalization.Format(
+                    "lap.delete.filtered",
+                    "已筛选：{0}；不勾选则删除全部等级。",
+                    string.Join(AppLocalization.Text("common.listSeparator", "、"),
+                        this.selectedPerformanceClasses.Order().Select(PerformanceClassName))),
             11, FontWeights.Normal, Color.FromRgb(132, 150, 170), new Thickness(24, 0, 0, 14)));
 
         deleteHistoricalBests = new CheckBox
@@ -108,6 +117,7 @@ internal sealed class LapBulkDeleteDialog : Window
             Child = root
         };
         UpdatePreview();
+        AppLocalization.ApplyTo(this);
     }
 
     public bool SelectedClassesOnly => selectedClassesOnly.IsChecked == true;
@@ -131,11 +141,17 @@ internal sealed class LapBulkDeleteDialog : Window
                 .ToArray();
         var deleteCount = candidates.Length - preserved.Length;
         var scope = SelectedClassesOnly
-            ? string.Join("、", selectedPerformanceClasses.Order().Select(PerformanceClassName))
-            : "全部性能等级";
+            ? string.Join(AppLocalization.Text("common.listSeparator", "、"),
+                selectedPerformanceClasses.Order().Select(PerformanceClassName))
+            : AppLocalization.Literal("全部性能等级");
         preview.Text = candidates.Length == 0
-            ? $"范围：{scope} · 没有圈速记录"
-            : $"范围：{scope} · 删除 {deleteCount} 圈 · 保留 {preserved.Length} 条最快圈";
+            ? AppLocalization.Format("lap.delete.none", "范围：{0} · 没有圈速记录", scope)
+            : AppLocalization.Format(
+                "lap.delete.preview",
+                "范围：{0} · 删除 {1} 圈 · 保留 {2} 条最快圈",
+                scope,
+                deleteCount,
+                preserved.Length);
         confirm.IsEnabled = deleteCount > 0;
     }
 
@@ -146,7 +162,7 @@ internal sealed class LapBulkDeleteDialog : Window
         Color? color = null,
         Thickness? margin = null) => new()
     {
-        Text = value,
+        Text = AppLocalization.Literal(value),
         FontSize = size <= 11 ? 13 : size,
         FontWeight = weight,
         Foreground = new SolidColorBrush(color ?? Colors.White),

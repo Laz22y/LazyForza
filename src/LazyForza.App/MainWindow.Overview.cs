@@ -96,7 +96,7 @@ internal sealed partial class MainWindow
                     "modules.status",
                     "状态：{0}",
                     ModuleStateText(module.Status.State)) +
-                (module.Status.LastError is null ? string.Empty : $" · {module.Status.LastError}"), 12,
+                (module.Status.LastError is null ? string.Empty : $" · {AppLocalization.Literal(module.Status.LastError)}"), 12,
                 FontWeights.Normal, module.Status.State == ModuleRuntimeState.Faulted ? "AccentBrush" : "MutedBrush"));
             if (module is DriftDashboardModule)
             {
@@ -131,8 +131,8 @@ internal sealed partial class MainWindow
                     catch (Exception exception)
                     {
                         MessageBox.Show(
-                            exception.Message,
-                            "漂移仪表盘设置失败",
+                            AppLocalization.Literal(exception.Message),
+                            AppLocalization.Literal("漂移仪表盘设置失败"),
                             MessageBoxButton.OK,
                             MessageBoxImage.Warning);
                     }
@@ -206,7 +206,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(exception.Message, "模块切换失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("模块切换失败"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
                 finally
                 {

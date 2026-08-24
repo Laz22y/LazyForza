@@ -85,6 +85,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
         Closing += OnClosing;
         Closed += (_, _) => refreshTimer.Stop();
         Refresh();
+        AppLocalization.ApplyTo(this);
     }
 
     private UIElement BuildContent(TrackTemplate track, EstateTrackDefinition definition)
@@ -200,7 +201,9 @@ internal sealed class EstatePitEnrollmentWindow : Window
             !double.TryParse(speedLimit.Text, out var limit) ||
             !double.TryParse(serviceSeconds.Text, out var seconds))
         {
-            MessageBox.Show(this, "请输入有效的通道半宽、限速和最短服务时间。", "参数无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this,
+                AppLocalization.Literal("请输入有效的通道半宽、限速和最短服务时间。"),
+                AppLocalization.Literal("参数无效"), MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         Run(() => module.BeginPitEnrollment(new EstatePitEnrollmentRequest(trackId, width, limit, seconds, editScope)), "无法开始维修区录入");
@@ -244,7 +247,8 @@ internal sealed class EstatePitEnrollmentWindow : Window
         try { action(); }
         catch (Exception exception)
         {
-            MessageBox.Show(this, exception.Message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                AppLocalization.Literal(title), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         Refresh();
     }
@@ -303,10 +307,12 @@ internal sealed class EstatePitEnrollmentWindow : Window
     private void ConfigureButtonLabels()
     {
         if (editScope == EstatePitEditScope.All) return;
-        prepare.Content = editScope == EstatePitEditScope.Settings ? "1  准备保存" : "1  准备录入";
-        lane.Content = "2  开始通道录入";
-        corner.Content = "2  记录当前角点";
-        save.Content = editScope == EstatePitEditScope.Settings ? "2  保存规则" : "3  保存";
+        prepare.Content = AppLocalization.Literal(
+            editScope == EstatePitEditScope.Settings ? "1  准备保存" : "1  准备录入");
+        lane.Content = AppLocalization.Literal("2  开始通道录入");
+        corner.Content = AppLocalization.Literal("2  记录当前角点");
+        save.Content = AppLocalization.Literal(
+            editScope == EstatePitEditScope.Settings ? "2  保存规则" : "3  保存");
     }
 
     private string CountSummary(EstatePitEnrollmentState state) => editScope switch
@@ -334,7 +340,9 @@ internal sealed class EstatePitEnrollmentWindow : Window
     private void OnClosing(object? sender, CancelEventArgs eventArgs)
     {
         if (acceptedClose || !module.PitState.IsActive) return;
-        if (MessageBox.Show(this, "当前维修区录入尚未保存。确认放弃吗？", "放弃维修区录入",
+        if (MessageBox.Show(this,
+                AppLocalization.Literal("当前维修区录入尚未保存。确认放弃吗？"),
+                AppLocalization.Literal("放弃维修区录入"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
         {
             eventArgs.Cancel = true;

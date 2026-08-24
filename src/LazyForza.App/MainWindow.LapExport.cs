@@ -32,13 +32,21 @@ internal sealed partial class MainWindow
             var path = PngReportExporter.Export(
                 this,
                 report,
-                $"LazyForza-圈速分析-{trackName}-{DateTime.Now:yyyyMMdd-HHmm}.png");
+                $"LazyForza-{AppLocalization.Text("png.lapAnalysis.fileStem", "圈速分析")}-{trackName}-{DateTime.Now:yyyyMMdd-HHmm}.png");
             if (path is not null)
-                MessageBox.Show($"已导出：\n{path}", "导出完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(
+                    AppLocalization.Format("common.exportedPath", "已导出：\n{0}", path),
+                    AppLocalization.Text("common.exportComplete", "导出完成"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
         }
         catch (Exception exception)
         {
-            MessageBox.Show($"无法导出 PNG：{exception.Message}", "导出失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(
+                AppLocalization.Format("png.export.failedMessage", "无法导出 PNG：{0}", exception.Message),
+                AppLocalization.Text("common.exportFailed", "导出失败"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
@@ -54,11 +62,16 @@ internal sealed partial class MainWindow
     {
         var stack = new StackPanel();
         stack.Children.Add(Label(
-            laps.Count == 1 ? "LazyForza · 单圈分析" : "LazyForza · 圈速对比",
+            AppLocalization.Literal(laps.Count == 1 ? "LazyForza · 单圈分析" : "LazyForza · 圈速对比"),
             28,
             FontWeights.Bold));
         var subtitle = Label(
-            $"{trackName} · {laps.Count} 圈 · 导出于 {DateTime.Now:yyyy-MM-dd HH:mm}",
+            AppLocalization.Format(
+                "png.lapAnalysis.subtitle",
+                "{0} · {1} 圈 · 导出于 {2:yyyy-MM-dd HH:mm}",
+                trackName,
+                laps.Count,
+                DateTime.Now),
             13,
             FontWeights.Normal,
             "MutedBrush");
@@ -82,8 +95,11 @@ internal sealed partial class MainWindow
 
         var mapTitle = Label(
             dynamicsLayer == DrivingDynamicsLayer.Default
-                ? "走线预览"
-                : $"走线预览 · {DrivingDynamicsAnalyzer.LayerName(dynamicsLayer)}",
+                ? AppLocalization.Literal("走线预览")
+                : AppLocalization.Format(
+                    "png.lapAnalysis.mapLayer",
+                    "走线预览 · {0}",
+                    AppLocalization.Literal(DrivingDynamicsAnalyzer.LayerName(dynamicsLayer))),
             17,
             FontWeights.SemiBold);
         mapTitle.Margin = new Thickness(0, 20, 0, 8);
@@ -119,7 +135,11 @@ internal sealed partial class MainWindow
             {
                 var item = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
                 item.Children.Add(Label(corner.Title, 12, FontWeights.SemiBold));
-                var detail = Label($"{corner.Details} · {corner.Hint}", 11, FontWeights.Normal, "MutedBrush");
+                var detail = Label(
+                    $"{AppLocalization.Literal(corner.Details)} · {AppLocalization.Literal(corner.Hint)}",
+                    11,
+                    FontWeights.Normal,
+                    "MutedBrush");
                 detail.TextWrapping = TextWrapping.Wrap;
                 item.Children.Add(detail);
                 cornerPanel.Children.Add(item);

@@ -83,7 +83,11 @@ internal sealed class EstateRaceJoinWindow : Window
             Background = ResourceBrush("InputBrush", Color.FromRgb(10, 14, 20)),
             Foreground = Foreground,
             BorderBrush = ResourceBrush("BorderBrush", Color.FromRgb(47, 58, 72)),
-            ItemsSource = new[] { "参赛车手", "OB（转播）" },
+            ItemsSource = new[]
+            {
+                AppLocalization.Literal("参赛车手"),
+                AppLocalization.Literal("OB（转播）")
+            },
             SelectedIndex = saved.IsObserver ? 1 : 0
         };
         teamSelector = new ComboBox
@@ -154,7 +158,11 @@ internal sealed class EstateRaceJoinWindow : Window
                 Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(item.Value)),
                 BorderBrush = Brushes.White,
                 BorderThickness = new Thickness(1),
-                ToolTip = $"{item.Name} · {item.Value}",
+                ToolTip = AppLocalization.Format(
+                    "estate.join.paletteColor",
+                    "{0} · {1}",
+                    AppLocalization.Literal(item.Name),
+                    item.Value),
                 Tag = item.Value
             };
             swatch.Click += (_, _) => SelectColor((string)swatch.Tag);
@@ -404,6 +412,7 @@ internal sealed class EstateRaceJoinWindow : Window
             colorPickerPopup.IsOpen = false;
             CancelDescriptorRefresh();
         };
+        AppLocalization.ApplyTo(this);
     }
 
     public EstateRaceConnectionProfile? Profile { get; private set; }
@@ -413,19 +422,19 @@ internal sealed class EstateRaceJoinWindow : Window
         error.Text = string.Empty;
         if (string.IsNullOrWhiteSpace(serverAddress.Text))
         {
-            error.Text = "请填写服务端域名或 IP。";
+            error.Text = AppLocalization.Literal("请填写服务端域名或 IP。");
             serverAddress.Focus();
             return;
         }
         if (displayName.Text.Trim().Length is < 2 or > 20)
         {
-            error.Text = "比赛显示名需要 2–20 个字符。";
+            error.Text = AppLocalization.Literal("比赛显示名需要 2–20 个字符。");
             displayName.Focus();
             return;
         }
         if (password.Password.Length > 128)
         {
-            error.Text = "赛事密码不能超过 128 个字符。";
+            error.Text = AppLocalization.Literal("赛事密码不能超过 128 个字符。");
             return;
         }
 
@@ -444,7 +453,7 @@ internal sealed class EstateRaceJoinWindow : Window
             var isObserver = IsObserverSelected;
             if (isObserver && descriptor?.SupportsObservers != true)
             {
-                error.Text = "该服务端版本不支持 OB 身份，请让房主更新服务端。";
+                error.Text = AppLocalization.Literal("该服务端版本不支持 OB 身份，请让房主更新服务端。");
                 roleSelector.Focus();
                 return;
             }
@@ -456,7 +465,7 @@ internal sealed class EstateRaceJoinWindow : Window
                 : null;
             if (!isObserver && descriptor?.AllowTeams == true && descriptor.Teams is { Count: > 0 } && selectedTeam is null)
             {
-                error.Text = "请选择本场参赛的车队。";
+                error.Text = AppLocalization.Literal("请选择本场参赛的车队。");
                 teamSelector.Focus();
                 return;
             }
@@ -486,13 +495,13 @@ internal sealed class EstateRaceJoinWindow : Window
         var address = serverAddress.Text.Trim();
         if (address.Length == 0)
         {
-            roomInfo.Text = "填写服务端地址后会自动读取房间设置。";
+            roomInfo.Text = AppLocalization.Literal("填写服务端地址后会自动读取房间设置。");
             return;
         }
 
-        roomInfo.Text = delay > TimeSpan.Zero
+        roomInfo.Text = AppLocalization.Literal(delay > TimeSpan.Zero
             ? "地址已更改，输入停止后将自动读取房间设置…"
-            : "正在读取房间设置…";
+            : "正在读取房间设置…");
         var refreshCancellation = new CancellationTokenSource();
         descriptorRefreshCancellation = refreshCancellation;
         _ = RefreshDescriptorAfterDelayAsync(address, delay, showError: false, refreshCancellation);
@@ -536,7 +545,7 @@ internal sealed class EstateRaceJoinWindow : Window
         if (address.Length == 0) return false;
         try
         {
-            roomInfo.Text = "正在读取房间设置…";
+            roomInfo.Text = AppLocalization.Literal("正在读取房间设置…");
             var previous = teamSelector.SelectedItem as EstateRaceTeam;
             var received = await descriptorReader(address, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
@@ -561,8 +570,17 @@ internal sealed class EstateRaceJoinWindow : Window
                 teamSelector.Text = previous?.Name ?? savedTeamName ?? string.Empty;
             }
             roomInfo.Text = descriptor.ActiveTrackId is null
-                ? $"{descriptor.ServerName} · 服务端尚未指定赛道 · {RoomModeText(descriptor)}"
-                : $"{descriptor.ServerName} · {descriptor.ActiveTrackName ?? descriptor.ActiveTrackId} · {RoomModeText(descriptor)}";
+                ? AppLocalization.Format(
+                    "estate.join.roomWithoutTrack",
+                    "{0} · 服务端尚未指定赛道 · {1}",
+                    descriptor.ServerName,
+                    RoomModeText(descriptor))
+                : AppLocalization.Format(
+                    "estate.join.roomWithTrack",
+                    "{0} · {1} · {2}",
+                    descriptor.ServerName,
+                    AppLocalization.Literal(descriptor.ActiveTrackName ?? descriptor.ActiveTrackId),
+                    RoomModeText(descriptor));
             return true;
         }
         catch (Exception exception)
@@ -571,8 +589,12 @@ internal sealed class EstateRaceJoinWindow : Window
             if (!string.Equals(address, serverAddress.Text.Trim(), StringComparison.Ordinal)) return false;
             descriptor = null;
             UpdateRoleFields();
-            roomInfo.Text = "暂时无法读取房间设置。";
-            if (showError) error.Text = $"无法读取房间设置：{exception.Message}";
+            roomInfo.Text = AppLocalization.Literal("暂时无法读取房间设置。");
+            if (showError)
+                error.Text = AppLocalization.Format(
+                    "estate.join.readFailed",
+                    "无法读取房间设置：{0}",
+                    AppLocalization.Literal(exception.Message));
             return false;
         }
     }
@@ -581,11 +603,15 @@ internal sealed class EstateRaceJoinWindow : Window
     {
         var raceMode = value.AllowTeams
             ? value.Teams is { Count: > 0 }
-                ? $"{value.Teams.Count} 支车队 · 每队最多 {value.DriversPerTeam} 人"
-                : "允许车队（旧版服务端自由填写）"
-            : "个人参赛";
+                ? AppLocalization.Format(
+                    "estate.join.teamMode",
+                    "{0} 支车队 · 每队最多 {1} 人",
+                    value.Teams.Count,
+                    value.DriversPerTeam)
+                : AppLocalization.Literal("允许车队（旧版服务端自由填写）")
+            : AppLocalization.Literal("个人参赛");
         return value.SupportsObservers
-            ? $"{raceMode} · 支持 OB 转播"
+            ? AppLocalization.Format("estate.join.observerMode", "{0} · 支持 OB 转播", raceMode)
             : raceMode;
     }
 
@@ -617,7 +643,7 @@ internal sealed class EstateRaceJoinWindow : Window
     {
         if (!TryColor(hexColor.Text, out _))
         {
-            error.Text = "代表色需要填写为 #RRGGBB，例如 #42D7E8。";
+            error.Text = AppLocalization.Literal("代表色需要填写为 #RRGGBB，例如 #42D7E8。");
             return false;
         }
         error.Text = string.Empty;
@@ -649,7 +675,8 @@ internal sealed class EstateRaceJoinWindow : Window
             new Point(1, 0.5));
         colorPreview.Background = new SolidColorBrush(color);
         customColorPreview.Background = new SolidColorBrush(color);
-        customColorButton.ToolTip = $"自定义代表色 · {selectedColor}";
+        customColorButton.ToolTip = AppLocalization.Format(
+            "estate.join.customColor", "自定义代表色 · {0}", selectedColor);
         hexColor.Text = selectedColor;
         var surfaceWidth = Math.Max(1, colorBase.ActualWidth);
         var surfaceHeight = Math.Max(1, colorBase.ActualHeight);
@@ -751,7 +778,7 @@ internal sealed class EstateRaceJoinWindow : Window
 
     private static TextBox Input(string value) => new()
     {
-        Text = value,
+        Text = AppLocalization.Literal(value),
         MinHeight = 42,
         Padding = new Thickness(11, 8, 11, 8),
         Background = ResourceBrush("InputBrush", Color.FromRgb(10, 14, 20)),

@@ -163,6 +163,7 @@ internal sealed partial class MainWindow : Window
     internal async Task CaptureEstateQaAsync(string directory)
     {
         Directory.CreateDirectory(directory);
+        var englishHanAudit = new SortedSet<string>(StringComparer.Ordinal);
         EnsureEstateQaTrack();
         WindowState = WindowState.Normal;
         Width = 1440;
@@ -172,6 +173,7 @@ internal sealed partial class MainWindow : Window
         if (content.Content is ScrollViewer trackPageScroll) trackPageScroll.ScrollToHome();
         await Task.Delay(250);
         CaptureVisual(this, Path.Combine(directory, "estate-tracks-1440x900.png"));
+        CollectHanText(this, "estate tracks", englishHanAudit);
 
         var lapModule = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
         lapModule.ResetTrackLearning();
@@ -191,6 +193,7 @@ internal sealed partial class MainWindow : Window
         enrollment.UpdateLayout();
         await Task.Delay(250);
         CaptureVisual(enrollment, Path.Combine(directory, "estate-enrollment-1060x780.png"));
+        CollectHanText(enrollment, "estate enrollment", englishHanAudit);
         enrollment.Close();
 
         var qaTrack = store.ListTracks()
@@ -202,6 +205,7 @@ internal sealed partial class MainWindow : Window
         editor.UpdateLayout();
         await Task.Delay(200);
         CaptureVisual(editor, Path.Combine(directory, "estate-editor-1040x720.png"));
+        CollectHanText(editor, "estate editor", englishHanAudit);
         editor.Close();
 
         var startFinish = new EstateStartFinishRevisionWindow(
@@ -210,6 +214,7 @@ internal sealed partial class MainWindow : Window
         startFinish.UpdateLayout();
         await Task.Delay(150);
         CaptureVisual(startFinish, Path.Combine(directory, "estate-start-finish-editor-900x660.png"));
+        CollectHanText(startFinish, "start finish editor", englishHanAudit);
         module.CancelEnrollment();
         startFinish.Close();
 
@@ -219,6 +224,7 @@ internal sealed partial class MainWindow : Window
         pitEntry.UpdateLayout();
         await Task.Delay(300);
         CaptureVisual(pitEntry, Path.Combine(directory, "estate-pit-entry-editor-940x780.png"));
+        CollectHanText(pitEntry, "pit entry editor", englishHanAudit);
         pitEntry.Close();
 
         var pitSettings = new EstatePitEnrollmentWindow(
@@ -227,7 +233,9 @@ internal sealed partial class MainWindow : Window
         pitSettings.UpdateLayout();
         await Task.Delay(300);
         CaptureVisual(pitSettings, Path.Combine(directory, "estate-pit-settings-editor-940x780.png"));
+        CollectHanText(pitSettings, "pit settings editor", englishHanAudit);
         pitSettings.Close();
+        File.WriteAllLines(Path.Combine(directory, "english-estate-window-audit.txt"), englishHanAudit);
     }
 
     internal async Task CaptureEstateRacePageQaAsync(string directory)
@@ -574,7 +582,10 @@ internal sealed partial class MainWindow : Window
         {
             var expiresAt = module.RecentCompetitionExpiresAt?.ToLocalTime();
             stack.Children.Add(EmptyCard("上一场比赛",
-                $"结果保留至 {expiresAt:HH:mm:ss}；新比赛开始后自动切换。"));
+                AppLocalization.Format(
+                    "competition.recentExpires",
+                    "结果保留至 {0:HH:mm:ss}；新比赛开始后自动切换。",
+                    expiresAt)));
         }
         else
         {
@@ -758,7 +769,12 @@ internal sealed partial class MainWindow : Window
             {
                 var item = new ComboBoxItem
                 {
-                    Content = $"{candidate.Summary.Name} · {TrackAnalysisKind(candidate.Summary)} · {candidate.RecordedLaps} 圈",
+                    Content = AppLocalization.Format(
+                        "lap.trackSelector.item",
+                        "{0} · {1} · {2} 圈",
+                        candidate.Summary.Name,
+                        TrackAnalysisKind(candidate.Summary),
+                        candidate.RecordedLaps),
                     Tag = candidate.Summary.Id
                 };
                 selector.Items.Add(item);
@@ -773,8 +789,8 @@ internal sealed partial class MainWindow : Window
                 if (selectedTrackId == module.CurrentTrack?.Id ||
                     selectedTrackId is null && module.CurrentTrack is null) return;
                 if (module.HasCurrentCompetitionSession && MessageBox.Show(
-                        "切换赛道会结束当前比赛的分析。仍要继续吗？",
-                        "切换分析赛道", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                        AppLocalization.Literal("切换赛道会结束当前比赛的分析。仍要继续吗？"),
+                        AppLocalization.Literal("切换分析赛道"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                 {
                     selector.SelectedItem = module.CurrentTrack is null
                         ? emptySelection
@@ -791,7 +807,7 @@ internal sealed partial class MainWindow : Window
                 }
                 catch (InvalidOperationException exception)
                 {
-                    MessageBox.Show(exception.Message, "无法选择赛道", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法选择赛道"), MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             };
             var selectedTrackIdForActions = selector.SelectedItem is ComboBoxItem { Tag: Guid selectedId }
@@ -843,7 +859,10 @@ internal sealed partial class MainWindow : Window
                         Background = new SolidColorBrush(selected ? classColor : DimmedPerformanceClassColor(classColor)),
                         BorderBrush = new SolidColorBrush(selected ? Colors.White : DimmedPerformanceClassColor(classColor)),
                         BorderThickness = new Thickness(selected ? 2 : 1),
-                        ToolTip = selected ? $"点击隐藏 {PerformanceClassName(performanceClass)} 级" : $"点击显示 {PerformanceClassName(performanceClass)} 级"
+                        ToolTip = AppLocalization.Format(
+                            selected ? "lap.classFilter.hide" : "lap.classFilter.show",
+                            selected ? "点击隐藏 {0} 级" : "点击显示 {0} 级",
+                            PerformanceClassName(performanceClass))
                     };
                     chip.Click += (_, _) =>
                     {
@@ -879,7 +898,7 @@ internal sealed partial class MainWindow : Window
                 var laps = TrackLaps(selectedTrackId);
                 if (laps.Length == 0)
                 {
-                    MessageBox.Show("该赛道没有已保存圈速。", "删除赛道圈速", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show(AppLocalization.Literal("该赛道没有已保存圈速。"), AppLocalization.Literal("删除赛道圈速"), MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -919,7 +938,7 @@ internal sealed partial class MainWindow : Window
                     .ToArray();
                 if (selectedLaps.Length == 0)
                 {
-                    MessageBox.Show("请先勾选要删除的圈速。", "删除所选圈速", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show(AppLocalization.Literal("请先勾选要删除的圈速。"), AppLocalization.Literal("删除所选圈速"), MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -935,13 +954,21 @@ internal sealed partial class MainWindow : Window
                 var selectedHistoricalBestCount = selectedLaps.Count(lap => historicalBestIds.Contains(lap.Id));
                 var records = string.Join("\n", selectedLaps.Select(lap =>
                     $"• {lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss}  {PerformanceClassName(lap.Vehicle.CarClass)} {lap.Vehicle.PerformanceIndex}  {AnalysisTime(lap.TotalSeconds, pointToPointTimingApproximate)}" +
-                    (historicalBestIds.Contains(lap.Id) ? "  · 历史最快" : string.Empty)));
+                    (historicalBestIds.Contains(lap.Id) ? AppLocalization.Literal("  · 历史最快") : string.Empty)));
                 var fastestWarning = selectedHistoricalBestCount > 0
-                    ? $"\n\n其中 {selectedHistoricalBestCount} 条是对应性能等级当前保留的历史最快圈；删除后，下一条最快有效圈会成为新的历史最快。"
+                    ? AppLocalization.Format(
+                        "lap.deleteSelected.fastestWarning",
+                        "\n\n其中 {0} 条是对应性能等级当前保留的历史最快圈；删除后，下一条最快有效圈会成为新的历史最快。",
+                        selectedHistoricalBestCount)
                     : string.Empty;
                 if (MessageBox.Show(
-                        $"确认删除所选 {selectedLaps.Length} 条圈速？\n\n{records}{fastestWarning}\n\n此操作不可撤销。",
-                        "删除所选圈速", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+                        AppLocalization.Format(
+                            "lap.deleteSelected.confirmation",
+                            "确认删除所选 {0} 条圈速？\n\n{1}{2}\n\n此操作不可撤销。",
+                            selectedLaps.Length,
+                            records,
+                            fastestWarning),
+                        AppLocalization.Literal("删除所选圈速"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
                 foreach (var lap in selectedLaps) module.DeleteLap(lap.Id);
                 selectedLapIds.ExceptWith(selectedLaps.Select(lap => lap.Id));
@@ -1011,8 +1038,8 @@ internal sealed partial class MainWindow : Window
                 ? module.CurrentSessionId
                 : comparableLaps[0].SessionId;
             var focusSessionLabel = module.HasCurrentCompetitionSession && focusSessionId == module.CurrentSessionId
-                ? "当前比赛"
-                : "最近一次比赛";
+                ? AppLocalization.Literal("当前比赛")
+                : AppLocalization.Literal("最近一次比赛");
             var savedTable = new Grid { Margin = new Thickness(4) };
             foreach (var width in new[] { 0.45, 0.75, 1.05, 1.15, 0.8, 0.75, 2.05, 0.6 })
                 savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width, GridUnitType.Star) });
@@ -1022,7 +1049,7 @@ internal sealed partial class MainWindow : Window
                 var savedLap = comparableLaps[index];
                 var isHistoricalBest = savedLap.IsValid && bestLapIds.Contains(savedLap.Id);
                 AddSavedRow(index + 1, savedLap,
-                    savedLap.SessionId == focusSessionId ? focusSessionLabel : "历史比赛",
+                    savedLap.SessionId == focusSessionId ? focusSessionLabel : AppLocalization.Literal("历史比赛"),
                     isHistoricalBest, false);
             }
             var savedStack = new StackPanel();
@@ -1030,7 +1057,10 @@ internal sealed partial class MainWindow : Window
             savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var savedHeaderText = new StackPanel();
-            savedHeaderText.Children.Add(Label($"已保存圈速 · {comparableLaps.Length}/50", 16, FontWeights.SemiBold));
+            savedHeaderText.Children.Add(Label(AppLocalization.Format(
+                "lap.savedCount",
+                "已保存圈速 · {0}/50",
+                comparableLaps.Length), 16, FontWeights.SemiBold));
             savedHeaderText.Children.Add(Label("勾选最多 4 圈，再加载图表；每个性能等级单独标记历史最快。", 11, FontWeights.Normal, "MutedBrush"));
             savedHeader.Children.Add(savedHeaderText);
             var displaySelectedLaps = new Button
@@ -1091,7 +1121,7 @@ internal sealed partial class MainWindow : Window
                                 if (selectedLapIds.Count >= 4)
                                 {
                                     check.IsChecked = false;
-                                    MessageBox.Show("一次最多比较 4 圈。", "圈选择", MessageBoxButton.OK, MessageBoxImage.Information);
+                                    MessageBox.Show(AppLocalization.Literal("一次最多比较 4 圈。"), AppLocalization.Literal("圈选择"), MessageBoxButton.OK, MessageBoxImage.Information);
                                     return;
                                 }
                                 selectedLapIds.Add(selectableLap.Id);
@@ -1122,11 +1152,16 @@ internal sealed partial class MainWindow : Window
                         delete.Click += (_, _) =>
                         {
                             var fastestWarning = historicalBest
-                                ? "\n\n这是程序当前保留的历史最快圈。手动删除后，下一条最快有效圈会成为新的历史最快。"
+                                ? AppLocalization.Literal("\n\n这是程序当前保留的历史最快圈。手动删除后，下一条最快有效圈会成为新的历史最快。")
                                 : string.Empty;
                             if (MessageBox.Show(
-                                    $"确认删除 {selectableLap.StartedAt.ToLocalTime():MM-dd HH:mm:ss} 的圈速 {AnalysisTime(selectableLap.TotalSeconds, pointToPointTimingApproximate)}？此操作不可撤销。{fastestWarning}",
-                                    "删除已保存圈速", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+                                    AppLocalization.Format(
+                                        "lap.deleteOne.confirmation",
+                                        "确认删除 {0:MM-dd HH:mm:ss} 的圈速 {1}？此操作不可撤销。{2}",
+                                        selectableLap.StartedAt.ToLocalTime(),
+                                        AnalysisTime(selectableLap.TotalSeconds, pointToPointTimingApproximate),
+                                        fastestWarning),
+                                    AppLocalization.Literal("删除已保存圈速"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
                             module.DeleteLap(selectableLap.Id);
                             selectedLapIds.Remove(selectableLap.Id);
                             displayedLapIds.Remove(selectableLap.Id);
@@ -1137,7 +1172,7 @@ internal sealed partial class MainWindow : Window
                     else
                     {
                         string? brush = null;
-                        if (!header && column == 2) brush = group == "历史比赛" ? "MutedBrush" : "SuccessBrush";
+                        if (!header && column == 2) brush = group == AppLocalization.Literal("历史比赛") ? "MutedBrush" : "SuccessBrush";
                         if (!header && historicalBest && column == 4) brush = "PurpleBrush";
                         var textCell = Label(cells[column], header ? 12 : 11, header ? FontWeights.SemiBold : FontWeights.Normal, brush);
                         if (column == 6)
@@ -1149,7 +1184,11 @@ internal sealed partial class MainWindow : Window
                         if (!header && column == 2)
                         {
                             textCell.TextWrapping = TextWrapping.Wrap;
-                            textCell.ToolTip = $"{group} · 玩家代号：{PlayerCodeText(selectableLap!.PlayerCode)}";
+                            textCell.ToolTip = AppLocalization.Format(
+                                "lap.playerCodeTooltip",
+                                "{0} · 玩家代号：{1}",
+                                AppLocalization.Literal(group),
+                                PlayerCodeText(selectableLap!.PlayerCode));
                         }
                         cell = textCell;
                     }
@@ -1267,15 +1306,15 @@ internal sealed partial class MainWindow : Window
                     ? null
                     : lap.Id == singleLapPlan.SelectedLap.Id
                         ? singleLapPlan.Mode == SingleLapAnalysisMode.AnalyzePersonalBest
-                            ? "所选圈 · 同等级个人最快"
-                            : "所选圈"
-                        : "个人参考圈 · 同等级最快";
+                            ? AppLocalization.Literal("所选圈 · 同等级个人最快")
+                            : AppLocalization.Literal("所选圈")
+                        : AppLocalization.Literal("个人参考圈 · 同等级最快");
                 legendEntries.Add(new LapSeriesLegendEntry(
                     $"{AnalysisTime(lap.TotalSeconds, pointToPointTimingApproximate)}" +
                     $"{(role is null ? string.Empty : $" · {role}")}",
                     $"{PerformanceClassName(lap.Vehicle.CarClass)} {pi} · " +
                     $"{lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss}" +
-                    $"{(lap.IsValid ? string.Empty : " · 无效")}"));
+                    $"{(lap.IsValid ? string.Empty : AppLocalization.Literal(" · 无效"))}"));
             }
 
             IReadOnlyList<CornerMapAnnotation> cornerAnnotations = [];
@@ -1370,7 +1409,10 @@ internal sealed partial class MainWindow : Window
             var mapTitle = Label(
                 cornerAnnotations.Count == 0
                     ? "走线预览 · 滚轮缩放，拖动平移"
-                    : $"走线预览 · {cornerAnnotations.Count} 个弯角标记 · 悬停查看分析",
+                    : AppLocalization.Format(
+                        "analysis.map.cornerCount",
+                        "走线预览 · {0} 个弯角标记 · 悬停查看分析",
+                        cornerAnnotations.Count),
                 13,
                 FontWeights.SemiBold);
             mapHeader.Children.Add(mapTitle);
@@ -1470,7 +1512,10 @@ internal sealed partial class MainWindow : Window
             "M 3 18 C 6 18 6 7 11 7 C 16 7 15 18 21 18 M 11 7 L 11 3 M 8 3 L 14 3",
             mapView.CornerAnnotationCount == 0
                 ? "当前圈没有检测到明显减速弯"
-                : $"显示或隐藏 {mapView.CornerAnnotationCount} 个弯角分析标记",
+                : AppLocalization.Format(
+                    "analysis.map.toggleCorners",
+                    "显示或隐藏 {0} 个弯角分析标记",
+                    mapView.CornerAnnotationCount),
             isChecked: mapView.CornerAnnotationCount > 0,
             isEnabled: mapView.CornerAnnotationCount > 0);
         mapView.ShowCornerAnnotations = corners.IsChecked == true;
@@ -1528,14 +1573,14 @@ internal sealed partial class MainWindow : Window
             var needsExtended = DrivingDynamicsAnalyzer.RequiresExtendedTelemetry(layer);
             var button = new ToggleButton
             {
-                Content = DrivingDynamicsAnalyzer.LayerName(layer),
+                Content = AppLocalization.Literal(DrivingDynamicsAnalyzer.LayerName(layer)),
                 IsChecked = layer == DrivingDynamicsLayer.Default,
                 Padding = new Thickness(9, 5, 9, 5),
                 Margin = new Thickness(0, 0, 6, 5),
                 FontSize = 11,
-                ToolTip = needsExtended && !mapView.HasExtendedDynamics
+                ToolTip = AppLocalization.Literal(needsExtended && !mapView.HasExtendedDynamics
                     ? "旧版本保存的圈速未记录此图层所需的动态遥测；切换后会显示不可用提示。"
-                    : "切换走线着色图层；悬停可查看当前位置数据。"
+                    : "切换走线着色图层；悬停可查看当前位置数据。")
             };
             button.Click += (_, _) =>
             {
@@ -1559,12 +1604,16 @@ internal sealed partial class MainWindow : Window
         if (plan.Mode == SingleLapAnalysisMode.CompareWithClassFastest && referenceLap is not null)
         {
             var comparisons = CornerDrivingAnalyzer.Compare(selectedLap, referenceLap);
-            var context =
-                $"对比同等级个人最快 · 所选 {AnalysisTime(selectedLap.TotalSeconds, pointToPointTimingApproximate)} / " +
-                $"参考 {AnalysisTime(referenceLap.TotalSeconds, pointToPointTimingApproximate)}";
-            var footer =
-                $"参考情况：{ReferenceMatchText(selectedLap.Vehicle, referenceLap.Vehicle)}。" +
-                "LazyForza 只能提供轻度范围内的分析，仅供参考。";
+            var context = AppLocalization.Format(
+                "analysis.corner.comparisonContext",
+                "对比同等级个人最快 · 所选 {0} / 参考 {1}",
+                AnalysisTime(selectedLap.TotalSeconds, pointToPointTimingApproximate),
+                AnalysisTime(referenceLap.TotalSeconds, pointToPointTimingApproximate));
+            var footer = AppLocalization.Format(
+                "analysis.corner.referenceFooter",
+                "参考情况：{0}。{1}",
+                ReferenceMatchText(selectedLap.Vehicle, referenceLap.Vehicle),
+                AppLocalization.Literal("LazyForza 只能提供轻度范围内的分析，仅供参考。"));
             return comparisons
                 .OrderByDescending(corner => corner.TimeLossSeconds)
                 .Take(8)
@@ -1577,11 +1626,10 @@ internal sealed partial class MainWindow : Window
         }
 
         var contextText = plan.Mode == SingleLapAnalysisMode.AnalyzePersonalBest
-            ? "同等级个人最快 · 轻度跑法分析"
-            : "暂无同等级参考圈 · 仅分析明显驾驶节奏";
-        const string footerText =
-            "依据已保存的速度、输入、位置与动态遥测；旧圈可能不含轮胎滑移。" +
-            "LazyForza 只能提供轻度范围内的分析，仅供参考。";
+            ? AppLocalization.Literal("同等级个人最快 · 轻度跑法分析")
+            : AppLocalization.Literal("暂无同等级参考圈 · 仅分析明显驾驶节奏");
+        var footerText = AppLocalization.Literal(
+            "依据已保存的速度、输入、位置与动态遥测；旧圈可能不含轮胎滑移。LazyForza 只能提供轻度范围内的分析，仅供参考。");
         return CornerDrivingAnalyzer.AnalyzePersonalBest(selectedLap)
             .OrderByDescending(corner => corner.OpportunityScore)
             .Take(8)
@@ -1601,21 +1649,30 @@ internal sealed partial class MainWindow : Window
     {
         var brake = corner.BrakePointDeltaMeters is double brakeDelta
             ? brakeDelta >= 0
-                ? $"刹车晚 {brakeDelta:0} m"
-                : $"刹车早 {Math.Abs(brakeDelta):0} m"
-            : "没有找到稳定刹车点";
+                ? AppLocalization.Format("analysis.corner.brakeLate", "刹车晚 {0:0} m", brakeDelta)
+                : AppLocalization.Format("analysis.corner.brakeEarly", "刹车早 {0:0} m", Math.Abs(brakeDelta))
+            : AppLocalization.Literal("没有找到稳定刹车点");
         var throttle = corner.ThrottleRecoveryDeltaSeconds is double throttleDelta
             ? throttleDelta >= 0
-                ? $"补油晚 {throttleDelta:0.00} s"
-                : $"补油早 {Math.Abs(throttleDelta):0.00} s"
-            : "没有找到稳定补油点";
-        var speeds =
-            $"入弯 {corner.SelectedEntrySpeedKph:0}/{corner.ReferenceEntrySpeedKph:0}，" +
-            $"最低 {corner.SelectedMinimumSpeedKph:0}/{corner.ReferenceMinimumSpeedKph:0}，" +
-            $"出弯 {corner.SelectedExitSpeedKph:0}/{corner.ReferenceExitSpeedKph:0} km/h";
-        var gears =
-            $"弯心 {GearText(corner.SelectedApexGear)}/{GearText(corner.ReferenceApexGear)}，" +
-            $"弯中换挡 {corner.SelectedGearChanges}/{corner.ReferenceGearChanges} 次";
+                ? AppLocalization.Format("analysis.corner.throttleLate", "补油晚 {0:0.00} s", throttleDelta)
+                : AppLocalization.Format("analysis.corner.throttleEarly", "补油早 {0:0.00} s", Math.Abs(throttleDelta))
+            : AppLocalization.Literal("没有找到稳定补油点");
+        var speeds = AppLocalization.Format(
+            "analysis.corner.comparisonSpeeds",
+            "入弯 {0:0}/{1:0}，最低 {2:0}/{3:0}，出弯 {4:0}/{5:0} km/h",
+            corner.SelectedEntrySpeedKph,
+            corner.ReferenceEntrySpeedKph,
+            corner.SelectedMinimumSpeedKph,
+            corner.ReferenceMinimumSpeedKph,
+            corner.SelectedExitSpeedKph,
+            corner.ReferenceExitSpeedKph);
+        var gears = AppLocalization.Format(
+            "analysis.corner.comparisonGears",
+            "弯心 {0}/{1}，弯中换挡 {2}/{3} 次",
+            GearText(corner.SelectedApexGear),
+            GearText(corner.ReferenceApexGear),
+            corner.SelectedGearChanges,
+            corner.ReferenceGearChanges);
         var accent = corner.TimeLossSeconds > 0.05
             ? Color.FromRgb(242, 184, 39)
             : corner.TimeLossSeconds < -0.05
@@ -1625,8 +1682,8 @@ internal sealed partial class MainWindow : Window
             lapId,
             corner.Window,
             context,
-            $"弯道 {corner.Window.Number} · {ProgressRange(corner.Window)} · {CornerTimeText(corner.TimeLossSeconds)}",
-            $"{brake} · {throttle}\n{speeds}\n走线平均偏离 {corner.MeanLineDeviationMeters:0.0} m · {gears}",
+            AppLocalization.Format("analysis.corner.titleWithDelta", "弯道 {0} · {1} · {2}", corner.Window.Number, ProgressRange(corner.Window), CornerTimeText(corner.TimeLossSeconds)),
+            AppLocalization.Format("analysis.corner.comparisonDetails", "{0} · {1}\n{2}\n走线平均偏离 {3:0.0} m · {4}", brake, throttle, speeds, corner.MeanLineDeviationMeters, gears),
             ComparisonHint(corner),
             footer,
             accent);
@@ -1639,12 +1696,19 @@ internal sealed partial class MainWindow : Window
         string footer)
     {
         var throttle = corner.ThrottleRecoverySeconds is double recovery
-            ? $"过弯心后 {recovery:0.00} s 恢复 70% 油门"
-            : "这段没有恢复到 70% 油门";
-        var details =
-            $"入弯/最低/出弯 {corner.EntrySpeedKph:0}/{corner.MinimumSpeedKph:0}/{corner.ExitSpeedKph:0} km/h · " +
-            $"{throttle}\n无油无刹 {corner.CoastingSeconds:0.00} s · 油刹重叠 {corner.BrakeThrottleOverlapSeconds:0.00} s · " +
-            $"弯心 {GearText(corner.ApexGear)} · 弯中换挡 {corner.GearChanges} 次";
+            ? AppLocalization.Format("analysis.corner.throttleRecovery", "过弯心后 {0:0.00} s 恢复 70% 油门", recovery)
+            : AppLocalization.Literal("这段没有恢复到 70% 油门");
+        var details = AppLocalization.Format(
+            "analysis.corner.optimizationDetails",
+            "入弯/最低/出弯 {0:0}/{1:0}/{2:0} km/h · {3}\n无油无刹 {4:0.00} s · 油刹重叠 {5:0.00} s · 弯心 {6} · 弯中换挡 {7} 次",
+            corner.EntrySpeedKph,
+            corner.MinimumSpeedKph,
+            corner.ExitSpeedKph,
+            throttle,
+            corner.CoastingSeconds,
+            corner.BrakeThrottleOverlapSeconds,
+            GearText(corner.ApexGear),
+            corner.GearChanges);
         var accent = corner.OpportunityScore >= 1.2
             ? Color.FromRgb(242, 184, 39)
             : Color.FromRgb(32, 184, 207);
@@ -1652,7 +1716,7 @@ internal sealed partial class MainWindow : Window
             lapId,
             corner.Window,
             context,
-            $"弯道 {corner.Window.Number} · {ProgressRange(corner.Window)}",
+            AppLocalization.Format("analysis.corner.title", "弯道 {0} · {1}", corner.Window.Number, ProgressRange(corner.Window)),
             details,
             OptimizationHint(corner),
             footer,
@@ -1661,56 +1725,58 @@ internal sealed partial class MainWindow : Window
 
     private static string ComparisonHint(CornerComparisonMetrics corner)
     {
-        if (corner.TimeLossSeconds < -0.05) return "该区间快于参考圈，可保留当前处理方式。";
+        if (corner.TimeLossSeconds < -0.05) return AppLocalization.Literal("该区间快于参考圈，可保留当前处理方式。");
         var hints = new List<string>();
-        if (corner.BrakePointDeltaMeters is < -4) hints.Add("刹车偏早");
-        if (corner.SelectedMinimumSpeedKph < corner.ReferenceMinimumSpeedKph - 3) hints.Add("弯心速度偏低");
-        if (corner.ThrottleRecoveryDeltaSeconds is > 0.15) hints.Add("补油偏晚");
-        if (corner.SelectedExitSpeedKph < corner.ReferenceExitSpeedKph - 3) hints.Add("出弯速度偏低");
-        if (corner.MeanLineDeviationMeters > 2) hints.Add("走线差异较大");
+        if (corner.BrakePointDeltaMeters is < -4) hints.Add(AppLocalization.Literal("刹车偏早"));
+        if (corner.SelectedMinimumSpeedKph < corner.ReferenceMinimumSpeedKph - 3) hints.Add(AppLocalization.Literal("弯心速度偏低"));
+        if (corner.ThrottleRecoveryDeltaSeconds is > 0.15) hints.Add(AppLocalization.Literal("补油偏晚"));
+        if (corner.SelectedExitSpeedKph < corner.ReferenceExitSpeedKph - 3) hints.Add(AppLocalization.Literal("出弯速度偏低"));
+        if (corner.MeanLineDeviationMeters > 2) hints.Add(AppLocalization.Literal("走线差异较大"));
         if (corner.SelectedGearChanges > corner.ReferenceGearChanges)
-            hints.Add("弯中换挡比参考圈多");
+            hints.Add(AppLocalization.Literal("弯中换挡比参考圈多"));
         if (corner.SelectedApexGear != corner.ReferenceApexGear)
-            hints.Add("弯心挡位不同，需结合车辆确认");
+            hints.Add(AppLocalization.Literal("弯心挡位不同，需结合车辆确认"));
         return hints.Count == 0
-            ? "单项差异不大，这段更像是整体节奏损失。"
-            : $"建议优先复查：{string.Join("、", hints)}。";
+            ? AppLocalization.Literal("单项差异不大，这段更像是整体节奏损失。")
+            : AppLocalization.Format("analysis.corner.reviewHints", "建议优先复查：{0}。", string.Join(AppLocalization.Text("analysis.hintSeparator", "、"), hints));
     }
 
     private static string OptimizationHint(CornerOptimizationMetrics corner)
     {
         var hints = new List<string>();
-        if (corner.CoastingSeconds > 0.35) hints.Add("可复查是否存在过长的无油无刹滑行");
-        if (corner.ThrottleRecoverySeconds is > 0.90) hints.Add("可尝试略早且更平缓地恢复油门");
-        if (corner.BrakeThrottleOverlapSeconds > 0.25) hints.Add("油刹重叠偏多");
-        if (corner.GearChanges > 1) hints.Add("复核入弯挡位，尽量少在弯中换挡");
+        if (corner.CoastingSeconds > 0.35) hints.Add(AppLocalization.Literal("可复查是否存在过长的无油无刹滑行"));
+        if (corner.ThrottleRecoverySeconds is > 0.90) hints.Add(AppLocalization.Literal("可尝试略早且更平缓地恢复油门"));
+        if (corner.BrakeThrottleOverlapSeconds > 0.25) hints.Add(AppLocalization.Literal("油刹重叠偏多"));
+        if (corner.GearChanges > 1) hints.Add(AppLocalization.Literal("复核入弯挡位，尽量少在弯中换挡"));
         return hints.Count == 0
-            ? "当前数据未显示明显问题，无需仅为配合分析结论而改变跑法。"
-            : $"{string.Join("；", hints)}。";
+            ? AppLocalization.Literal("当前数据未显示明显问题，无需仅为配合分析结论而改变跑法。")
+            : AppLocalization.Format("analysis.corner.hints", "{0}。", string.Join(AppLocalization.Text("analysis.hintListSeparator", "；"), hints));
     }
 
     private static string ReferenceMatchText(
         VehicleProfileFingerprint selected,
         VehicleProfileFingerprint reference)
     {
-        if (selected == reference) return "车辆和调校指纹一致";
+        if (selected == reference) return AppLocalization.Literal("车辆和调校指纹一致");
         if (selected.CarOrdinal == reference.CarOrdinal &&
             selected.PerformanceIndex == reference.PerformanceIndex)
-            return "车型和 PI 一致，但调校指纹不同或尚未识别";
+            return AppLocalization.Literal("车型和 PI 一致，但调校指纹不同或尚未识别");
         if (selected.CarOrdinal == reference.CarOrdinal)
-            return "车型相同，但 PI 或调校不同";
-        return "同等级不同车辆，速度和挡位差异要谨慎看";
+            return AppLocalization.Literal("车型相同，但 PI 或调校不同");
+        return AppLocalization.Literal("同等级不同车辆，速度和挡位差异要谨慎看");
     }
 
     private static string CornerTimeText(double deltaSeconds) =>
         deltaSeconds >= 0
-            ? $"损失 {deltaSeconds:0.000} s"
-            : $"快 {Math.Abs(deltaSeconds):0.000} s";
+            ? AppLocalization.Format("analysis.corner.timeLoss", "损失 {0:0.000} s", deltaSeconds)
+            : AppLocalization.Format("analysis.corner.timeGain", "快 {0:0.000} s", Math.Abs(deltaSeconds));
 
     private static string ProgressRange(CornerWindow window) =>
         $"{window.StartS / 1_000:0.00}–{window.EndS / 1_000:0.00} km";
 
-    private static string GearText(int gear) => gear > 0 ? $"{gear} 挡" : "—";
+    private static string GearText(int gear) => gear > 0
+        ? AppLocalization.Format("common.gear", "{0} 挡", gear)
+        : "—";
 
     private UIElement TracksPage()
     {
@@ -1720,7 +1786,10 @@ internal sealed partial class MainWindow : Window
         if (lapModule.IncompatibleTrackName is { } incompatibleTrack)
         {
             stack.Children.Add(Card(Label(
-                $"“{incompatibleTrack}”使用旧版起点逻辑，已停止参与匹配。进入比赛后可重新学习。",
+                AppLocalization.Format(
+                    "tracks.incompatible",
+                    "“{0}”使用旧版起点逻辑，已停止参与匹配。进入比赛后可重新学习。",
+                    incompatibleTrack),
                 13, FontWeights.SemiBold, "AccentBrush")));
         }
 
@@ -1768,8 +1837,8 @@ internal sealed partial class MainWindow : Window
         add.Click += (_, _) =>
         {
             if (MessageBox.Show(
-                    "下场比赛将用于学习赛道。请完整跑完路线，期间不要倒带、传送或退出。开始学习吗？",
-                    "添加自定义赛道",
+                    AppLocalization.Literal("下场比赛将用于学习赛道。请完整跑完路线，期间不要倒带、传送或退出。开始学习吗？"),
+                    AppLocalization.Literal("添加自定义赛道"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             lapModule.ResetTrackLearning();
@@ -1994,8 +2063,12 @@ internal sealed partial class MainWindow : Window
             delete.Click += (_, _) =>
             {
                 if (MessageBox.Show(
-                        $"删除“{summary.Name}”及其 {summary.Laps} 圈记录？此操作不可撤销。",
-                        "确认删除自定义赛道",
+                        AppLocalization.Format(
+                            "tracks.delete.confirmation",
+                            "删除“{0}”及其 {1} 圈记录？此操作不可撤销。",
+                            summary.Name,
+                            summary.Laps),
+                        AppLocalization.Literal("确认删除自定义赛道"),
                         MessageBoxButton.YesNo,
                         MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
                 store.DeleteTrack(summary.Id);
@@ -2066,8 +2139,8 @@ internal sealed partial class MainWindow : Window
         if (lapModule.CurrentTrack?.Id != summary.Id)
         {
             if (lapModule.HasCurrentCompetitionSession && MessageBox.Show(
-                    "切换赛道会结束当前比赛的分析。仍要继续吗？",
-                    "切换分析赛道",
+                    AppLocalization.Literal("切换赛道会结束当前比赛的分析。仍要继续吗？"),
+                    AppLocalization.Literal("切换分析赛道"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             try
@@ -2078,7 +2151,7 @@ internal sealed partial class MainWindow : Window
             }
             catch (InvalidOperationException exception)
             {
-                MessageBox.Show(exception.Message, "无法选择赛道", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法选择赛道"), MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
         }
@@ -2266,8 +2339,8 @@ internal sealed partial class MainWindow : Window
                     var profile = orderedTunes[index];
                     var displayName = profile.CustomName ??
                                       (orderedTunes.Length > 1
-                                          ? $"调校 {index + 1}"
-                                          : "车辆配置");
+                                          ? AppLocalization.Format("shift.tuneName", "调校 {0}", index + 1)
+                                          : AppLocalization.Literal("车辆配置"));
                     tunePanel.Children.Add(VehicleProfileCard(
                         profile,
                         displayName,
@@ -2353,7 +2426,7 @@ internal sealed partial class MainWindow : Window
                 }
                 if (learning.Targets.Count == 0) targets.Children.Add(Label("数据不足：不会伪造最佳换挡点。", 13, FontWeights.Normal, "MutedBrush"));
             }
-            var rejected = string.Join(" · ", learning.RejectedSamples.OrderByDescending(item => item.Value).Take(8).Select(item => $"{item.Key} {item.Value}"));
+            var rejected = string.Join(" · ", learning.RejectedSamples.OrderByDescending(item => item.Value).Take(8).Select(item => $"{AppLocalization.Literal(item.Key)} {item.Value}"));
             rejectedLabel.Text = AppLocalization.Format(
                 "shift.rejected",
                 "未计入：{0}",
@@ -2383,7 +2456,7 @@ internal sealed partial class MainWindow : Window
                     $"{PerformanceClassName(profile.Fingerprint.CarClass)} {profile.Fingerprint.PerformanceIndex}")
                 .Distinct(StringComparer.Ordinal));
         var subtitle = Label(
-            $"车型编号 {carOrdinal} · {classes}",
+            AppLocalization.Format("shift.vehicleGroup", "车型编号 {0} · {1}", carOrdinal, classes),
             12,
             FontWeights.Normal,
             "MutedBrush");
@@ -2418,7 +2491,9 @@ internal sealed partial class MainWindow : Window
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(8, 3, 8, 3),
             Child = Label(
-                profiles.Count > 1 ? $"{profiles.Count} 个调校" : "1 个配置",
+                profiles.Count > 1
+                    ? AppLocalization.Format("shift.tuneCount", "{0} 个调校", profiles.Count)
+                    : AppLocalization.Literal("1 个配置"),
                 11,
                 FontWeights.SemiBold,
                 "MutedBrush")
@@ -2459,8 +2534,15 @@ internal sealed partial class MainWindow : Window
         details.Children.Add(titleRow);
 
         var identity = Label(
-            $"{PerformanceClassName(fingerprint.CarClass)} {fingerprint.PerformanceIndex} · 车型编号 {fingerprint.CarOrdinal} · " +
-            $"{DrivetrainText(fingerprint.DrivetrainType)} · {fingerprint.NumCylinders} 缸 · 最高 {fingerprint.RoundedMaxRpm:N0} RPM",
+            AppLocalization.Format(
+                "shift.profile.identity",
+                "{0} {1} · 车型编号 {2} · {3} · {4} 缸 · 最高 {5:N0} RPM",
+                PerformanceClassName(fingerprint.CarClass),
+                fingerprint.PerformanceIndex,
+                fingerprint.CarOrdinal,
+                DrivetrainText(fingerprint.DrivetrainType),
+                fingerprint.NumCylinders,
+                fingerprint.RoundedMaxRpm),
             13,
             FontWeights.Normal,
             "TextBrush");
@@ -2470,9 +2552,15 @@ internal sealed partial class MainWindow : Window
         var legacy = !VehicleProfileIdentity.IsResolved(fingerprint);
         var learned = Label(
             legacy
-                ? "旧版配置 · 需要重新学习后才能自动匹配调校"
-                : $"{LearningStateText(profile.State)} · 置信度 {profile.Confidence:P0} · " +
-                  $"{profile.CurveBins} 个转速区间 · {profile.Gears} 个挡位 · {profile.ShiftTargets} 个换挡目标",
+                ? AppLocalization.Literal("旧版配置 · 需要重新学习后才能自动匹配调校")
+                : AppLocalization.Format(
+                    "shift.profile.learning",
+                    "{0} · 置信度 {1:P0} · {2} 个转速区间 · {3} 个挡位 · {4} 个换挡目标",
+                    LearningStateText(profile.State),
+                    profile.Confidence,
+                    profile.CurveBins,
+                    profile.Gears,
+                    profile.ShiftTargets),
             12,
             FontWeights.Normal,
             legacy ? "WarningBrush" : "MutedBrush");
@@ -2480,7 +2568,7 @@ internal sealed partial class MainWindow : Window
         details.Children.Add(learned);
 
         var updated = Label(
-            $"更新于 {profile.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}",
+            AppLocalization.Format("shift.profile.updated", "更新于 {0:yyyy-MM-dd HH:mm}", profile.UpdatedAt.ToLocalTime()),
             11,
             FontWeights.Normal,
             "MutedBrush");
@@ -2497,7 +2585,8 @@ internal sealed partial class MainWindow : Window
         var recommendation = new ToggleButton
         {
             IsChecked = profile.ShiftRecommendationsEnabled,
-            Content = profile.ShiftRecommendationsEnabled ? "推荐挡位：开" : "推荐挡位：关",
+            Content = AppLocalization.Literal(
+                profile.ShiftRecommendationsEnabled ? "推荐挡位：开" : "推荐挡位：关"),
             MinWidth = 112,
             Padding = new Thickness(10, 6, 10, 6)
         };
@@ -2506,7 +2595,7 @@ internal sealed partial class MainWindow : Window
             var enabled = recommendation.IsChecked == true;
             store.SetShiftRecommendationsEnabled(profile.Id, enabled);
             module.SetShiftRecommendationsEnabled(profile.Id, enabled);
-            recommendation.Content = enabled ? "推荐挡位：开" : "推荐挡位：关";
+            recommendation.Content = AppLocalization.Literal(enabled ? "推荐挡位：开" : "推荐挡位：关");
             refreshProfiles();
         };
         actions.Children.Add(recommendation);
@@ -2535,8 +2624,11 @@ internal sealed partial class MainWindow : Window
         delete.Click += (_, _) =>
         {
             if (MessageBox.Show(
-                    $"删除车辆配置“{displayName}”及其学习数据？此操作不可撤销。",
-                    "确认删除车辆配置",
+                    AppLocalization.Format(
+                        "shift.profile.deleteConfirmation",
+                        "删除车辆配置“{0}”及其学习数据？此操作不可撤销。",
+                        displayName),
+                    AppLocalization.Literal("确认删除车辆配置"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             store.DeleteVehicleProfile(profile.Id);
@@ -2581,20 +2673,25 @@ internal sealed partial class MainWindow : Window
     {
         status?.SetCurrentValue(
             TextBlock.TextProperty,
-            $"发现 {release.Tag}，等待你的确认。");
+            AppLocalization.Format("update.offer.waiting", "发现 {0}，等待你的确认。", release.Tag));
 
         if (!updateManager.CanInstallAutomatically)
         {
             new UpdateOfferWindow(this, release, false).ShowDialog();
             status?.SetCurrentValue(
                 TextBlock.TextProperty,
-                $"已查看 {release.Tag}；开发构建不会自动安装。");
+                AppLocalization.Format(
+                    "update.offer.developmentViewed",
+                    "已查看 {0}；开发构建不会自动安装。",
+                    release.Tag));
             return;
         }
 
         if (new UpdateOfferWindow(this, release, true).ShowDialog() != true)
         {
-            status?.SetCurrentValue(TextBlock.TextProperty, $"已跳过 {release.Tag}。");
+            status?.SetCurrentValue(
+                TextBlock.TextProperty,
+                AppLocalization.Format("update.offer.skipped", "已跳过 {0}。", release.Tag));
             return;
         }
 
@@ -2607,22 +2704,29 @@ internal sealed partial class MainWindow : Window
                 progressWindow.Progress,
                 progressWindow.CancellationToken);
             progressWindow.Finish();
-            status?.SetCurrentValue(TextBlock.TextProperty, "更新已校验，正在重启安装…");
+            status?.SetCurrentValue(
+                TextBlock.TextProperty,
+                AppLocalization.Literal("更新已校验，正在重启安装…"));
             updateManager.InstallAndRestart(prepared);
         }
         catch (OperationCanceledException)
         {
             progressWindow.Finish();
-            status?.SetCurrentValue(TextBlock.TextProperty, "已取消下载。");
+            status?.SetCurrentValue(TextBlock.TextProperty, AppLocalization.Literal("已取消下载。"));
         }
         catch (Exception exception)
         {
             progressWindow.Finish();
             updateManager.ReportFailure("Update download or install failed", exception);
-            status?.SetCurrentValue(TextBlock.TextProperty, "更新失败，可稍后重试。");
+            status?.SetCurrentValue(
+                TextBlock.TextProperty,
+                AppLocalization.Literal("更新失败，可稍后重试。"));
             MessageBox.Show(
-                $"更新未安装，当前版本没有被更改。\n\n{exception.Message}",
-                "更新失败",
+                AppLocalization.Format(
+                    "update.install.failedMessage",
+                    "更新未安装，当前版本没有被更改。\n\n{0}",
+                    AppLocalization.Literal(exception.Message)),
+                AppLocalization.Literal("更新失败"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -2716,8 +2820,8 @@ internal sealed partial class MainWindow : Window
             if (!selection.HasAny)
             {
                 MessageBox.Show(
-                    "请至少选择一类数据。",
-                    "没有可导出的内容",
+                    AppLocalization.Literal("请至少选择一类数据。"),
+                    AppLocalization.Literal("没有可导出的内容"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
                 return;
@@ -2725,8 +2829,8 @@ internal sealed partial class MainWindow : Window
 
             var dialog = new SaveFileDialog
             {
-                Title = "导出 LazyForza 数据备份",
-                Filter = "LazyForza 备份 (*.lfzbackup)|*.lfzbackup",
+                Title = AppLocalization.Text("backup.export.dialog", "导出 LazyForza 数据备份"),
+                Filter = AppLocalization.Text("backup.fileFilter", "LazyForza 备份 (*.lfzbackup)|*.lfzbackup"),
                 DefaultExt = ".lfzbackup",
                 AddExtension = true,
                 InitialDirectory = directories.BackupsPath,
@@ -2735,7 +2839,7 @@ internal sealed partial class MainWindow : Window
             if (dialog.ShowDialog(this) != true) return;
 
             exportButton.IsEnabled = false;
-            exportStatus.Text = "正在整理并校验备份…";
+            exportStatus.Text = AppLocalization.Literal("正在整理并校验备份…");
             try
             {
                 var manifest = await Task.Run(
@@ -2744,24 +2848,30 @@ internal sealed partial class MainWindow : Window
                         selection,
                         lifetimeCancellation.Token),
                     lifetimeCancellation.Token);
-                exportStatus.Text =
-                    $"已导出 · Schema {manifest.SchemaVersion} · 应用 {manifest.ApplicationVersion}";
+                exportStatus.Text = AppLocalization.Format(
+                    "backup.export.status",
+                    "已导出 · Schema {0} · 应用 {1}",
+                    manifest.SchemaVersion,
+                    manifest.ApplicationVersion);
                 MessageBox.Show(
-                    $"备份已生成并完成 SHA-256 校验。\n\n{dialog.FileName}",
-                    "导出完成",
+                    AppLocalization.Format(
+                        "backup.export.complete",
+                        "备份已生成并完成 SHA-256 校验。\n\n{0}",
+                        dialog.FileName),
+                    AppLocalization.Literal("导出完成"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
             }
             catch (OperationCanceledException)
             {
-                exportStatus.Text = "导出已取消。";
+                exportStatus.Text = AppLocalization.Literal("导出已取消。");
             }
             catch (Exception exception)
             {
-                exportStatus.Text = "导出失败。";
+                exportStatus.Text = AppLocalization.Literal("导出失败。");
                 MessageBox.Show(
-                    exception.Message,
-                    "无法导出备份",
+                    AppLocalization.Literal(exception.Message),
+                    AppLocalization.Literal("无法导出备份"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
@@ -2834,8 +2944,8 @@ internal sealed partial class MainWindow : Window
         {
             var dialog = new OpenFileDialog
             {
-                Title = "选择 LazyForza 数据备份",
-                Filter = "LazyForza 备份 (*.lfzbackup)|*.lfzbackup",
+                Title = AppLocalization.Text("backup.import.dialog", "选择 LazyForza 数据备份"),
+                Filter = AppLocalization.Text("backup.fileFilter", "LazyForza 备份 (*.lfzbackup)|*.lfzbackup"),
                 CheckFileExists = true,
                 Multiselect = false,
                 InitialDirectory = directories.BackupsPath
@@ -2844,7 +2954,7 @@ internal sealed partial class MainWindow : Window
 
             inspectButton.IsEnabled = false;
             importButton.IsEnabled = false;
-            previewLabel.Text = "正在校验清单和文件哈希…";
+            previewLabel.Text = AppLocalization.Literal("正在校验清单和文件哈希…");
             try
             {
                 preview = await Task.Run(
@@ -2854,31 +2964,46 @@ internal sealed partial class MainWindow : Window
                     lifetimeCancellation.Token);
                 selectedBackup = dialog.FileName;
                 var conflictLines = preview.Conflicts.Count == 0
-                    ? "没有发现冲突。"
+                    ? AppLocalization.Literal("没有发现冲突。")
                     : string.Join(
                         "\n",
                         preview.Conflicts.Take(8).Select(conflict =>
-                            $"• {conflict.Category}：{conflict.SourceSummary}"));
+                            AppLocalization.Format(
+                                "backup.preview.conflict",
+                                "• {0}：{1}",
+                                AppLocalization.Literal(conflict.Category),
+                                AppLocalization.Literal(conflict.SourceSummary))));
                 if (preview.Conflicts.Count > 8)
-                    conflictLines += $"\n• 另有 {preview.Conflicts.Count - 8} 项冲突";
+                    conflictLines += AppLocalization.Format(
+                        "backup.preview.moreConflicts",
+                        "\n• 另有 {0} 项冲突",
+                        preview.Conflicts.Count - 8);
                 var warnings = preview.Warnings.Count == 0
                     ? string.Empty
-                    : "\n\n" + string.Join("\n", preview.Warnings);
-                previewLabel.Text =
-                    $"创建时间：{preview.Manifest.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}\n" +
-                    $"来源版本：{preview.Manifest.ApplicationVersion} · Schema {preview.Manifest.SchemaVersion}\n" +
-                    $"配置 {preview.Settings} · 车辆 {preview.Vehicles} · 圈速 {preview.Laps} · 自定义赛道 {preview.CustomTracks}\n" +
-                    $"冲突 {preview.Conflicts.Count} 项\n\n{conflictLines}{warnings}";
+                    : "\n\n" + string.Join("\n", preview.Warnings.Select(AppLocalization.Literal));
+                previewLabel.Text = AppLocalization.Format(
+                    "backup.preview.summary",
+                    "创建时间：{0:yyyy-MM-dd HH:mm:ss}\n来源版本：{1} · Schema {2}\n配置 {3} · 车辆 {4} · 圈速 {5} · 自定义赛道 {6}\n冲突 {7} 项\n\n{8}{9}",
+                    preview.Manifest.CreatedAt.ToLocalTime(),
+                    preview.Manifest.ApplicationVersion,
+                    preview.Manifest.SchemaVersion,
+                    preview.Settings,
+                    preview.Vehicles,
+                    preview.Laps,
+                    preview.CustomTracks,
+                    preview.Conflicts.Count,
+                    conflictLines,
+                    warnings);
                 importButton.IsEnabled = true;
             }
             catch (Exception exception)
             {
                 selectedBackup = null;
                 preview = null;
-                previewLabel.Text = "备份校验失败。";
+                previewLabel.Text = AppLocalization.Literal("备份校验失败。");
                 MessageBox.Show(
-                    exception.Message,
-                    "无法读取备份",
+                    AppLocalization.Literal(exception.Message),
+                    AppLocalization.Literal("无法读取备份"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
@@ -2896,15 +3021,18 @@ internal sealed partial class MainWindow : Window
             if (mode == BackupImportMode.Overwrite &&
                 preview.Conflicts.Count > 0 &&
                 MessageBox.Show(
-                    $"将覆盖 {preview.Conflicts.Count} 项冲突数据。继续前会保留现有自动备份，是否继续？",
-                    "确认覆盖冲突",
+                    AppLocalization.Format(
+                        "backup.import.confirmOverwrite",
+                        "将覆盖 {0} 项冲突数据。继续前会保留现有自动备份，是否继续？",
+                        preview.Conflicts.Count),
+                    AppLocalization.Literal("确认覆盖冲突"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes)
                 return;
 
             importButton.IsEnabled = false;
             inspectButton.IsEnabled = false;
-            previewLabel.Text += "\n\n正在导入…";
+            previewLabel.Text += AppLocalization.Literal("\n\n正在导入…");
             try
             {
                 var result = await Task.Run(
@@ -2920,21 +3048,25 @@ internal sealed partial class MainWindow : Window
                             lifetimeCancellation.Token);
                     },
                     lifetimeCancellation.Token);
-                previewLabel.Text +=
-                    $"\n完成：配置 {result.ImportedSettings} · 车辆 {result.ImportedVehicles} · " +
-                    $"圈速 {result.ImportedLaps} · 自定义赛道 {result.ImportedCustomTracks}。";
+                previewLabel.Text += AppLocalization.Format(
+                    "backup.import.result",
+                    "\n完成：配置 {0} · 车辆 {1} · 圈速 {2} · 自定义赛道 {3}。",
+                    result.ImportedSettings,
+                    result.ImportedVehicles,
+                    result.ImportedLaps,
+                    result.ImportedCustomTracks);
                 MessageBox.Show(
-                    "数据导入完成。为使后台模块重新载入赛道与车辆缓存，请重启 LazyForza。",
-                    "导入完成",
+                    AppLocalization.Literal("数据导入完成。为使后台模块重新载入赛道与车辆缓存，请重启 LazyForza。"),
+                    AppLocalization.Literal("导入完成"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
             }
             catch (Exception exception)
             {
-                previewLabel.Text += "\n导入失败，数据库事务已回滚。";
+                previewLabel.Text += AppLocalization.Literal("\n导入失败，数据库事务已回滚。");
                 MessageBox.Show(
-                    exception.Message,
-                    "无法导入备份",
+                    AppLocalization.Literal(exception.Message),
+                    AppLocalization.Literal("无法导入备份"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
@@ -2989,7 +3121,10 @@ internal sealed partial class MainWindow : Window
             Padding = new Thickness(9, 7, 9, 7),
             Margin = new Thickness(18, 0, 12, 0),
             VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = $"最多 {PlayerIdentitySettings.MaximumLength} 个字符；留空表示不标注"
+            ToolTip = AppLocalization.Format(
+                "settings.playerCode.hint",
+                "最多 {0} 个字符；留空表示不标注",
+                PlayerIdentitySettings.MaximumLength)
         };
         Grid.SetColumn(playerCode, 1);
         identity.Children.Add(playerCode);
@@ -3004,9 +3139,9 @@ internal sealed partial class MainWindow : Window
             var normalized = PlayerIdentitySettings.Normalize(playerCode.Text);
             playerCode.Text = normalized;
             store.SetAppSetting(PlayerIdentitySettings.PlayerCodeSettingKey, normalized);
-            saveIdentity.Content = "已保存";
+            saveIdentity.Content = AppLocalization.Literal("已保存");
         };
-        playerCode.TextChanged += (_, _) => saveIdentity.Content = "保存";
+        playerCode.TextChanged += (_, _) => saveIdentity.Content = AppLocalization.Literal("保存");
         Grid.SetColumn(saveIdentity, 2);
         identity.Children.Add(saveIdentity);
         generalSettings.Children.Add(Card(identity));
@@ -3032,12 +3167,20 @@ internal sealed partial class MainWindow : Window
             if (!IPAddress.TryParse(address.Text.Trim(), out _) ||
                 !int.TryParse(port.Text.Trim(), out var parsedPort) || parsedPort is < 1 or > 65535 || parsedPort is >= 5200 and <= 5300)
             {
-                MessageBox.Show("请输入有效 IP 地址和 1–65535 端口，并避开 5200–5300。", "监听设置无效", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(
+                    AppLocalization.Literal("请输入有效 IP 地址和 1–65535 端口，并避开 5200–5300。"),
+                    AppLocalization.Literal("监听设置无效"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
                 return;
             }
             store.SetAppSetting("telemetry.listenAddress", address.Text.Trim());
             store.SetAppSetting("telemetry.port", parsedPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            MessageBox.Show("监听设置已保存，重启后生效。", "设置已保存", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(
+                AppLocalization.Literal("监听设置已保存，重启后生效。"),
+                AppLocalization.Literal("设置已保存"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         };
         Grid.SetRow(saveNetwork, 3);
         Grid.SetColumnSpan(saveNetwork, 2);
@@ -3130,8 +3273,8 @@ internal sealed partial class MainWindow : Window
         resetDefaults.Click += async (_, _) =>
         {
             if (MessageBox.Show(
-                    "确定重置 Overlay 设置吗？\n\n位置、尺寸、仪表盘部件、地产赛事部件、透明度、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。",
-                    "重置 Overlay",
+                    AppLocalization.Literal("确定重置 Overlay 设置吗？\n\n位置、尺寸、仪表盘部件、地产赛事部件、透明度、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。"),
+                    AppLocalization.Literal("重置 Overlay"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
@@ -3216,8 +3359,10 @@ internal sealed partial class MainWindow : Window
 
         void RefreshInteractionControls()
         {
-            reduceMotion.Content = reduceMotion.IsChecked == true ? "减少动态：开" : "减少动态：关";
-            dashboardMotion.Content = dashboardMotion.IsChecked == true ? "加速度跟随：开" : "加速度跟随：关";
+            reduceMotion.Content = AppLocalization.Literal(
+                reduceMotion.IsChecked == true ? "减少动态：开" : "减少动态：关");
+            dashboardMotion.Content = AppLocalization.Literal(
+                dashboardMotion.IsChecked == true ? "加速度跟随：开" : "加速度跟随：关");
             motionIntensity.IsEnabled = dashboardMotion.IsChecked == true && reduceMotion.IsChecked != true;
         }
 
@@ -3256,8 +3401,11 @@ internal sealed partial class MainWindow : Window
                 Padding = new Thickness(10, 6, 10, 6),
                 MinWidth = 106
             };
-            void RefreshComponentToggle() => toggle.Content =
-                $"{name}：{(toggle.IsChecked == true ? "开" : "关")}";
+            void RefreshComponentToggle() => toggle.Content = AppLocalization.Format(
+                "settings.hud.componentToggle",
+                "{0}：{1}",
+                AppLocalization.Literal(name),
+                AppLocalization.Literal(toggle.IsChecked == true ? "开" : "关"));
             toggle.Click += (_, _) => RefreshComponentToggle();
             RefreshComponentToggle();
             componentToggles[kind] = toggle;
@@ -3293,8 +3441,11 @@ internal sealed partial class MainWindow : Window
                 Padding = new Thickness(10, 6, 10, 6),
                 MinWidth = 116
             };
-            void RefreshEstateRaceToggle() => toggle.Content =
-                $"{name}：{(toggle.IsChecked == true ? "开" : "关")}";
+            void RefreshEstateRaceToggle() => toggle.Content = AppLocalization.Format(
+                "settings.hud.componentToggle",
+                "{0}：{1}",
+                AppLocalization.Literal(name),
+                AppLocalization.Literal(toggle.IsChecked == true ? "开" : "关"));
             toggle.Click += (_, _) => RefreshEstateRaceToggle();
             RefreshEstateRaceToggle();
             estateRaceToggles[kind] = toggle;
@@ -3708,8 +3859,8 @@ internal sealed partial class MainWindow : Window
         {
             var dialog = new SaveFileDialog
             {
-                Title = "导出 LazyForza 诊断包",
-                Filter = "LazyForza 诊断包 (*.lfzdiag)|*.lfzdiag",
+                Title = AppLocalization.Text("diagnostics.export.dialog", "导出 LazyForza 诊断包"),
+                Filter = AppLocalization.Text("diagnostics.fileFilter", "LazyForza 诊断包 (*.lfzdiag)|*.lfzdiag"),
                 DefaultExt = ".lfzdiag",
                 AddExtension = true,
                 InitialDirectory = directories.DiagnosticsPath,
@@ -3717,7 +3868,7 @@ internal sealed partial class MainWindow : Window
             };
             if (dialog.ShowDialog(this) != true) return;
             exportPackage.IsEnabled = false;
-            packageStatus.Text = "正在整理遥测、状态事件和赛道候选评分…";
+            packageStatus.Text = AppLocalization.Literal("正在整理遥测、状态事件和赛道候选评分…");
             try
             {
                 var path = await Task.Run(
@@ -3727,22 +3878,25 @@ internal sealed partial class MainWindow : Window
                         CurrentApplicationVersion(),
                         lifetimeCancellation.Token),
                     lifetimeCancellation.Token);
-                packageStatus.Text =
-                    $"已导出：{Path.GetFileName(path)}\n" +
-                    $"当前缓冲 {diagnosticCapture.BufferedSamples} 帧 · " +
-                    $"事件 {diagnosticCapture.EventCount} 条 · 异常快照 {diagnosticCapture.AnomalyCount} 个";
+                packageStatus.Text = AppLocalization.Format(
+                    "diagnostics.export.status",
+                    "已导出：{0}\n当前缓冲 {1} 帧 · 事件 {2} 条 · 异常快照 {3} 个",
+                    Path.GetFileName(path),
+                    diagnosticCapture.BufferedSamples,
+                    diagnosticCapture.EventCount,
+                    diagnosticCapture.AnomalyCount);
                 MessageBox.Show(
-                    $"诊断包已生成。\n\n{path}",
-                    "导出完成",
+                    AppLocalization.Format("diagnostics.export.complete", "诊断包已生成。\n\n{0}", path),
+                    AppLocalization.Literal("导出完成"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
             }
             catch (Exception exception)
             {
-                packageStatus.Text = "诊断包导出失败。";
+                packageStatus.Text = AppLocalization.Literal("诊断包导出失败。");
                 MessageBox.Show(
-                    exception.Message,
-                    "无法导出诊断包",
+                    AppLocalization.Literal(exception.Message),
+                    AppLocalization.Literal("无法导出诊断包"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
@@ -3775,8 +3929,8 @@ internal sealed partial class MainWindow : Window
                 {
                     var result = lapAnalysisModule.CorrectTrackMatch(trackId);
                     MessageBox.Show(
-                        result.Message,
-                        "赛道已纠正",
+                        AppLocalization.Literal(result.Message),
+                        AppLocalization.Literal("赛道已纠正"),
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
                     refreshVisiblePage?.Invoke();
@@ -3784,8 +3938,8 @@ internal sealed partial class MainWindow : Window
                 catch (Exception exception)
                 {
                     MessageBox.Show(
-                        exception.Message,
-                        "无法应用纠正",
+                        AppLocalization.Literal(exception.Message),
+                        AppLocalization.Literal("无法应用纠正"),
                         MessageBoxButton.OK,
                         MessageBoxImage.Warning);
                 }
@@ -3809,29 +3963,98 @@ internal sealed partial class MainWindow : Window
         stack.Children.Add(Card(recordingControls));
         var moduleLabels = moduleManager.Modules.Select(module => (Module: module, Label: Label(string.Empty, 13))).ToArray();
         foreach (var (_, label) in moduleLabels) stack.Children.Add(Card(label));
-        stack.Children.Add(Card(Label($"数据目录：{directories.Root}\n录制目录：{directories.RecordingsPath}\n日志目录：{directories.LogsPath}\nSchemaVersion：{store.SchemaVersion}\n车辆配置档案：{store.CountVehicleProfiles()}", 13)));
+        stack.Children.Add(Card(Label(AppLocalization.Format(
+            "diagnostics.paths",
+            "数据目录：{0}\n录制目录：{1}\n日志目录：{2}\nSchemaVersion：{3}\n车辆配置档案：{4}",
+            directories.Root,
+            directories.RecordingsPath,
+            directories.LogsPath,
+            store.SchemaVersion,
+            store.CountVehicleProfiles()), 13)));
         refreshVisiblePage = () =>
         {
             var diagnostics = telemetry.Diagnostics;
-            diagnosticsLabel.Text = $"来源/监听：{diagnostics.ListenAddress}\n状态：{diagnostics.State}\n包率：{diagnostics.PacketsPerSecond:0.0} Hz\n有效/无效：{diagnostics.ValidPackets:N0} / {diagnostics.InvalidPackets:N0}\n估计丢包：{diagnostics.EstimatedDroppedPackets:N0}\n同时间戳/乱序/回绕：{diagnostics.DuplicatePackets:N0} / {diagnostics.OutOfOrderPackets:N0} / {diagnostics.TimestampWraps:N0}\n最后包：{diagnostics.LastPacketAt?.ToLocalTime():O}\n最近错误：{diagnostics.LastError ?? "无"}";
+            diagnosticsLabel.Text = AppLocalization.Format(
+                "diagnostics.telemetryStatus",
+                "来源/监听：{0}\n状态：{1}\n包率：{2:0.0} Hz\n有效/无效：{3:N0} / {4:N0}\n估计丢包：{5:N0}\n同时间戳/乱序/回绕：{6:N0} / {7:N0} / {8:N0}\n最后包：{9:O}\n最近错误：{10}",
+                diagnostics.ListenAddress,
+                diagnostics.State,
+                diagnostics.PacketsPerSecond,
+                diagnostics.ValidPackets,
+                diagnostics.InvalidPackets,
+                diagnostics.EstimatedDroppedPackets,
+                diagnostics.DuplicatePackets,
+                diagnostics.OutOfOrderPackets,
+                diagnostics.TimestampWraps,
+                diagnostics.LastPacketAt?.ToLocalTime(),
+                AppLocalization.Literal(diagnostics.LastError ?? "无"));
             if (telemetry.Latest is { } latest)
             {
                 var raw = latest.Raw;
-                var displayGear = raw.IsRaceOn == 1 ? ForzaGear.Display(raw.Gear) : "—（非驾驶帧）";
-                rawLabel.Text = $"当前原始帧（用于真实 FH6 核验）\nIsRaceOn={raw.IsRaceOn} · Competition={TelemetryContextClassifier.IsCompetition(raw)} · RacePosition={raw.RacePosition} · LapNumber={raw.LapNumber}\nCarOrdinal={raw.CarOrdinal} · Class/PI={raw.CarClass}/{raw.CarPerformanceIndex} · Cylinders={raw.NumCylinders} · Drivetrain={raw.DrivetrainType}\nRace/Current/Last={raw.CurrentRaceTime:0.000}/{raw.CurrentLap:0.000}/{raw.LastLap:0.000} s\nGear(raw)={raw.Gear} · Display={displayGear} · Speed={raw.Speed:0.000} m/s → {latest.Normalized.SpeedKph:0.0} km/h · Distance={raw.DistanceTraveled:0.0} m\nPosition={raw.Position.X:0.000}/{raw.Position.Y:0.000}/{raw.Position.Z:0.000} · Yaw/Pitch/Roll={raw.Yaw:0.000}/{raw.Pitch:0.000}/{raw.Roll:0.000}\nVelocity={raw.Velocity.X:0.000}/{raw.Velocity.Y:0.000}/{raw.Velocity.Z:0.000} · WheelRad/s={raw.WheelRotationSpeed.FrontLeft:0.000}/{raw.WheelRotationSpeed.FrontRight:0.000}/{raw.WheelRotationSpeed.RearLeft:0.000}/{raw.WheelRotationSpeed.RearRight:0.000}\nRPM={raw.CurrentEngineRpm:0}/{raw.EngineMaxRpm:0} · Power={raw.Power:0} W → {latest.Normalized.PowerKw:0.0} kW · Torque={raw.Torque:0.0} N·m\nAccel={raw.Accel} · Brake={raw.Brake} · Clutch={raw.Clutch} · HandBrake={raw.HandBrake} · Steer={raw.Steer}\nTireTemp raw={raw.TireTemperature.FrontLeft:0.0}/{raw.TireTemperature.FrontRight:0.0}/{raw.TireTemperature.RearLeft:0.0}/{raw.TireTemperature.RearRight:0.0} °F（实机同帧对照；仪表盘换算为 °C）";
+                var displayGear = raw.IsRaceOn == 1
+                    ? ForzaGear.Display(raw.Gear)
+                    : AppLocalization.Literal("—（非驾驶帧）");
+                rawLabel.Text = AppLocalization.Format(
+                    "diagnostics.rawFrame",
+                    "当前原始帧（用于真实 FH6 核验）\nIsRaceOn={0} · Competition={1} · RacePosition={2} · LapNumber={3}\nCarOrdinal={4} · Class/PI={5}/{6} · Cylinders={7} · Drivetrain={8}\nRace/Current/Last={9:0.000}/{10:0.000}/{11:0.000} s\nGear(raw)={12} · Display={13} · Speed={14:0.000} m/s → {15:0.0} km/h · Distance={16:0.0} m\nPosition={17:0.000}/{18:0.000}/{19:0.000} · Yaw/Pitch/Roll={20:0.000}/{21:0.000}/{22:0.000}\nVelocity={23:0.000}/{24:0.000}/{25:0.000} · WheelRad/s={26:0.000}/{27:0.000}/{28:0.000}/{29:0.000}\nRPM={30:0}/{31:0} · Power={32:0} W → {33:0.0} kW · Torque={34:0.0} N·m\nAccel={35} · Brake={36} · Clutch={37} · HandBrake={38} · Steer={39}\nTireTemp raw={40:0.0}/{41:0.0}/{42:0.0}/{43:0.0} °F（实机同帧对照；仪表盘换算为 °C）",
+                    raw.IsRaceOn,
+                    TelemetryContextClassifier.IsCompetition(raw),
+                    raw.RacePosition,
+                    raw.LapNumber,
+                    raw.CarOrdinal,
+                    raw.CarClass,
+                    raw.CarPerformanceIndex,
+                    raw.NumCylinders,
+                    raw.DrivetrainType,
+                    raw.CurrentRaceTime,
+                    raw.CurrentLap,
+                    raw.LastLap,
+                    raw.Gear,
+                    displayGear,
+                    raw.Speed,
+                    latest.Normalized.SpeedKph,
+                    raw.DistanceTraveled,
+                    raw.Position.X,
+                    raw.Position.Y,
+                    raw.Position.Z,
+                    raw.Yaw,
+                    raw.Pitch,
+                    raw.Roll,
+                    raw.Velocity.X,
+                    raw.Velocity.Y,
+                    raw.Velocity.Z,
+                    raw.WheelRotationSpeed.FrontLeft,
+                    raw.WheelRotationSpeed.FrontRight,
+                    raw.WheelRotationSpeed.RearLeft,
+                    raw.WheelRotationSpeed.RearRight,
+                    raw.CurrentEngineRpm,
+                    raw.EngineMaxRpm,
+                    raw.Power,
+                    latest.Normalized.PowerKw,
+                    raw.Torque,
+                    raw.Accel,
+                    raw.Brake,
+                    raw.Clutch,
+                    raw.HandBrake,
+                    raw.Steer,
+                    raw.TireTemperature.FrontLeft,
+                    raw.TireTemperature.FrontRight,
+                    raw.TireTemperature.RearLeft,
+                    raw.TireTemperature.RearRight);
             }
-            else rawLabel.Text = "尚未收到原始帧。";
+            else rawLabel.Text = AppLocalization.Literal("尚未收到原始帧。");
             if (lapAnalysisModule is not null)
             {
                 var match = lapAnalysisModule.MatchDiagnostics;
                 diagnosticCapture.UpdateTrackMatch(match);
                 var candidates = match.TopCandidates.Count == 0
-                    ? "  暂无候选"
+                    ? AppLocalization.Literal("  暂无候选")
                     : string.Join(
                         "\n",
                         match.TopCandidates.Select((candidate, index) =>
                         {
-                            var layout = candidate.LayoutKind == TrackLayoutKind.Circuit ? "环道" : "定点";
+                            var layout = AppLocalization.Literal(
+                                candidate.LayoutKind == TrackLayoutKind.Circuit ? "环道" : "定点");
                             var startDistance = candidate.StartDistanceMeters is double start
                                 ? $"{start:0.0} m"
                                 : "—";
@@ -3840,37 +4063,74 @@ internal sealed partial class MainWindow : Window
                                 : "—";
                             var reason = string.IsNullOrWhiteSpace(candidate.EliminationReason)
                                 ? string.Empty
-                                : $" · 淘汰：{candidate.EliminationReason}";
-                            return $"  {index + 1}. {candidate.TrackName} [{candidate.Stage} · {layout}/{candidate.Category ?? "未分类"} · {candidate.LengthMeters:0} m]" +
-                                   $"\n     起点 {startDistance} · 平均距离 {meanDistance} · 进度 {candidate.ProgressMeters:0} m · 有效率 {candidate.ValidRatio:P0}{reason}";
+                                : AppLocalization.Format(
+                                    "diagnostics.candidate.eliminated",
+                                    " · 淘汰：{0}",
+                                    AppLocalization.Literal(candidate.EliminationReason));
+                            return AppLocalization.Format(
+                                "diagnostics.candidate",
+                                "  {0}. {1} [{2} · {3}/{4} · {5:0} m]\n     起点 {6} · 平均距离 {7} · 进度 {8:0} m · 有效率 {9:P0}{10}",
+                                index + 1,
+                                AppLocalization.Literal(candidate.TrackName),
+                                AppLocalization.Literal(candidate.Stage),
+                                layout,
+                                AppLocalization.Literal(candidate.Category ?? "未分类"),
+                                candidate.LengthMeters,
+                                startDistance,
+                                meanDistance,
+                                candidate.ProgressMeters,
+                                candidate.ValidRatio,
+                                reason);
                         }));
                 var eliminations = match.EliminatedCandidates.Count == 0
-                    ? "  暂无淘汰记录"
+                    ? AppLocalization.Literal("  暂无淘汰记录")
                     : string.Join(
                         "\n",
                         match.EliminatedCandidates.Select(candidate =>
-                            $"  {candidate.TrackName}：{candidate.EliminationReason ?? "未进入精匹配集合"}"));
-                trackMatchLabel.Text =
-                    $"赛道识别 2.0\n状态：{match.State}\n路线总数/粗筛通过/精匹配：{match.TotalRoutes} / {match.CoarseEligibleRoutes} / {match.FineCandidateRoutes}\n前三名候选：\n{candidates}\n最近淘汰：\n{eliminations}";
+                            AppLocalization.Format(
+                                "diagnostics.elimination",
+                                "  {0}：{1}",
+                                AppLocalization.Literal(candidate.TrackName),
+                                AppLocalization.Literal(candidate.EliminationReason ?? "未进入精匹配集合"))));
+                trackMatchLabel.Text = AppLocalization.Format(
+                    "diagnostics.trackMatch",
+                    "赛道识别 2.0\n状态：{0}\n路线总数/粗筛通过/精匹配：{1} / {2} / {3}\n前三名候选：\n{4}\n最近淘汰：\n{5}",
+                    AppLocalization.Literal(match.State),
+                    match.TotalRoutes,
+                    match.CoarseEligibleRoutes,
+                    match.FineCandidateRoutes,
+                    candidates,
+                    eliminations);
                 if (trackCorrection is not null)
                 {
                     trackCorrection.IsEnabled = lapAnalysisModule.HasCurrentCompetitionSession;
-                    trackCorrection.ToolTip = trackCorrection.IsEnabled
+                    trackCorrection.ToolTip = AppLocalization.Literal(trackCorrection.IsEnabled
                         ? "根据当前候选证据或官方赛事名称纠正本场识别"
-                        : "进入一场比赛后可使用纠错助手";
+                        : "进入一场比赛后可使用纠错助手");
                 }
             }
             if (exportPackage.IsEnabled)
             {
-                packageStatus.Text =
-                    $"短时缓冲 {diagnosticCapture.BufferedSamples} 帧 · " +
-                    $"事件 {diagnosticCapture.EventCount} 条 · 异常快照 {diagnosticCapture.AnomalyCount} 个\n" +
-                    "导出内容会移除用户名和本地目录，不包含原始 UDP 字节。";
+                packageStatus.Text = AppLocalization.Format(
+                    "diagnostics.bufferStatus",
+                    "短时缓冲 {0} 帧 · 事件 {1} 条 · 异常快照 {2} 个\n导出内容会移除用户名和本地目录，不包含原始 UDP 字节。",
+                    diagnosticCapture.BufferedSamples,
+                    diagnosticCapture.EventCount,
+                    diagnosticCapture.AnomalyCount);
             }
             recordingLabel.Text = recorder.IsManualRecording
-                ? $"正在手动录制：{recorder.FramesWritten:N0} 帧\n{recorder.CurrentPath}\n{recorder.AutomaticStatus}"
-                : $"手动原始数据录制已停止。\n{recorder.AutomaticStatus}";
-            recordButton.Content = recorder.IsManualRecording ? "停止并写入文件" : "开始手动原始 324 字节录制";
+                ? AppLocalization.Format(
+                    "diagnostics.recording.active",
+                    "正在手动录制：{0:N0} 帧\n{1}\n{2}",
+                    recorder.FramesWritten,
+                    recorder.CurrentPath,
+                    AppLocalization.Literal(recorder.AutomaticStatus))
+                : AppLocalization.Format(
+                    "diagnostics.recording.stopped",
+                    "手动原始数据录制已停止。\n{0}",
+                    AppLocalization.Literal(recorder.AutomaticStatus));
+            recordButton.Content = AppLocalization.Literal(
+                recorder.IsManualRecording ? "停止并写入文件" : "开始手动原始 324 字节录制");
             foreach (var (module, label) in moduleLabels) label.Text = $"{module.Descriptor.Id} · {module.Status.State} · Enabled={module.Status.IsEnabled} · Error={module.Status.LastError ?? "none"}";
         };
         refreshVisiblePage();
@@ -4162,6 +4422,7 @@ internal sealed class TrackNameDialog : Window
         save.Click += (_, _) => { if (!string.IsNullOrWhiteSpace(textBox.Text)) DialogResult = true; };
         buttons.Children.Add(cancel); buttons.Children.Add(save); stack.Children.Add(buttons);
         Content = stack;
+        AppLocalization.ApplyTo(this);
         Loaded += (_, _) => { textBox.SelectAll(); textBox.Focus(); };
     }
 
@@ -4204,6 +4465,7 @@ internal sealed class VehicleProfileNameDialog : Window
         buttons.Children.Add(save);
         stack.Children.Add(buttons);
         Content = stack;
+        AppLocalization.ApplyTo(this);
         Loaded += (_, _) =>
         {
             textBox.SelectAll();

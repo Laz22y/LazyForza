@@ -53,7 +53,7 @@ internal sealed class UpdateOfferWindow : Window
         });
         version.Children.Add(new TextBlock
         {
-            Text = $"更新来源：{release.SourceName}",
+            Text = AppLocalization.Format("update.offer.source", "更新来源：{0}", release.SourceName),
             FontSize = 12,
             Foreground = ResourceBrush("MutedBrush"),
             Margin = new Thickness(0, 3, 0, 0)
@@ -138,6 +138,7 @@ internal sealed class UpdateOfferWindow : Window
         root.Children.Add(footer);
 
         Content = root;
+        AppLocalization.ApplyTo(this);
     }
 
     private static Border BuildTypeBadge(UpdateReleaseType type)
@@ -159,7 +160,7 @@ internal sealed class UpdateOfferWindow : Window
             Padding = new Thickness(10, 4, 10, 4),
             Child = new TextBlock
             {
-                Text = type.DisplayName(),
+                Text = AppLocalization.Literal(type.DisplayName()),
                 Foreground = new SolidColorBrush(accent),
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold

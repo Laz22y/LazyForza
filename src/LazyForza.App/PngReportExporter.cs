@@ -21,8 +21,8 @@ internal static class PngReportExporter
 
         var dialog = new SaveFileDialog
         {
-            Title = "导出 PNG",
-            Filter = "PNG 图片 (*.png)|*.png",
+            Title = AppLocalization.Text("png.export.title", "导出 PNG"),
+            Filter = AppLocalization.Text("png.export.filter", "PNG 图片 (*.png)|*.png"),
             DefaultExt = ".png",
             AddExtension = true,
             FileName = SanitizeFileName(suggestedFileName),
@@ -40,6 +40,7 @@ internal static class PngReportExporter
         ArgumentNullException.ThrowIfNull(report);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
+        AppLocalization.ApplyTo(report);
         report.Measure(new Size(MaximumPixelWidth, double.PositiveInfinity));
         var logicalWidth = Math.Max(1, Math.Min(MaximumPixelWidth, report.DesiredSize.Width));
         var logicalHeight = Math.Max(1, report.DesiredSize.Height);

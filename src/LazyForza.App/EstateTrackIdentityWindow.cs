@@ -29,7 +29,10 @@ internal sealed class EstateTrackIdentityWindow : Window
         root.Children.Add(Text(
             exportedPath is null
                 ? "下面的信息可用于核对赛道。房主也可以直接在服务端总控上传 .lfzestate，由服务端自动识别并填写。"
-                : $"文件已保存到：{exportedPath}\n把这份 .lfzestate 上传到服务端总控即可，服务端会自动识别赛道名称、标识和特征值。",
+                : AppLocalization.Format(
+                    "estate.identity.exported",
+                    "文件已保存到：{0}\n把这份 .lfzestate 上传到服务端总控即可，服务端会自动识别赛道名称、标识和特征值。",
+                    exportedPath),
             13,
             FontWeights.Normal,
             ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185)),
@@ -39,7 +42,11 @@ internal sealed class EstateTrackIdentityWindow : Window
         root.Children.Add(Field("赛道标识", identity.TrackId.ToString("D")));
         root.Children.Add(Field("赛道特征 SHA-256", identity.TrackFingerprintSha256));
         root.Children.Add(Text(
-            $"地图修订：{identity.MapRevision}    分段数：{identity.SectorCount}\n特征值只对应会影响比赛的赛道几何、分段、终点门、检查点和维修区；本地数据来源、名称、圈速记录及个人配置不会改变它。",
+            AppLocalization.Format(
+                "estate.identity.summary",
+                "地图修订：{0}    分段数：{1}\n特征值只对应会影响比赛的赛道几何、分段、终点门、检查点和维修区；本地数据来源、名称、圈速记录及个人配置不会改变它。",
+                identity.MapRevision,
+                identity.SectorCount),
             12,
             FontWeights.Normal,
             ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185)),
@@ -64,6 +71,7 @@ internal sealed class EstateTrackIdentityWindow : Window
         root.Children.Add(copyStatus);
         root.Children.Add(actions);
         Content = root;
+        AppLocalization.ApplyTo(this);
     }
 
     private Grid Field(string label, string value)
@@ -93,28 +101,35 @@ internal sealed class EstateTrackIdentityWindow : Window
             Padding = new Thickness(12, 7, 12, 7),
             Margin = new Thickness(10, 0, 0, 0)
         };
-        copy.Click += (_, _) => Copy(value, $"已复制{label}。");
+        copy.Click += (_, _) => Copy(
+            value,
+            AppLocalization.Format("estate.identity.copiedField", "已复制{0}。", AppLocalization.Literal(label)));
         Grid.SetColumn(copy, 2);
         grid.Children.Add(copy);
         return grid;
     }
 
-    private string AllText() =>
-        $"赛道名称：{identity.TrackName}\r\n" +
-        $"赛道标识：{identity.TrackId:D}\r\n" +
-        $"地图修订：{identity.MapRevision}\r\n" +
-        $"赛道特征 SHA-256：{identity.TrackFingerprintSha256}";
+    private string AllText() => AppLocalization.Format(
+        "estate.identity.copyText",
+        "赛道名称：{0}\r\n赛道标识：{1}\r\n地图修订：{2}\r\n赛道特征 SHA-256：{3}",
+        identity.TrackName,
+        identity.TrackId.ToString("D"),
+        identity.MapRevision,
+        identity.TrackFingerprintSha256);
 
     private void Copy(string value, string success)
     {
         try
         {
             Clipboard.SetText(value);
-            copyStatus.Text = success;
+            copyStatus.Text = AppLocalization.Literal(success);
         }
         catch (Exception exception)
         {
-            copyStatus.Text = $"复制失败：{exception.Message}";
+            copyStatus.Text = AppLocalization.Format(
+                "estate.identity.copyFailed",
+                "复制失败：{0}",
+                AppLocalization.Literal(exception.Message));
         }
     }
 
@@ -125,7 +140,7 @@ internal sealed class EstateTrackIdentityWindow : Window
         Brush? brush = null,
         Thickness? margin = null) => new()
         {
-            Text = value,
+            Text = AppLocalization.Literal(value),
             FontSize = size,
             FontWeight = weight,
             Foreground = brush ?? ResourceBrush("TextBrush", Color.FromRgb(244, 246, 248)),

@@ -125,7 +125,7 @@ internal sealed partial class MainWindow
         {
             MessageBox.Show(
                 this,
-                exception.Message,
+                AppLocalization.Literal(exception.Message),
                 AppLocalization.Text("literal:导入地产环道", "导入地产环道"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);

@@ -49,8 +49,10 @@ internal sealed partial class MainWindow
         {
             var dialog = new OpenFileDialog
             {
-                Title = "导入地产环道",
-                Filter = "LazyForza 地产环道 (*.lfzestate)|*.lfzestate|所有文件 (*.*)|*.*",
+                Title = AppLocalization.Text("estate.file.importDialog", "导入地产环道"),
+                Filter = AppLocalization.Text(
+                    "estate.file.openFilter",
+                    "LazyForza 地产环道 (*.lfzestate)|*.lfzestate|所有文件 (*.*)|*.*"),
                 CheckFileExists = true,
                 Multiselect = false
             };
@@ -72,8 +74,8 @@ internal sealed partial class MainWindow
             {
                 MessageBox.Show(
                     this,
-                    "请先关闭漂移仪表盘，再录入地产环道。",
-                    "地产环道",
+                    AppLocalization.Literal("请先关闭漂移仪表盘，再录入地产环道。"),
+                    AppLocalization.Literal("地产环道"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
                 return;
@@ -105,8 +107,8 @@ internal sealed partial class MainWindow
                 15,
                 FontWeights.SemiBold,
                 "AccentBrush"));
-            activeStatus = Label(state.Status, 13);
-            activeInstruction = Label(state.Instruction, 12, FontWeights.Normal, "MutedBrush");
+            activeStatus = Label(AppLocalization.Literal(state.Status), 13);
+            activeInstruction = Label(AppLocalization.Literal(state.Instruction), 12, FontWeights.Normal, "MutedBrush");
             active.Children.Add(activeStatus);
             active.Children.Add(activeInstruction);
             if (state.IsTimingActive)
@@ -185,7 +187,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, exception.Message, "无法读取赛事赛道信息", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法读取赛事赛道信息"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             };
             rowActions.Children.Add(raceInfo);
@@ -201,8 +203,9 @@ internal sealed partial class MainWindow
             {
                 var dialog = new SaveFileDialog
                 {
-                    Title = "导出地产环道",
-                    Filter = "LazyForza 地产环道 (*.lfzestate)|*.lfzestate",
+                    Title = AppLocalization.Text("estate.file.exportDialog", "导出地产环道"),
+                    Filter = AppLocalization.Text(
+                        "estate.file.exportFilter", "LazyForza 地产环道 (*.lfzestate)|*.lfzestate"),
                     DefaultExt = EstateTrackPackageService.FileExtension,
                     AddExtension = true,
                     FileName = $"{SafeFileName(track.Name)}-{SafeFileName(definition.MapRevision)}.lfzestate"
@@ -222,7 +225,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, exception.Message, "导出地产环道", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("导出地产环道"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             };
             rowActions.Children.Add(export);
@@ -241,7 +244,7 @@ internal sealed partial class MainWindow
                 var currentDefinition = store.LoadEstateTrackDefinition(track.Id);
                 if (loadedTrack is null || currentDefinition is null)
                 {
-                    MessageBox.Show(this, "赛道定义已经不存在，请刷新列表。", "无法编辑地产环道", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(this, AppLocalization.Literal("赛道定义已经不存在，请刷新列表。"), AppLocalization.Literal("无法编辑地产环道"), MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
                 var window = new EstateTrackEditorWindow(
@@ -272,8 +275,8 @@ internal sealed partial class MainWindow
                 {
                     MessageBox.Show(
                         this,
-                        "请先完成或取消当前地产环道录入，再删除已有赛道。",
-                        "无法删除地产环道",
+                        AppLocalization.Literal("请先完成或取消当前地产环道录入，再删除已有赛道。"),
+                        AppLocalization.Literal("无法删除地产环道"),
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
                     return;
@@ -282,18 +285,20 @@ internal sealed partial class MainWindow
                 {
                     MessageBox.Show(
                         this,
-                        "这条地产环道正在计时。请先停止计时，再删除赛道。",
-                        "无法删除地产环道",
+                        AppLocalization.Literal("这条地产环道正在计时。请先停止计时，再删除赛道。"),
+                        AppLocalization.Literal("无法删除地产环道"),
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
                     return;
                 }
                 if (MessageBox.Show(
                         this,
-                        $"确认删除“{track.Name}”？\n\n" +
-                        $"赛道路线、终点门、检查点、维修区定义以及 {track.Laps} 圈成绩都会一并删除，且无法撤销。" +
-                        "如需保留赛道，请先导出 .lfzestate 文件。",
-                        "确认删除地产环道",
+                        AppLocalization.Format(
+                            "estate.delete.confirmation",
+                            "确认删除“{0}”？\n\n赛道路线、终点门、检查点、维修区定义以及 {1} 圈成绩都会一并删除，且无法撤销。如需保留赛道，请先导出 .lfzestate 文件。",
+                            track.Name,
+                            track.Laps),
+                        AppLocalization.Literal("确认删除地产环道"),
                         MessageBoxButton.YesNo,
                         MessageBoxImage.Warning) != MessageBoxResult.Yes)
                     return;
@@ -311,7 +316,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, exception.Message, "删除地产环道", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("删除地产环道"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             };
             rowActions.Children.Add(delete);
@@ -331,8 +336,8 @@ internal sealed partial class MainWindow
                 {
                     MessageBox.Show(
                         this,
-                        "请先关闭漂移仪表盘，再启用地产环道计时。",
-                        "地产环道",
+                        AppLocalization.Literal("请先关闭漂移仪表盘，再启用地产环道计时。"),
+                        AppLocalization.Literal("地产环道"),
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
                     return;
@@ -346,7 +351,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, exception.Message, "地产环道计时", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("地产环道计时"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
                 RenderSelectedPage();
             };
@@ -379,8 +384,8 @@ internal sealed partial class MainWindow
 
                 add.IsEnabled = !current.IsTimingActive && !current.IsEnrollmentActive;
                 import.IsEnabled = !current.IsTimingActive && !current.IsEnrollmentActive;
-                if (activeStatus is not null) activeStatus.Text = current.Status;
-                if (activeInstruction is not null) activeInstruction.Text = current.Instruction;
+                if (activeStatus is not null) activeStatus.Text = AppLocalization.Literal(current.Status);
+                if (activeInstruction is not null) activeInstruction.Text = AppLocalization.Literal(current.Instruction);
                 if (activeTiming is not null) activeTiming.Text = TimingSummary(current);
                 foreach (var (trackId, button) in timingButtons)
                 {
@@ -396,9 +401,12 @@ internal sealed partial class MainWindow
             }
         }
 
-        static string TimingSummary(EstateCircuitState value) =>
-            $"当前 {value.CurrentLapSeconds:0.0} s · 上一圈 " +
-            $"{(value.LastLapSeconds is double last ? $"{last:0.000} s" : "—")} · 已完成 {value.CompletedLaps} 圈";
+        static string TimingSummary(EstateCircuitState value) => AppLocalization.Format(
+            "estate.timing.summary",
+            "当前 {0:0.0} s · 上一圈 {1} · 已完成 {2} 圈",
+            value.CurrentLapSeconds,
+            value.LastLapSeconds is double last ? $"{last:0.000} s" : "—",
+            value.CompletedLaps);
 
         static double GateWidth(EstateTimingGate gate)
         {
