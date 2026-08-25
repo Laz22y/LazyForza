@@ -19,7 +19,6 @@ EstateRaceModule <-> LazyForza.RaceServer protocol v2
 ```
 
 `TelemetryHub` 只有存在订阅者时运行数据源；HUD/实时分析订阅是 bounded、`DropOldest` 的 latest-wins 通道。模块停用会取消自己的 Task、释放订阅并移除 HUD contribution。所有业务模块关闭后主窗口、模块管理与诊断仍能运行。
-地产赛事的赛道、维修区和碰撞状态计算会在遥测频率高于处理上限时合并过密帧，不让 FH6 帧率转化为待处理积压；计圈仍使用源时间戳和跨点插值，手动赛道录入不降采样。
 
 ## 项目边界
 

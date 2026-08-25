@@ -51,8 +51,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private readonly EstatePitStrategyPredictor pitStrategyPredictor = new();
     private readonly EstatePracticeTestManager practiceTestManager = new();
     private readonly Stopwatch monotonicClock = Stopwatch.StartNew();
-    private readonly TelemetryProcessingCadence telemetryProcessingCadence = new(
-        TelemetryProcessingCadence.HighRateMinimumInterval);
     private ITelemetrySubscription? subscription;
     private CancellationTokenSource? runCancellation;
     private CancellationTokenSource? connectionCancellation;
@@ -218,7 +216,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         string? expectedTrackPackageHash = null)
     {
         await CancelReconnectAsync().ConfigureAwait(false);
-        telemetryProcessingCadence.Reset();
         Interlocked.Exchange(ref reconnectAttemptCount, 0);
         Interlocked.Exchange(ref connectedAtMonotonicMilliseconds, 0);
         requestedTrackPackageHash = string.IsNullOrWhiteSpace(expectedTrackPackageHash)
@@ -471,7 +468,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         lastQualifyingSessionNumber = 0;
         lastPracticeSessionNumber = 0;
         lastValidProjection = null;
-        telemetryProcessingCadence.Reset();
         sentLapEventId = null;
         ClearPendingLapUploads();
         ClearPendingPitServiceUploads();
@@ -491,26 +487,11 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             try
             {
                 var batch = LatestTelemetryBatch.Drain(frame, frames);
-                var selectedMask = 0;
-                var lastSelectedIndex = -1;
                 for (var index = 0; index < batch.Count; index++)
-                {
-                    var candidate = batch[index];
-                    if (!telemetryProcessingCadence.ShouldProcess(
-                            candidate.ArrivalTime,
-                            RequiresImmediateTelemetryObservation(candidate)))
-                        continue;
-                    selectedMask |= 1 << index;
-                    lastSelectedIndex = index;
-                }
-                for (var index = 0; index < batch.Count; index++)
-                {
-                    if ((selectedMask & (1 << index)) == 0) continue;
                     await ProcessTelemetryFrameAsync(
                         batch[index],
-                        processPeriodicState: index == lastSelectedIndex,
+                        processPeriodicState: index == batch.Count - 1,
                         cancellationToken: cancellationToken).ConfigureAwait(false);
-                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception)
@@ -1300,12 +1281,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                float.IsFinite(frame.Raw.Position.Y) &&
                float.IsFinite(frame.Raw.Position.Z);
     }
-
-    private static bool RequiresImmediateTelemetryObservation(TelemetryFrame frame) =>
-        TelemetryContextClassifier.IsDriverIntervention(frame.Raw) ||
-        !float.IsFinite(frame.Raw.Position.X) ||
-        !float.IsFinite(frame.Raw.Position.Y) ||
-        !float.IsFinite(frame.Raw.Position.Z);
 
     private void PublishSnapshot(EstateRaceConnectionState state, string text)
     {

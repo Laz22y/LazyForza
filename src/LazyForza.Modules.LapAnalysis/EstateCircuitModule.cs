@@ -150,8 +150,6 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private readonly Func<OverlayLayout> getOverlayLayout;
     private readonly Func<string?> playerCodeProvider;
     private readonly object stateGate = new();
-    private readonly TelemetryProcessingCadence timingProcessingCadence = new(
-        TelemetryProcessingCadence.HighRateMinimumInterval);
     private readonly EstateTimestampUnwrapper timestampUnwrapper = new();
     private readonly List<EstateGatePoint> firstTrace = [];
     private readonly List<EstateGatePoint> secondTrace = [];
@@ -1075,11 +1073,6 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         {
             lock (stateGate)
             {
-                var timingOnly = state.IsTimingActive && !state.IsEnrollmentActive && !pitState.IsActive;
-                var requiresImmediateObservation = RequiresImmediateObservation(frame);
-                if (timingOnly &&
-                    !timingProcessingCadence.ShouldProcess(frame.ArrivalTime, requiresImmediateObservation))
-                    continue;
                 try { Observe(frame); }
                 catch (Exception exception)
                 {
@@ -2127,7 +2120,6 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         ClearCumulativeHistoricalDeltaDisplay();
         lastFrame = null;
         timestampUnwrapper.Reset();
-        timingProcessingCadence.Reset();
         ResetLapTracking();
         startFinishEditTrackId = null;
         startFinishEditTrack = null;
@@ -2326,14 +2318,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         minimumAcceptedFrameArrival = latest?.ArrivalTime ?? DateTimeOffset.MinValue;
         previousPosition = null;
         previousPitRouteProjection = null;
-        timingProcessingCadence.Reset();
     }
-
-    private static bool RequiresImmediateObservation(TelemetryFrame frame) =>
-        TelemetryContextClassifier.IsDriverIntervention(frame.Raw) ||
-        !float.IsFinite(frame.Raw.Position.X) ||
-        !float.IsFinite(frame.Raw.Position.Y) ||
-        !float.IsFinite(frame.Raw.Position.Z);
 
     private void ResetLiveCumulativeHistoricalDelta()
     {
