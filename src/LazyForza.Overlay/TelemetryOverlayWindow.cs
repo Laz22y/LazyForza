@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using System.IO;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
@@ -350,6 +351,7 @@ internal sealed class HudSurface : FrameworkElement
     private readonly EstatePitWindowHudRuntime pitWindowHudRuntime = new();
     private readonly EstateFullRaceStrategyHudRuntime fullRaceStrategyHudRuntime = new();
     private readonly EstateRaceHudAnimationController estateRaceWidgetAnimations = new();
+    private readonly EstateRaceMapGeometryCache raceMapGeometryCache = new();
     private readonly Dictionary<EstateRaceHudWidgetKind, RaceWidgetDrawingRuntime> raceWidgetDrawings = [];
     private readonly Dictionary<EstateRaceHudWidgetKind, EstateRaceWidgetVisual> raceWidgetVisuals = [];
     private readonly Dictionary<Guid, RaceMapPointRuntime> raceMapPointRuntime = [];
@@ -367,7 +369,6 @@ internal sealed class HudSurface : FrameworkElement
     private bool estateRaceContinuousAnimation;
     private bool lapFadeAnimation;
     private bool raceWidgetContentAnimation;
-    private bool raceMapPointAnimation;
     private bool raceMapFlagAnimation;
     private bool leaderboardRowAnimation;
     private bool pitStopRowAnimation;
@@ -387,6 +388,9 @@ internal sealed class HudSurface : FrameworkElement
     private string? raceLogoHash;
     private ImageSource? raceLogoImage;
     private readonly EstateRaceLeaderboardRefreshCache raceComparisonCache = new();
+    private readonly DispatcherTimer? estateRaceRenderTimer;
+    private EstateRaceHudState? lastScheduledEstateRaceState;
+    private DateTimeOffset lastEstateRaceInvalidatedAt = DateTimeOffset.MinValue;
     private bool renderingSubscribed;
 
     public HudSurface(
@@ -404,16 +408,36 @@ internal sealed class HudSurface : FrameworkElement
             HudSurfaceKind.Lap or HudSurfaceKind.Drift => 30,
             _ => 60
         });
+        if (kind == HudSurfaceKind.EstateRace)
+        {
+            estateRaceRenderTimer = new DispatcherTimer(
+                DispatcherPriority.Background,
+                Dispatcher)
+            {
+                Interval = EstateRaceRenderCadence.SnapshotInterval
+            };
+            estateRaceRenderTimer.Tick += OnEstateRaceRenderTick;
+        }
         this.layoutPreview = layoutPreview;
         IsHitTestVisible = false;
         Loaded += (_, _) =>
         {
             if (this.layoutPreview) return;
+            if (estateRaceRenderTimer is not null)
+            {
+                estateRaceRenderTimer.Start();
+                return;
+            }
             CompositionTarget.Rendering += OnRendering;
             renderingSubscribed = true;
         };
         Unloaded += (_, _) =>
         {
+            if (estateRaceRenderTimer is not null)
+            {
+                estateRaceRenderTimer.Stop();
+                return;
+            }
             if (!renderingSubscribed) return;
             CompositionTarget.Rendering -= OnRendering;
             renderingSubscribed = false;
@@ -456,6 +480,32 @@ internal sealed class HudSurface : FrameworkElement
                 ? animatedLimiter
                 : limiter;
         if (activeLimiter.ShouldRender(nowSeconds)) InvalidateVisual();
+    }
+
+    private void OnEstateRaceRenderTick(object? sender, EventArgs e)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var state = LastSnapshot<EstateRaceHudState>(getContributions());
+        var snapshotChanged = !ReferenceEquals(state, lastScheduledEstateRaceState);
+        var reduceMotion = getLayout().ReduceMotion;
+        var animationActive = !reduceMotion &&
+                              (clock.Elapsed.TotalSeconds < smoothAnimationUntilSeconds ||
+                               estateRaceContinuousAnimation);
+        var targetInterval = EstateRaceRenderCadence.SelectInterval(
+            reduceMotion,
+            animationActive);
+        if (estateRaceRenderTimer is not null && estateRaceRenderTimer.Interval != targetInterval)
+            estateRaceRenderTimer.Interval = targetInterval;
+        if (!EstateRaceRenderCadence.ShouldInvalidate(
+                snapshotChanged,
+                animationActive,
+                state?.Session is not null,
+                now - lastEstateRaceInvalidatedAt))
+            return;
+
+        lastScheduledEstateRaceState = state;
+        lastEstateRaceInvalidatedAt = now;
+        InvalidateVisual();
     }
 
     protected override void OnRender(DrawingContext drawingContext)
@@ -616,7 +666,6 @@ internal sealed class HudSurface : FrameworkElement
     {
         estateRaceContinuousAnimation = false;
         raceWidgetContentAnimation = false;
-        raceMapPointAnimation = false;
         raceMapFlagAnimation = false;
         leaderboardRowAnimation = false;
         pitStopRowAnimation = false;
@@ -766,7 +815,6 @@ internal sealed class HudSurface : FrameworkElement
                                         limiterVisible && state.PitService.IsSpeeding ||
                                         estateRaceWidgetAnimations.AnyAnimating ||
                                         raceWidgetContentAnimation ||
-                                        raceMapPointAnimation ||
                                         raceMapFlagAnimation ||
                                         leaderboardRowAnimation ||
                                         pitStopRowAnimation ||
@@ -1967,7 +2015,7 @@ internal sealed class HudSurface : FrameworkElement
         var map = new Rect(size * 0.10, size * 0.12, size * 0.80, size * 0.76);
         if (state.TrackOutline.Count >= 2)
         {
-            var geometry = RaceMapGeometry(state.TrackOutline, map);
+            var geometry = raceMapGeometryCache.Track(state.TrackOutline, map);
             dc.DrawGeometry(null,
                 new Pen(BrushOf(0x00, 0x00, 0x00, 0.70), size * 0.038), geometry);
             dc.DrawGeometry(null,
@@ -2007,7 +2055,7 @@ internal sealed class HudSurface : FrameworkElement
         }
         if (state.PitLaneOutline is { Count: >= 2 } pitLane)
         {
-            var geometry = RaceMapGeometry(pitLane, map);
+            var geometry = raceMapGeometryCache.Pit(pitLane, map);
             dc.DrawGeometry(null,
                 new Pen(BrushOf(0x00, 0x00, 0x00, 0.82), size * 0.020), geometry);
             dc.DrawGeometry(null,
@@ -2045,7 +2093,6 @@ internal sealed class HudSurface : FrameworkElement
                 targetMapPoint,
                 estateRaceAnimationNowSeconds,
                 estateRaceReduceMotion || layoutPreview);
-            raceMapPointAnimation |= visualPoint.IsAnimating;
             var point = new Point(
                 map.Left + visualPoint.Point.X * map.Width,
                 map.Top + visualPoint.Point.Y * map.Height);
@@ -2081,7 +2128,7 @@ internal sealed class HudSurface : FrameworkElement
         return sectors.Length == 0 ? "normal" : $"yellow:{string.Join(',', sectors)}";
     }
 
-    private static void DrawRaceMapFlagOverlay(
+    private void DrawRaceMapFlagOverlay(
         DrawingContext dc,
         string visualKey,
         Geometry fullTrack,
@@ -2116,7 +2163,7 @@ internal sealed class HudSurface : FrameworkElement
             if (!yellowSectors.Contains(sector.SectorIndex) || sector.Points.Count < 2) continue;
             dc.DrawGeometry(null,
                 new Pen(BrushOf(0xFF, 0xCB, 0x21, 0.98 * opacity), mapSize * 0.019),
-                RaceMapGeometry(sector.Points, map));
+                raceMapGeometryCache.Sector(sector.Points, map));
         }
     }
 
@@ -2199,28 +2246,6 @@ internal sealed class HudSurface : FrameworkElement
         dc.DrawRoundedRectangle(purple, null,
             new Rect(center.X - radius * 0.28, center.Y - radius * 1.34,
                 radius * 0.56, radius * 0.30), radius * 0.10, radius * 0.10);
-    }
-
-    private static StreamGeometry RaceMapGeometry(
-        IReadOnlyList<EstateRaceMapPoint> points,
-        Rect map)
-    {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
-        {
-            var first = points[0];
-            context.BeginFigure(
-                new Point(map.Left + first.X * map.Width, map.Top + first.Y * map.Height),
-                false,
-                false);
-            context.PolyLineTo(points.Skip(1)
-                .Select(point => new Point(
-                    map.Left + point.X * map.Width,
-                    map.Top + point.Y * map.Height))
-                .ToArray(), true, false);
-        }
-        geometry.Freeze();
-        return geometry;
     }
 
     private PitHudSnapshot UpdatePitHud(
@@ -5212,7 +5237,7 @@ internal sealed class HudSurface : FrameworkElement
     private static Brush BrushWithOpacity(Brush source, double opacity)
     {
         if (source is not SolidColorBrush solid) return source;
-        return new SolidColorBrush(solid.Color) { Opacity = Math.Clamp(opacity, 0, 1) };
+        return OverlayBrushCache.Get(solid.Color.R, solid.Color.G, solid.Color.B, opacity);
     }
     private static Brush FrozenLinearGradient(
         GradientStopCollection stops,
@@ -5269,11 +5294,7 @@ internal sealed class HudSurface : FrameworkElement
     }
     private static Color BrushColor(byte r, byte g, byte b) => Color.FromRgb(r, g, b);
     private static Brush BrushOf(byte r, byte g, byte b, double opacity = 1)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b)) { Opacity = opacity };
-        brush.Freeze();
-        return brush;
-    }
+        => OverlayBrushCache.Get(r, g, b, opacity);
 }
 
 public static class OverlayLayoutPreviewState
