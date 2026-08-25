@@ -212,6 +212,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private double? activePitEntryProgressMeters;
     private double? activePitExitProgressMeters;
     private bool invalidateCurrentLapOnDriverIntervention = true;
+    private bool telemetryInterruptionActive;
     private DateTimeOffset? invalidProjectionStartedAt;
     private bool trackDeviationDetected;
     private Guid? startFinishEditTrackId;
@@ -1100,15 +1101,19 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
 
         if (TelemetryContextClassifier.IsDriverIntervention(frame.Raw))
         {
-            if (IsLapInProgress() && invalidateCurrentLapOnDriverIntervention)
-                AbandonCurrentLap("收到游戏暂停或回转遥测");
-            else if (IsLapInProgress())
-                ResynchronizeLapAfterDriverIntervention("收到游戏暂停或回转遥测", resetTimestamp: true);
-            else
+            if (!telemetryInterruptionActive)
             {
-                timestampUnwrapper.Reset();
-                lastUnwrappedTimestamp = 0;
-                lastHudUpdateTimestamp = long.MinValue;
+                telemetryInterruptionActive = true;
+                if (IsLapInProgress() && invalidateCurrentLapOnDriverIntervention)
+                    AbandonCurrentLap("收到游戏暂停或回转遥测");
+                else if (IsLapInProgress())
+                    ResynchronizeLapAfterDriverIntervention("收到游戏暂停或回转遥测", resetTimestamp: true);
+                else
+                {
+                    timestampUnwrapper.Reset();
+                    lastUnwrappedTimestamp = 0;
+                    lastHudUpdateTimestamp = long.MinValue;
+                }
             }
             previousPosition = null;
             previousPitRouteProjection = null;
@@ -1119,14 +1124,19 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             !float.IsFinite(frame.Raw.Position.Y) ||
             !float.IsFinite(frame.Raw.Position.Z))
         {
-            if (IsLapInProgress() && invalidateCurrentLapOnDriverIntervention)
-                AbandonCurrentLap("收到无效位置遥测");
-            else if (IsLapInProgress())
-                ResynchronizeLapAfterDriverIntervention("收到无效位置遥测", resetTimestamp: false);
+            if (!telemetryInterruptionActive)
+            {
+                telemetryInterruptionActive = true;
+                if (IsLapInProgress() && invalidateCurrentLapOnDriverIntervention)
+                    AbandonCurrentLap("收到无效位置遥测");
+                else if (IsLapInProgress())
+                    ResynchronizeLapAfterDriverIntervention("收到无效位置遥测", resetTimestamp: false);
+            }
             previousPosition = null;
             previousPitRouteProjection = null;
             return;
         }
+        telemetryInterruptionActive = false;
         lastFrame = frame;
         var timestamp = timestampUnwrapper.Unwrap(frame.Raw.TimestampMS);
         if (lastUnwrappedTimestamp > 0 && timestamp <= lastUnwrappedTimestamp)
@@ -2110,6 +2120,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         timingHistory.Clear();
         timingSessionId = Guid.Empty;
         invalidateCurrentLapOnDriverIntervention = true;
+        telemetryInterruptionActive = false;
         lastTelemetryArrival = null;
         minimumAcceptedFrameSequence = long.MinValue;
         minimumAcceptedFrameArrival = DateTimeOffset.MinValue;

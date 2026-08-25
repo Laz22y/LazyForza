@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading.Channels;
 using LazyForza.Analysis;
@@ -230,8 +231,9 @@ public sealed class EstateCircuitModuleTests
             store.SaveTrack(track, TrackAlgorithms.CreateSectors(track), definition);
 
             var feed = new TestFeed();
+            var logs = new ConcurrentQueue<string>();
             var module = new EstateCircuitModule(store, TelemetrySourceKind.Live);
-            await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+            await module.InitializeAsync(new TestContext(feed, store, logs.Enqueue), CancellationToken.None);
             await module.StartAsync(CancellationToken.None);
             try
             {
@@ -348,12 +350,40 @@ public sealed class EstateCircuitModuleTests
                     () => module.State.ToString());
 
                 module.SetEstateRaceInterventionInvalidation(false);
-                PublishPosition(feed, 0, 100, 2, 0, 0, isRaceOn: false);
-                await Task.Delay(50);
+                for (var index = 0; index < 100; index++)
+                    PublishPosition(feed, (uint)(607_000 + index), 100, 2, 0, 0, isRaceOn: false);
+                await WaitUntilAsync(
+                    () => logs.Count(message => message.Contains(
+                        "Estate race lap retained after driver intervention",
+                        StringComparison.Ordinal)) >= 1,
+                    TimeSpan.FromSeconds(2),
+                    () => module.State.ToString());
                 Assert.AreEqual(
                     EstateCircuitPhase.TimingLap,
                     module.State.Phase,
                     "正赛暂停帧应保留当前圈，而不是切回等待下一次过线。");
+                Assert.AreEqual(
+                    1,
+                    logs.Count(message => message.Contains(
+                        "Estate race lap retained after driver intervention",
+                        StringComparison.Ordinal)),
+                    "连续的暂停遥测属于一次状态切换，不能逐帧重置圈状态并同步写日志。");
+
+                PublishPosition(feed, 608_000, 99, 2, 3, 20);
+                for (var index = 0; index < 50; index++)
+                    PublishPosition(feed, (uint)(608_100 + index), 99, 2, 3, 0, isRaceOn: false);
+                await WaitUntilAsync(
+                    () => logs.Count(message => message.Contains(
+                        "Estate race lap retained after driver intervention",
+                        StringComparison.Ordinal)) >= 2,
+                    TimeSpan.FromSeconds(2),
+                    () => module.State.ToString());
+                Assert.AreEqual(
+                    2,
+                    logs.Count(message => message.Contains(
+                        "Estate race lap retained after driver intervention",
+                        StringComparison.Ordinal)),
+                    "恢复有效遥测后再次中断应形成一个新事件，但同一中断期间仍只能处理一次。");
 
                 PublishLap(
                     feed,
@@ -1260,13 +1290,16 @@ public sealed class EstateCircuitModuleTests
         }
     }
 
-    private sealed record TestContext(TestFeed Feed, LazyForzaStore Store) : IModuleContext
+    private sealed record TestContext(
+        TestFeed Feed,
+        LazyForzaStore Store,
+        Action<string>? Logger = null) : IModuleContext
     {
         public ITelemetryFeed Telemetry => Feed;
         public IHudHost Hud { get; } = new EmptyHud();
         public IModuleSettingsStore Settings => Store;
         public IAnalysisStore AnalysisStore => Store;
-        public Action<string> Log => _ => { };
+        public Action<string> Log => Logger ?? (_ => { });
     }
 
     private sealed class EmptyHud : IHudHost
