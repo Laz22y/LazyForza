@@ -382,12 +382,23 @@ internal static class EstateRaceGeometry
     public static bool IsApproachingPitEntry(EstatePitDefinition? pit, Vector3F position)
     {
         if (pit is null) return false;
+        return IsApproachingPitEntry(
+            pit,
+            position,
+            ProjectPitRoute(pit, position),
+            PitGateProgress(pit, pit.EntryGate));
+    }
+
+    public static bool IsApproachingPitEntry(
+        EstatePitDefinition pit,
+        Vector3F position,
+        EstatePitRouteProjection route,
+        double entryProgress)
+    {
         // The recorded centre line starts at the racing-line split, while the
         // deterministic entry gate defines where enforcement begins. Following
         // the recorded branch avoids lighting the limiter on the final corner,
         // but still gives the driver the cue before reaching the entry line.
-        var route = ProjectPitRoute(pit, position);
-        var entryProgress = PitGateProgress(pit, pit.EntryGate);
         var routeApproach = route.TotalLengthMeters > 0 &&
                             route.DistanceMeters <= Math.Clamp(pit.LaneHalfWidthMeters, 1, 20) * 1.35 + 0.75 &&
                             route.ProgressMeters <= entryProgress + 0.75;

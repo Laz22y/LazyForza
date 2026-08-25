@@ -486,16 +486,12 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         {
             try
             {
-                const int maximumCatchUpFrames = 16;
-                var catchUp = new Queue<TelemetryFrame>(maximumCatchUpFrames);
-                catchUp.Enqueue(frame);
-                while (frames.TryRead(out var newer))
-                {
-                    if (catchUp.Count == maximumCatchUpFrames) catchUp.Dequeue();
-                    catchUp.Enqueue(newer);
-                }
-                while (catchUp.TryDequeue(out var buffered))
-                    await ProcessTelemetryFrameAsync(buffered, cancellationToken).ConfigureAwait(false);
+                var batch = LatestTelemetryBatch.Drain(frame, frames);
+                for (var index = 0; index < batch.Count; index++)
+                    await ProcessTelemetryFrameAsync(
+                        batch[index],
+                        processPeriodicState: index == batch.Count - 1,
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception)
@@ -511,6 +507,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
 
     private async Task ProcessTelemetryFrameAsync(
         TelemetryFrame frame,
+        bool processPeriodicState,
         CancellationToken cancellationToken)
     {
         var context = trackContext();
@@ -518,35 +515,19 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         if (connectionIsObserver) return;
         var monotonicNow = monotonicClock.ElapsedMilliseconds;
         var valid = IsTelemetryValid(frame, out var pausedOrRewinding);
-        EstateShortcutObservation shortcutObservation;
-        lock (telemetryStateSync)
-            shortcutObservation = shortcutDetector.Observe(
-                frame,
-                context.Track,
-                context.Definition.Pit,
-                valid,
-                monotonicNow);
         var localParticipant = session?.Participants.FirstOrDefault(candidate => candidate.Id == participantId);
         var serviceBlocked = localParticipant is
         {
             PendingTimePenaltySeconds: > 0
         } or { IsServingTimePenalty: true };
         EstatePitServiceState pitService;
-        EstateRaceProjection projection;
-        RaceGripCondition gripCondition;
         lock (telemetryStateSync)
         {
-            gripEstimator.Observe(frame, context.CompletedLaps, valid);
             pitService = pitServiceTracker.Observe(
                 frame,
                 context.Definition.Pit,
                 valid,
                 serviceBlocked);
-            projection = valid && shortcutObservation.Projection.IsValid
-                ? shortcutObservation.Projection
-                : lastValidProjection ?? new EstateRaceProjection(0, 0, 0.5, 0.5);
-            if (valid) lastValidProjection = projection;
-            gripCondition = gripEstimator.Current;
         }
         CapturePitServiceCompletion(
             pitService,
@@ -556,7 +537,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             CaptureDisconnectedLap(context);
             return;
         }
-        await FlushPendingPitServiceUploadsAsync(cancellationToken).ConfigureAwait(false);
         await FlushPendingLapUploadsAsync(cancellationToken).ConfigureAwait(false);
         if (context.LastCompletedLap is { } completedLap &&
             completedLap.EventId != sentLapEventId &&
@@ -571,7 +551,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 cancellationToken).ConfigureAwait(false);
             sentLapEventId = completedLap.EventId;
         }
+        await FlushPendingPitServiceUploadsAsync(cancellationToken).ConfigureAwait(false);
         var collision = collisionEvidenceDetector.Observe(frame, valid);
+        if (!processPeriodicState) return;
         if (lastTelemetrySentAt != default &&
             frame.ArrivalTime - lastTelemetrySentAt < TelemetryInterval &&
             monotonicNow - lastTelemetrySentMonotonicMilliseconds < TelemetryInterval.TotalMilliseconds)
@@ -580,6 +562,24 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         lastTelemetrySentMonotonicMilliseconds = monotonicNow;
         observedVehicleFingerprint = VehicleProfileFingerprint.FromFrame(frame);
         var positionReliable = valid;
+        EstateShortcutObservation shortcutObservation;
+        EstateRaceProjection projection;
+        RaceGripCondition gripCondition;
+        lock (telemetryStateSync)
+        {
+            gripEstimator.Observe(frame, context.CompletedLaps, valid);
+            shortcutObservation = shortcutDetector.Observe(
+                frame,
+                context.Track,
+                pitService.IsOnPitRoute || pitService.IsInServiceZone || pitService.IsApproachingPit,
+                valid,
+                monotonicNow);
+            projection = valid && shortcutObservation.Projection.IsValid
+                ? shortcutObservation.Projection
+                : lastValidProjection ?? new EstateRaceProjection(0, 0, 0.5, 0.5);
+            if (valid) lastValidProjection = projection;
+            gripCondition = gripEstimator.Current;
+        }
         var pit = context.Definition.Pit;
         var isOnPitRoute = positionReliable && pitService.IsOnPitRoute;
         var update = new RaceTelemetryUpdate(

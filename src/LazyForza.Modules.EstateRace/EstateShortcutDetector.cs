@@ -40,12 +40,23 @@ internal sealed class EstateShortcutDetector
         bool telemetryValid,
         long monotonicMilliseconds)
     {
-        EnsureTrack(track);
         var position = frame.Raw.Position;
         var legalPitRoute = telemetryValid &&
                             (EstateRaceGeometry.IsInPitLane(pit, position) ||
                              EstateRaceGeometry.IsInServiceZone(pit, position) ||
                              EstateRaceGeometry.IsApproachingPitEntry(pit, position));
+        return Observe(frame, track, legalPitRoute, telemetryValid, monotonicMilliseconds);
+    }
+
+    public EstateShortcutObservation Observe(
+        TelemetryFrame frame,
+        TrackTemplate track,
+        bool legalPitRoute,
+        bool telemetryValid,
+        long monotonicMilliseconds)
+    {
+        EnsureTrack(track);
+        var position = frame.Raw.Position;
         if (!telemetryValid || legalPitRoute)
         {
             ResetTracking();

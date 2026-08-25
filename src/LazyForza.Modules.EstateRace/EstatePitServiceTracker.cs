@@ -24,6 +24,11 @@ internal sealed class EstatePitServiceTracker
     private DateTimeOffset? serviceZoneLastConfirmedAt;
     private DateTimeOffset? movementInterruptedAt;
     private Guid? serviceVisitId;
+    private EstatePitDefinition? cachedPit;
+    private double cachedEntryProgress;
+    private double cachedExitProgress;
+
+    internal int GateProgressRefreshCount { get; private set; }
 
     public EstatePitServiceState Current { get; private set; } = EstatePitServiceState.Empty;
 
@@ -71,8 +76,9 @@ internal sealed class EstatePitServiceTracker
         }
         var position = frame.Raw.Position;
         var route = EstateRaceGeometry.ProjectPitRoute(pit, position);
-        var entryProgress = EstateRaceGeometry.PitGateProgress(pit, pit.EntryGate);
-        var exitProgress = EstateRaceGeometry.PitGateProgress(pit, pit.ExitGate);
+        EnsureGateProgress(pit);
+        var entryProgress = cachedEntryProgress;
+        var exitProgress = cachedExitProgress;
         var halfWidth = Math.Clamp(pit.LaneHalfWidthMeters, 1, 20);
         var corridorMatch = route.DistanceMeters <= halfWidth;
         var reverseProgressTolerance = Math.Clamp(halfWidth * 0.25, 0.5, 1.5);
@@ -199,7 +205,11 @@ internal sealed class EstatePitServiceTracker
         previousPosition = position;
         previousRouteProgress = route.ProgressMeters;
         wasEligible = eligible;
-        var approaching = !pitLaneActive && EstateRaceGeometry.IsApproachingPitEntry(pit, position);
+        var approaching = !pitLaneActive && EstateRaceGeometry.IsApproachingPitEntry(
+            pit,
+            position,
+            route,
+            entryProgress);
         Current = new EstatePitServiceState(
             pitLaneActive,
             inZone,
@@ -245,7 +255,19 @@ internal sealed class EstatePitServiceTracker
         serviceZoneLastConfirmedAt = null;
         movementInterruptedAt = null;
         serviceVisitId = null;
+        cachedPit = null;
+        cachedEntryProgress = 0;
+        cachedExitProgress = 0;
         Current = EstatePitServiceState.Empty;
+    }
+
+    private void EnsureGateProgress(EstatePitDefinition pit)
+    {
+        if (ReferenceEquals(cachedPit, pit)) return;
+        cachedPit = pit;
+        cachedEntryProgress = EstateRaceGeometry.PitGateProgress(pit, pit.EntryGate);
+        cachedExitProgress = EstateRaceGeometry.PitGateProgress(pit, pit.ExitGate);
+        GateProgressRefreshCount++;
     }
 
     private void AccumulateUntil(DateTimeOffset now)

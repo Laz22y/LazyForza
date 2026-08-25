@@ -26,3 +26,20 @@ internal sealed class LatestValueSendQueue<T>
         }
     }
 }
+
+internal static class LatestTelemetryBatch
+{
+    internal const int MaximumFrames = 4;
+
+    public static IReadOnlyList<T> Drain<T>(T first, ChannelReader<T> reader)
+    {
+        var latest = new Queue<T>(MaximumFrames);
+        latest.Enqueue(first);
+        while (reader.TryRead(out var newer))
+        {
+            if (latest.Count == MaximumFrames) latest.Dequeue();
+            latest.Enqueue(newer);
+        }
+        return latest.ToArray();
+    }
+}

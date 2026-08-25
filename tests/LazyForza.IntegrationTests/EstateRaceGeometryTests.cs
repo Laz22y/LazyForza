@@ -200,6 +200,34 @@ public sealed class EstateRaceGeometryTests
     }
 
     [TestMethod]
+    public void PitGateProgressIsCachedAcrossHighFrequencySamples()
+    {
+        var pit = new EstatePitDefinition(
+            Gate(0, 0, 1, 0),
+            Gate(30, 0, 1, 0),
+            Enumerable.Range(0, 97)
+                .Select(index => new EstateGatePoint(index * 0.5 - 9, 2, 0))
+                .ToArray(),
+            new EstateGatePoint(15, 2, 0),
+            4,
+            80,
+            3,
+            3.5);
+        var tracker = new EstatePitServiceTracker();
+
+        for (var index = 0; index < 60; index++)
+            _ = tracker.Observe(Frame((uint)(1_000 + index * 16), 10 + index * 0.01, 0, 40), pit, true);
+
+        Assert.AreEqual(1, tracker.GateProgressRefreshCount,
+            "入口和出口在同一份维修区定义中固定，不能随每个遥测包重新遍历整条维修路线。");
+
+        tracker.Reset();
+        _ = tracker.Observe(Frame(3_000, 12, 0, 40), pit, true);
+        Assert.AreEqual(2, tracker.GateProgressRefreshCount,
+            "状态重置后应重新确认当前维修区定义的缓存。");
+    }
+
+    [TestMethod]
     public void BriefMovementPausesServiceTimerButSustainedMovementResetsIt()
     {
         var pit = new EstatePitDefinition(

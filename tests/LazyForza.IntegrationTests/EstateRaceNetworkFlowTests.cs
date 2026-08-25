@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using LazyForza.Modules.EstateRace;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -7,6 +8,21 @@ namespace LazyForza.IntegrationTests;
 [TestClass]
 public sealed class EstateRaceNetworkFlowTests
 {
+    [TestMethod]
+    public void TelemetryCatchUpKeepsOnlyTheLatestShortContinuityWindow()
+    {
+        var frames = Channel.CreateUnbounded<int>();
+        for (var value = 1; value <= 20; value++)
+            Assert.IsTrue(frames.Writer.TryWrite(value));
+        Assert.IsTrue(frames.Reader.TryRead(out var first));
+
+        var latest = LatestTelemetryBatch.Drain(first, frames.Reader);
+
+        CollectionAssert.AreEqual(new[] { 17, 18, 19, 20 }, latest.ToArray());
+        Assert.AreEqual(4, LatestTelemetryBatch.MaximumFrames,
+            "地产赛事积压时只保留短连续窗口，不能补算大批过期遥测拖慢整个客户端。");
+    }
+
     [TestMethod]
     public async Task TelemetryQueueKeepsOnlyLatestValueWhileSendIsBlocked()
     {
