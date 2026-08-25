@@ -172,6 +172,12 @@ internal sealed class TelemetryOverlayWindow : Window
     {
         var helper = new WindowInteropHelper(this);
         source = HwndSource.FromHwnd(helper.Handle);
+        // FH6 can keep the 3D engine close to saturation at high frame rates.
+        // Rendering this transparent layered HUD on the same GPU queue then
+        // starves its presentation even though the application CPU is idle.
+        // Restrict the fallback to the overlay target; the main window keeps
+        // WPF's normal hardware rendering path.
+        source.CompositionTarget.RenderMode = RenderMode.SoftwareOnly;
         source.AddHook(WindowProcedure);
         UpdateNativeStyles();
     }
