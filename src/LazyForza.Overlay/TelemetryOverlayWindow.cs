@@ -5,7 +5,6 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Threading;
 using System.IO;
 using LazyForza.Domain;
 using LazyForza.Modules.Abstractions;
@@ -369,6 +368,7 @@ internal sealed class HudSurface : FrameworkElement
     private bool estateRaceContinuousAnimation;
     private bool lapFadeAnimation;
     private bool raceWidgetContentAnimation;
+    private bool raceMapPointAnimation;
     private bool raceMapFlagAnimation;
     private bool leaderboardRowAnimation;
     private bool pitStopRowAnimation;
@@ -388,9 +388,6 @@ internal sealed class HudSurface : FrameworkElement
     private string? raceLogoHash;
     private ImageSource? raceLogoImage;
     private readonly EstateRaceLeaderboardRefreshCache raceComparisonCache = new();
-    private readonly DispatcherTimer? estateRaceRenderTimer;
-    private EstateRaceHudState? lastScheduledEstateRaceState;
-    private DateTimeOffset lastEstateRaceInvalidatedAt = DateTimeOffset.MinValue;
     private bool renderingSubscribed;
 
     public HudSurface(
@@ -408,36 +405,16 @@ internal sealed class HudSurface : FrameworkElement
             HudSurfaceKind.Lap or HudSurfaceKind.Drift => 30,
             _ => 60
         });
-        if (kind == HudSurfaceKind.EstateRace)
-        {
-            estateRaceRenderTimer = new DispatcherTimer(
-                DispatcherPriority.Background,
-                Dispatcher)
-            {
-                Interval = EstateRaceRenderCadence.SnapshotInterval
-            };
-            estateRaceRenderTimer.Tick += OnEstateRaceRenderTick;
-        }
         this.layoutPreview = layoutPreview;
         IsHitTestVisible = false;
         Loaded += (_, _) =>
         {
             if (this.layoutPreview) return;
-            if (estateRaceRenderTimer is not null)
-            {
-                estateRaceRenderTimer.Start();
-                return;
-            }
             CompositionTarget.Rendering += OnRendering;
             renderingSubscribed = true;
         };
         Unloaded += (_, _) =>
         {
-            if (estateRaceRenderTimer is not null)
-            {
-                estateRaceRenderTimer.Stop();
-                return;
-            }
             if (!renderingSubscribed) return;
             CompositionTarget.Rendering -= OnRendering;
             renderingSubscribed = false;
@@ -480,32 +457,6 @@ internal sealed class HudSurface : FrameworkElement
                 ? animatedLimiter
                 : limiter;
         if (activeLimiter.ShouldRender(nowSeconds)) InvalidateVisual();
-    }
-
-    private void OnEstateRaceRenderTick(object? sender, EventArgs e)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var state = LastSnapshot<EstateRaceHudState>(getContributions());
-        var snapshotChanged = !ReferenceEquals(state, lastScheduledEstateRaceState);
-        var reduceMotion = getLayout().ReduceMotion;
-        var animationActive = !reduceMotion &&
-                              (clock.Elapsed.TotalSeconds < smoothAnimationUntilSeconds ||
-                               estateRaceContinuousAnimation);
-        var targetInterval = EstateRaceRenderCadence.SelectInterval(
-            reduceMotion,
-            animationActive);
-        if (estateRaceRenderTimer is not null && estateRaceRenderTimer.Interval != targetInterval)
-            estateRaceRenderTimer.Interval = targetInterval;
-        if (!EstateRaceRenderCadence.ShouldInvalidate(
-                snapshotChanged,
-                animationActive,
-                state?.Session is not null,
-                now - lastEstateRaceInvalidatedAt))
-            return;
-
-        lastScheduledEstateRaceState = state;
-        lastEstateRaceInvalidatedAt = now;
-        InvalidateVisual();
     }
 
     protected override void OnRender(DrawingContext drawingContext)
@@ -666,6 +617,7 @@ internal sealed class HudSurface : FrameworkElement
     {
         estateRaceContinuousAnimation = false;
         raceWidgetContentAnimation = false;
+        raceMapPointAnimation = false;
         raceMapFlagAnimation = false;
         leaderboardRowAnimation = false;
         pitStopRowAnimation = false;
@@ -815,6 +767,7 @@ internal sealed class HudSurface : FrameworkElement
                                         limiterVisible && state.PitService.IsSpeeding ||
                                         estateRaceWidgetAnimations.AnyAnimating ||
                                         raceWidgetContentAnimation ||
+                                        raceMapPointAnimation ||
                                         raceMapFlagAnimation ||
                                         leaderboardRowAnimation ||
                                         pitStopRowAnimation ||
@@ -2093,6 +2046,7 @@ internal sealed class HudSurface : FrameworkElement
                 targetMapPoint,
                 estateRaceAnimationNowSeconds,
                 estateRaceReduceMotion || layoutPreview);
+            raceMapPointAnimation |= visualPoint.IsAnimating;
             var point = new Point(
                 map.Left + visualPoint.Point.X * map.Width,
                 map.Top + visualPoint.Point.Y * map.Height);

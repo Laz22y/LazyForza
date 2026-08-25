@@ -8,40 +8,6 @@ namespace LazyForza.IntegrationTests;
 public sealed class EstateRaceRenderPerformanceTests
 {
     [TestMethod]
-    public void NormalSnapshotsStayAtNetworkCadenceWhileAnimationsUseThirtyFps()
-    {
-        Assert.AreEqual(
-            TimeSpan.FromMilliseconds(100),
-            EstateRaceRenderCadence.SelectInterval(reduceMotion: false, animationActive: false));
-        Assert.AreEqual(
-            TimeSpan.FromMilliseconds(1000d / 30d),
-            EstateRaceRenderCadence.SelectInterval(reduceMotion: false, animationActive: true));
-        Assert.AreEqual(
-            TimeSpan.FromMilliseconds(100),
-            EstateRaceRenderCadence.SelectInterval(reduceMotion: true, animationActive: true));
-    }
-
-    [TestMethod]
-    public void UnchangedSessionOnlyRefreshesItsClockAtIdleCadence()
-    {
-        Assert.IsFalse(EstateRaceRenderCadence.ShouldInvalidate(
-            snapshotChanged: false,
-            animationActive: false,
-            hasSession: true,
-            sinceLastInvalidation: TimeSpan.FromMilliseconds(499)));
-        Assert.IsTrue(EstateRaceRenderCadence.ShouldInvalidate(
-            snapshotChanged: false,
-            animationActive: false,
-            hasSession: true,
-            sinceLastInvalidation: TimeSpan.FromMilliseconds(500)));
-        Assert.IsFalse(EstateRaceRenderCadence.ShouldInvalidate(
-            snapshotChanged: false,
-            animationActive: false,
-            hasSession: false,
-            sinceLastInvalidation: TimeSpan.FromMinutes(1)));
-    }
-
-    [TestMethod]
     public void MapGeometryIsReusedUntilItsSourceOrViewportChanges()
     {
         IReadOnlyList<EstateRaceMapPoint> points =
