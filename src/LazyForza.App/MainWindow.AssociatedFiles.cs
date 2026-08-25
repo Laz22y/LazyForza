@@ -25,20 +25,17 @@ internal sealed partial class MainWindow
         {
             case ".lfztelemetry":
                 pendingReplayRecordingPath = fullPath;
-                navigation.SelectedIndex = 5;
-                RenderSelectedPage();
+                ShowAssociatedFilePage(5);
                 break;
             case ".lfzlap":
-                navigation.SelectedIndex = 4;
-                RenderSelectedPage();
+                ShowAssociatedFilePage(4);
                 await ImportLapAnalysisAsync(
                     moduleManager.Modules.OfType<LapAnalysisModule>().Single(),
                     button: null,
                     sourcePath: fullPath);
                 break;
             case ".lfzestate":
-                navigation.SelectedIndex = 6;
-                RenderSelectedPage();
+                ShowAssociatedFilePage(6);
                 ImportEstateTrackPackage(fullPath);
                 break;
             default:
@@ -51,6 +48,13 @@ internal sealed partial class MainWindow
                 break;
         }
     }
+
+    private void ShowAssociatedFilePage(int pageIndex) =>
+        AssociatedFilePageNavigator.Show(
+            navigation.SelectedIndex,
+            pageIndex,
+            index => navigation.SelectedIndex = index,
+            () => RenderSelectedPage());
 
     private void ImportEstateTrackPackage(
         string path,
