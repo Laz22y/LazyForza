@@ -19,6 +19,17 @@
 
 * { box-sizing: border-box; }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 94px;
@@ -86,6 +97,27 @@ a { color: inherit; text-decoration: none; }
 .docs-header nav {
   display: flex;
   gap: 5px;
+}
+
+.language-switcher {
+  margin-left: 6px;
+}
+
+.language-switcher select {
+  min-height: 34px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: #c7d4df;
+  background: #0c141e;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.language-switcher select:focus-visible {
+  border-color: var(--cyan);
+  outline: none;
 }
 
 .docs-header nav a {

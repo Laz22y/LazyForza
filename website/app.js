@@ -1,18 +1,21 @@
 const RELEASE_FALLBACK = {
-  tag: "v1.4.9",
-  version: "1.4.9",
-  publishedAt: "2026-08-22T04:54:39Z",
-  assetName: "LazyForza-1.4.9-win-x64.zip",
+  tag: "v1.5.0",
+  version: "1.5.0",
+  publishedAt: "2026-08-26T09:39:32Z",
+  installerName: "LazyForza-1.5.0-win-x64-setup.exe",
+  portableName: "LazyForza-1.5.0-win-x64.zip",
 };
 
 const RELEASE_SOURCES = {
   github: {
     api: "https://api.github.com/repos/Laz22y/LazyForza/releases/latest",
     button: "#github-download",
+    portable: "#github-portable",
   },
   gitcode: {
     api: "https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza/releases/latest",
     button: "#gitcode-download",
+    portable: "#gitcode-portable",
   },
 };
 
@@ -32,15 +35,19 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function releaseAsset(release, version) {
-  const expected = `LazyForza-${version}-win-x64.zip`;
+function releaseAsset(release, expected) {
   return release?.assets?.find((asset) => asset.name === expected) || null;
 }
 
 function normalizeRelease(release, source) {
   const version = stableVersion(release?.tag_name);
-  const asset = version ? releaseAsset(release, version) : null;
-  if (!version || !asset) {
+  const installerName = version
+    ? `LazyForza-${version}-win-x64-setup.exe`
+    : null;
+  const portableName = version ? `LazyForza-${version}-win-x64.zip` : null;
+  const installer = installerName ? releaseAsset(release, installerName) : null;
+  const portable = portableName ? releaseAsset(release, portableName) : null;
+  if (!version || !installer || !portable) {
     return null;
   }
 
@@ -52,11 +59,10 @@ function normalizeRelease(release, source) {
       release.published_at ||
       release.created_at ||
       RELEASE_FALLBACK.publishedAt,
-    assetName: asset.name,
-    downloadUrl:
-      source === "github" && asset.browser_download_url
-        ? asset.browser_download_url
-        : null,
+    installerName: installer.name,
+    installerUrl: source === "github" ? installer.browser_download_url : null,
+    portableName: portable.name,
+    portableUrl: source === "github" ? portable.browser_download_url : null,
   };
 }
 
@@ -81,14 +87,15 @@ async function fetchJson(url) {
 
 function formatDate(value) {
   const date = new Date(value);
+  const english = window.WebsiteI18n?.language === "en";
   if (Number.isNaN(date.getTime())) {
     return {
       iso: "2026-07-29",
-      label: "2026.07.29 更新",
+      label: english ? "Updated Jul 29, 2026" : "2026.07.29 更新",
     };
   }
 
-  const parts = new Intl.DateTimeFormat("zh-CN", {
+  const parts = new Intl.DateTimeFormat(english ? "en-US" : "zh-CN", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
     month: "2-digit",
@@ -98,16 +105,24 @@ function formatDate(value) {
 
   return {
     iso: `${values.year}-${values.month}-${values.day}`,
-    label: `${values.year}.${values.month}.${values.day} 更新`,
+    label: english
+      ? `Updated ${values.month}/${values.day}/${values.year}`
+      : `${values.year}.${values.month}.${values.day} 更新`,
   };
 }
 
-function downloadUrl(source, release) {
+function downloadUrl(source, release, kind) {
   const encodedTag = encodeURIComponent(release.tag);
-  const encodedAsset = encodeURIComponent(release.assetName);
+  const assetName = kind === "installer"
+    ? release.installerName
+    : release.portableName;
+  const directUrl = kind === "installer"
+    ? release.installerUrl
+    : release.portableUrl;
+  const encodedAsset = encodeURIComponent(assetName);
   if (source === "github") {
     return (
-      release.downloadUrl ||
+      directUrl ||
       `https://github.com/Laz22y/LazyForza/releases/download/${encodedTag}/${encodedAsset}`
     );
   }
@@ -120,7 +135,8 @@ function downloadUrl(source, release) {
 
 function renderCard(source, release) {
   const card = document.querySelector(RELEASE_SOURCES[source].button);
-  if (!card) {
+  const portable = document.querySelector(RELEASE_SOURCES[source].portable);
+  if (!card || !portable) {
     return;
   }
 
@@ -130,7 +146,8 @@ function renderCard(source, release) {
   version.textContent = release.tag;
   time.textContent = date.label;
   time.dateTime = date.iso;
-  card.href = downloadUrl(source, release);
+  card.href = downloadUrl(source, release, "installer");
+  portable.href = downloadUrl(source, release, "portable");
   card.dataset.releaseReady = "true";
 }
 

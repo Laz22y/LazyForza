@@ -8,6 +8,7 @@
     <title>LazyForza 文档</title>
     <link rel="icon" href="../assets/favicon.png" type="image/png">
     <link rel="stylesheet" href="styles.css">
+    <script src="../i18n.js" defer></script>
     <script src="docs.js" defer></script>
   </head>
   <body>
@@ -21,6 +22,13 @@
         <a href="../">官网</a>
         <a href="https://github.com/Laz22y/LazyForza" target="_blank" rel="noreferrer">客户端仓库 ↗</a>
         <a href="https://github.com/Laz22y/LazyForza.RaceServer" target="_blank" rel="noreferrer">服务端仓库 ↗</a>
+        <label class="language-switcher">
+          <span class="sr-only">语言</span>
+          <select data-language-select aria-label="选择语言">
+            <option value="zh-Hans">简体中文</option>
+            <option value="en">English</option>
+          </select>
+        </label>
       </nav>
     </header>
 
@@ -40,8 +48,8 @@
         </nav>
         <div class="version-card">
           <span>当前文档</span>
-          <strong>Client 1.4.9</strong>
-          <strong>Server 0.4.2</strong>
+          <strong>Client 1.5.0</strong>
+          <strong>Server 0.4.3</strong>
         </div>
       </aside>
 
@@ -52,8 +60,8 @@
             <h1>用户与开发者文档</h1>
             <p class="doc-lead">从第一次接收 FH6 遥测，到部署赛事服务端、阅读架构和提交代码。只保留需要的信息。</p>
             <div class="doc-status">
-              <div><span>客户端</span><strong>1.4.9</strong><small>Windows 10 / 11 x64</small></div>
-              <div><span>RaceServer</span><strong>0.4.2</strong><small>Native / Cloudflare</small></div>
+              <div><span>客户端</span><strong>1.5.0</strong><small>Windows 10 / 11 x64</small></div>
+              <div><span>RaceServer</span><strong>0.4.3</strong><small>Native / Cloudflare</small></div>
               <div><span>数据入口</span><strong>UDP 2299</strong><small>FH6 Official Data Out</small></div>
             </div>
             <div class="callout callout-info"><strong>项目边界</strong><p>不读取游戏内存，不注入 DLL，不修改游戏进程。官方 UDP 没有提供的数据不会被包装成官方数据。</p></div>
@@ -63,7 +71,7 @@
             <p class="section-index">01 / QUICK START</p>
             <h2>快速开始</h2>
             <h3>下载与安装</h3>
-            <p>从 <a href="https://github.com/Laz22y/LazyForza/releases/latest">GitHub Releases</a> 或官网的 GitCode 入口下载最新版 <code>win-x64.zip</code>。完整解压后运行 <code>LazyForza.App.exe</code>。正式包已包含 .NET 运行时。</p>
+            <p>从 <a href="https://github.com/Laz22y/LazyForza/releases/latest">GitHub Releases</a> 或官网的 GitCode 入口下载安装版。需要免安装使用时，选择 <code>win-x64.zip</code> 便携版并完整解压。两种版本都已包含 .NET 运行时。</p>
             <div class="callout callout-warn"><strong>不要在 ZIP 内直接运行</strong><p>更新、日志、数据库和录制需要正常的可写目录。</p></div>
 
             <h3>配置 FH6 Data Out</h3>
@@ -93,6 +101,9 @@
               <div><span>DRIFT</span><h3>实验性漂移 HUD</h3><p>用本车 UDP 推导侧滑角和控车趋势，优先降低 Spin 风险。换挡箭头不是最佳换挡点，积分趋势不复刻游戏分数。</p></div>
               <div><span>ESTATE RACE</span><h3>地产环道与赛事</h3><p>录入支持暂存、地图预览和分项修订；赛事 HUD 提示弱网状态，服务端可选开启断线计圈恢复。</p></div>
             </div>
+
+            <h3>模拟换胎</h3>
+            <p>地产赛事的换胎流程使用游戏内设置模拟。依次进入维修区和换胎区，车辆停稳后暂停游戏，打开“设置 → 难度”，将“损坏与轮胎磨损”调为“外观”并保存；随后调回“拟真”，再次保存并返回游戏。LazyForza 只核对车辆位置和停留条件，不读取暂停菜单，也无法确认游戏内设置是否完成。</p>
           </section>
 
           <section class="doc-section" id="data">
@@ -172,7 +183,7 @@ chmod +x ./LazyForza.RaceServer.Web
             <p>车手需要服务端域名或 IP、房间密码、匹配的地产赛道、显示名和可选车队。OB 只接收赛事快照，不上传遥测、不参与排名和处罚。</p>
 
             <h3>兼容性</h3>
-            <p>RaceServer <code>0.4.2</code> 支持 LazyForza <code>1.4.2–1.4.9</code> 的协议 v2 主要流程。路线收益切弯证据和本次碰撞识别改进需要客户端 <code>1.4.9</code>；断线计圈恢复需要客户端 <code>1.4.8</code> 或更高版本，并由服务端总控开启。</p>
+            <p>RaceServer <code>0.4.3</code> 推荐搭配 LazyForza <code>1.5.0</code>，并兼容 <code>1.4.2–1.4.9</code> 的协议 v2 主要流程。断线计圈恢复需要客户端 <code>1.4.8</code> 或更高版本，并由服务端总控开启。</p>
           </section>
 
           <section class="doc-section" id="troubleshooting">

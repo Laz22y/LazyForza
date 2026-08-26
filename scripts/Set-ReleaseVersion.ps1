@@ -71,14 +71,24 @@ Update-SingleMatch `
 
 Update-SingleMatch `
     -Path (Join-Path $repositoryRoot 'website\app.js') `
-    -Pattern '(const RELEASE_FALLBACK = \{\s*tag:\s*"v)[^"]+(",\s*version:\s*")[^"]+(",\s*publishedAt:\s*")[^"]+(",\s*assetName:\s*"LazyForza-)[^"]+(-win-x64\.zip",\s*\};)' `
-    -Replacement "`${1}$Version`${2}$Version`${3}$releaseTimestamp`${4}$Version`${5}"
+    -Pattern '(const RELEASE_FALLBACK = \{\s*tag:\s*"v)[^"]+(",\s*version:\s*")[^"]+(",\s*publishedAt:\s*")[^"]+(",\s*installerName:\s*"LazyForza-)[^"]+(-win-x64-setup\.exe",\s*portableName:\s*"LazyForza-)[^"]+(-win-x64\.zip",\s*\};)' `
+    -Replacement "`${1}$Version`${2}$Version`${3}$releaseTimestamp`${4}$Version`${5}$Version`${6}"
 
 $websiteIndexPath = Join-Path $repositoryRoot 'website\index.html'
 Update-ExpectedMatches `
     -Path $websiteIndexPath `
+    -Pattern 'releases/v\d+\.\d+\.\d+/attach_files/LazyForza-\d+\.\d+\.\d+-win-x64-setup\.exe/download' `
+    -Replacement "releases/v$Version/attach_files/LazyForza-$Version-win-x64-setup.exe/download" `
+    -ExpectedCount 1
+Update-ExpectedMatches `
+    -Path $websiteIndexPath `
     -Pattern 'releases/v\d+\.\d+\.\d+/attach_files/LazyForza-\d+\.\d+\.\d+-win-x64\.zip/download' `
     -Replacement "releases/v$Version/attach_files/LazyForza-$Version-win-x64.zip/download" `
+    -ExpectedCount 1
+Update-ExpectedMatches `
+    -Path $websiteIndexPath `
+    -Pattern 'releases/download/v\d+\.\d+\.\d+/LazyForza-\d+\.\d+\.\d+-win-x64-setup\.exe' `
+    -Replacement "releases/download/v$Version/LazyForza-$Version-win-x64-setup.exe" `
     -ExpectedCount 1
 Update-ExpectedMatches `
     -Path $websiteIndexPath `

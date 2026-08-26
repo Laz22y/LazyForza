@@ -1,4 +1,5 @@
 const sidebarLinks = [...document.querySelectorAll(".docs-sidebar nav a")];
+const localizedText = (text) => window.WebsiteI18n?.text(text) || text;
 const sections = sidebarLinks
   .map((link) => document.querySelector(link.getAttribute("href")))
   .filter(Boolean);
@@ -33,15 +34,15 @@ for (const pre of document.querySelectorAll("pre")) {
   const button = document.createElement("button");
   button.className = "copy-button";
   button.type = "button";
-  button.textContent = "复制";
-  button.setAttribute("aria-label", "复制代码");
+  button.textContent = localizedText("复制");
+  button.setAttribute("aria-label", localizedText("复制代码"));
   button.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(code.textContent);
-      button.textContent = "已复制";
-      window.setTimeout(() => { button.textContent = "复制"; }, 1400);
+      button.textContent = localizedText("已复制");
+      window.setTimeout(() => { button.textContent = localizedText("复制"); }, 1400);
     } catch {
-      button.textContent = "复制失败";
+      button.textContent = localizedText("复制失败");
     }
   });
   pre.append(button);

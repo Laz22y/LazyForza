@@ -75,6 +75,11 @@ $selectedUpdateType = $updateTypeMetadata[$UpdateType]
 $baseTitle = "LazyForza $Version"
 $expectedTitle = "$baseTitle $([char]0x00B7) $($selectedUpdateType.Label)"
 $updateTypeMarker = "<!-- lazyforza-update-type: $($selectedUpdateType.Marker) -->"
+$chineseLanguageHeading = -join @(
+    [char]0x7B80,
+    [char]0x4F53,
+    [char]0x4E2D,
+    [char]0x6587)
 $githubRepository = 'Laz22y/LazyForza'
 $gitCodeRepositoryUri = 'https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza'
 $gitCodeCredentialTarget = 'LazyForza-GitCode-Release'
@@ -444,7 +449,7 @@ elseif ([Version]$Version -ge [Version]'1.5.0') {
 }
 
 $releaseNotesBody = if ($notesEn) {
-    "## 简体中文`r`n`r`n$($notes.Trim())`r`n`r`n## English`r`n`r`n$($notesEn.Trim())"
+    "## $chineseLanguageHeading`r`n`r`n$($notes.Trim())`r`n`r`n## English`r`n`r`n$($notesEn.Trim())"
 }
 else {
     $notes.Trim()
@@ -509,9 +514,14 @@ $buildLog = Join-Path $logRoot "build-$Version.log"
 $testLog = Join-Path $logRoot "test-$Version.log"
 $testResultsRoot = Join-Path $logRoot "test-results-$Version"
 $packageLog = Join-Path $logRoot "package-$Version.log"
+$websiteLog = Join-Path $logRoot "website-$Version.log"
 $testCount = 0
 
 if (-not $SkipBuild) {
+    & node (Join-Path $PSScriptRoot 'Test-WebsiteLocalization.cjs') *>&1 |
+        Out-File -LiteralPath $websiteLog -Encoding UTF8
+    Assert-LastExitCode -Operation 'website localization checks' -LogPath $websiteLog
+
     & dotnet restore LazyForza.sln --configfile NuGet.Config --verbosity minimal *>&1 |
         Out-File -LiteralPath $restoreLog -Encoding UTF8
     Assert-LastExitCode -Operation 'dotnet restore' -LogPath $restoreLog

@@ -13,6 +13,7 @@
     <link rel="icon" href="assets/favicon.png" type="image/png">
     <link rel="preload" href="assets/lazyforza-logo-transparent.png" as="image">
     <link rel="stylesheet" href="styles.css">
+    <script src="i18n.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -27,6 +28,13 @@
           <a href="#race-server">RaceServer</a>
           <a href="docs/">文档</a>
           <a href="https://github.com/Laz22y/LazyForza" target="_blank" rel="noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+          <label class="language-switcher">
+            <span class="sr-only">语言</span>
+            <select data-language-select aria-label="选择语言">
+              <option value="zh-Hans">简体中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
         </nav>
       </header>
 
@@ -38,27 +46,33 @@
             <p class="hero-copy">LazyForza 将 FH6 官方 Data Out 转成实时 HUD、圈速与走线分析、遥测回放和自托管赛事能力。个人数据默认只保存在本机。</p>
 
             <div class="download-grid" aria-label="下载 LazyForza 客户端">
-              <a class="download-card download-card-primary" id="gitcode-download" href="https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza/releases/v1.4.9/attach_files/LazyForza-1.4.9-win-x64.zip/download">
-                <span class="download-source">
-                  <span class="source-mark source-mark-gitcode" aria-hidden="true"><img src="assets/gitcode.png" alt=""></span>
-                  <span><strong>下载客户端</strong><small>GitCode · 中国大陆网络优先</small></span>
-                </span>
-                <span class="release-meta"><strong data-release-version>v1.4.9</strong><time data-release-date datetime="2026-08-22">2026.08.22 更新</time><span class="download-arrow" aria-hidden="true">↓</span></span>
-              </a>
-              <a class="download-card" id="github-download" href="https://github.com/Laz22y/LazyForza/releases/download/v1.4.9/LazyForza-1.4.9-win-x64.zip">
-                <span class="download-source">
-                  <span class="source-mark" aria-hidden="true"><img src="assets/github.png" alt=""></span>
-                  <span><strong>备用下载</strong><small>GitHub · 全球下载源</small></span>
-                </span>
-                <span class="release-meta"><strong data-release-version>v1.4.9</strong><time data-release-date datetime="2026-08-22">2026.08.22 更新</time><span class="download-arrow" aria-hidden="true">↓</span></span>
-              </a>
+              <div class="download-option">
+                <a class="download-card download-card-primary" id="gitcode-download" href="https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza/releases/v1.5.0/attach_files/LazyForza-1.5.0-win-x64-setup.exe/download">
+                  <span class="download-source">
+                    <span class="source-mark source-mark-gitcode" aria-hidden="true"><img src="assets/gitcode.png" alt=""></span>
+                    <span><strong>下载安装版</strong><small>GitCode · 中国大陆网络优先</small></span>
+                  </span>
+                  <span class="release-meta"><strong data-release-version>v1.5.0</strong><time data-release-date datetime="2026-08-26">2026.08.26 更新</time><span class="download-arrow" aria-hidden="true">↓</span></span>
+                </a>
+                <a class="portable-link" id="gitcode-portable" href="https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza/releases/v1.5.0/attach_files/LazyForza-1.5.0-win-x64.zip/download">下载便携版 ZIP <span aria-hidden="true">→</span></a>
+              </div>
+              <div class="download-option">
+                <a class="download-card" id="github-download" href="https://github.com/Laz22y/LazyForza/releases/download/v1.5.0/LazyForza-1.5.0-win-x64-setup.exe">
+                  <span class="download-source">
+                    <span class="source-mark" aria-hidden="true"><img src="assets/github.png" alt=""></span>
+                    <span><strong>备用下载安装版</strong><small>GitHub · 全球下载源</small></span>
+                  </span>
+                  <span class="release-meta"><strong data-release-version>v1.5.0</strong><time data-release-date datetime="2026-08-26">2026.08.26 更新</time><span class="download-arrow" aria-hidden="true">↓</span></span>
+                </a>
+                <a class="portable-link" id="github-portable" href="https://github.com/Laz22y/LazyForza/releases/download/v1.5.0/LazyForza-1.5.0-win-x64.zip">下载便携版 ZIP <span aria-hidden="true">→</span></a>
+              </div>
             </div>
 
             <div class="hero-links">
               <a href="docs/">开始使用 <span aria-hidden="true">→</span></a>
               <a href="https://github.com/Laz22y/LazyForza" target="_blank" rel="noreferrer">查看客户端源码 <span aria-hidden="true">↗</span></a>
             </div>
-            <p class="download-note">Windows 10 / 11 x64 · 解压即用 · 已包含 .NET 运行时</p>
+            <p class="download-note">Windows 10 / 11 x64 · 安装版与便携版均已包含 .NET 运行时</p>
           </div>
 
           <div class="signal-board" aria-label="LazyForza 数据流概览">
@@ -121,7 +135,7 @@
         <section class="quick-start" aria-labelledby="quick-start-title">
           <div class="section-heading section-heading-compact"><p>QUICK START</p><h2 id="quick-start-title">三步开始。</h2></div>
           <ol class="step-grid">
-            <li><span>01</span><strong>下载并完整解压</strong><p>运行 <code>LazyForza.App.exe</code>，无需另装 .NET 运行时。</p></li>
+            <li><span>01</span><strong>安装或完整解压</strong><p>推荐安装版；便携版可解压到任意目录运行。</p></li>
             <li><span>02</span><strong>开启 FH6 Data Out</strong><p>地址设为 <code>127.0.0.1</code>，端口设为 <code>2299</code>。</p></li>
             <li><span>03</span><strong>进入驾驶</strong><p>实时 HUD 自动连接；圈速、赛道与车辆数据按功能设置保存。</p></li>
           </ol>
