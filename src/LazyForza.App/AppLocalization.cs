@@ -23,6 +23,30 @@ internal static class AppLocalization
 
     private static IReadOnlyDictionary<string, string> translations =
         new Dictionary<string, string>(StringComparer.Ordinal);
+    private static readonly IReadOnlyDictionary<string, string> RaceServerLiteralTokens =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["lobby"] = "lobby",
+            ["practice"] = "practice",
+            ["qualifying"] = "qualifying",
+            ["grid"] = "grid",
+            ["outLap"] = "outLap",
+            ["formationLap"] = "formationLap",
+            ["countdown"] = "countdown",
+            ["race"] = "race",
+            ["finished"] = "finished",
+            ["green"] = "green",
+            ["yellow"] = "yellow",
+            ["red"] = "red",
+            ["chequered"] = "chequered",
+            ["retired"] = "retired",
+            ["disqualified"] = "disqualified",
+            ["warningsOnly"] = "warningsOnly",
+            ["automatic"] = "automatic",
+            ["disabled"] = "disabled"
+        };
+    private static readonly HashSet<string> RaceServerIdentityGroups =
+        new(StringComparer.Ordinal) { "name", "first", "second", "team" };
     private static readonly Regex ConfirmingStartPattern = new(
         "^正在确认起点 · (?<count>[0-9]+) 个轨迹点$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -162,6 +186,100 @@ internal static class AppLocalization
         Template("^组合本场各段最快约还能缩短 (?<seconds>.+) 秒。$", "template.reviewPotential", "组合本场各段最快约还能缩短 {0} 秒。", "seconds")
     ];
 
+    private static readonly DynamicLiteralTemplate[] RaceServerLiteralTemplates =
+    [
+        Template("^(?<name>.+) 进入房间。$", "server.event.driverJoined", "{0} 进入房间。", "name"),
+        Template("^(?<name>.+) 离开房间。$", "server.event.driverLeft", "{0} 离开房间。", "name"),
+        Template("^OB (?<name>.+) 加入转播席。$", "server.event.observerJoined", "OB {0} 加入转播席。", "name"),
+        Template("^OB (?<name>.+) 重新连接。$", "server.event.observerResumed", "OB {0} 重新连接。", "name"),
+        Template("^OB (?<name>.+) 断开连接。$", "server.event.observerDisconnected", "OB {0} 断开连接。", "name"),
+        Template("^(?<name>.+)已准备。$", "server.event.driverReady", "{0}已准备。", "name"),
+        Template("^(?<name>.+)取消准备。$", "server.event.driverNotReady", "{0}取消准备。", "name"),
+        Template("^(?<name>.+) 进入维修区。$", "server.event.pitEntered", "{0} 进入维修区。", "name"),
+        Template("^(?<name>.+) 停入换胎区。$", "server.event.pitBoxEntered", "{0} 停入换胎区。", "name"),
+        Template("^(?<name>.+) 完成换胎停留。$", "server.event.pitServiceCompleted", "{0} 完成换胎停留。", "name"),
+        Template("^(?<name>.+) 离开维修区。$", "server.event.pitExited", "{0} 离开维修区。", "name"),
+        Template("^(?<name>.+) 完成第 (?<lap>[0-9]+) 圈：(?<time>.+)（不计最快圈）。$", "server.event.lapCompletedIneligible", "{0} 完成第 {1} 圈：{2}（不计最快圈）。", "name", "lap", "time"),
+        Template("^(?<name>.+) 完成第 (?<lap>[0-9]+) 圈：(?<time>.+)。$", "server.event.lapCompleted", "{0} 完成第 {1} 圈：{2}。", "name", "lap", "time"),
+        Template("^(?<name>.+) 的本圈无效：(?<reason>.+)。$", "server.event.lapInvalid", "{0} 的本圈无效：{1}。", "name", "reason"),
+        Template("^(?<name>.+) 率先完成预定圈数，方格旗生效。$", "server.event.chequered", "{0} 率先完成预定圈数，方格旗生效。", "name"),
+        Template("^(?<name>.+) 率先完成 (?<laps>[0-9]+) 圈$", "server.banner.chequeredDetail", "{0} 率先完成 {1} 圈", "name", "laps"),
+        Template("^(?<name>.+) 的换胎停留已补传确认（第 (?<count>[0-9]+) 次）。$", "server.event.pitRecovered", "{0} 的换胎停留已补传确认（第 {1} 次）。", "name", "count"),
+        Template("^(?<name>.+) 完成第 (?<count>[0-9]+) 次换胎停留。$", "server.event.pitCompleted", "{0} 完成第 {1} 次换胎停留。", "name", "count"),
+        Template("^(?<name>.+) 触发第 (?<sector>[0-9]+) 分段自动黄旗：(?<reason>.+)。$", "server.event.automaticYellow", "{0} 触发第 {1} 分段自动黄旗：{2}。", "name", "sector", "reason"),
+        Template("^(?<name>.+) 的异常状态已恢复，自动黄旗解除。$", "server.event.automaticYellowCleared", "{0} 的异常状态已恢复，自动黄旗解除。", "name"),
+        Template("^房间设置已更新，赛道边界处理为 (?<mode>.+)。$", "server.event.roomSettings", "房间设置已更新，赛道边界处理为 {0}。", "mode"),
+        Template("^赛事阶段切换为 (?<phase>.+)。$", "server.event.phaseChanged", "赛事阶段切换为 {0}。", "phase"),
+        Template("^赛事总控发布第 (?<sector>[0-9]+) 分段 (?<flag>.+)：(?<reason>.+)。$", "server.event.sectorFlag", "赛事总控发布第 {0} 分段 {1}：{2}。", "sector", "flag", "reason"),
+        Template("^赛事总控发布全场 (?<flag>.+)。$", "server.event.fullCourseFlag", "赛事总控发布全场 {0}。", "flag"),
+        Template("^赛事总控恢复第 (?<sector>[0-9]+) 分段绿旗。$", "server.event.sectorGreen", "赛事总控恢复第 {0} 分段绿旗。", "sector"),
+        Template("^赛事总控断开了 (?<name>.+)，显示名称已释放。$", "server.event.controlDisconnected", "赛事总控断开了 {0}，显示名称已释放。", "name"),
+        Template("^赛事总控断开了 OB (?<name>.+)，显示名称已释放。$", "server.event.controlDisconnectedObserver", "赛事总控断开了 OB {0}，显示名称已释放。", "name"),
+        Template("^(?<name>.+) 状态改为 (?<status>.+)：(?<reason>.+)。$", "server.event.driverStatus", "{0} 状态改为 {1}：{2}。", "name", "status", "reason"),
+        Template("^(?<name>.+) 开始执行 (?<seconds>.+) 秒停车罚时。$", "server.event.penaltyServiceStarted", "{0} 开始执行 {1} 秒停车罚时。", "name", "seconds"),
+        Template("^(?<name>.+) 已完成 (?<seconds>.+) 秒停车罚时，可以开始换胎。$", "server.event.penaltyServiceCompleted", "{0} 已完成 {1} 秒停车罚时，可以开始换胎。", "name", "seconds"),
+        Template("^(?<name>.+) 已完成通过维修区处罚。$", "server.event.driveThroughServed", "{0} 已完成通过维修区处罚。", "name"),
+        Template("^(?<name>.+) 的通过维修区处罚还可跨越终点线 (?<count>[0-9]+) 次。$", "server.event.driveThroughReminder", "{0} 的通过维修区处罚还可跨越终点线 {1} 次。", "name", "count"),
+        Template("^(?<name>.+) 必须在本圈结束前进入维修区执行通过维修区处罚。$", "server.event.driveThroughDue", "{0} 必须在本圈结束前进入维修区执行通过维修区处罚。", "name"),
+        Template("^(?<name>.+) 未按期执行通过维修区处罚，原处罚已替换为 (?<seconds>.+) 秒完赛加时。$", "server.event.driveThroughOverdue", "{0} 未按期执行通过维修区处罚，原处罚已替换为 {1} 秒完赛加时。", "name", "seconds"),
+        Template("^(?<name>.+) 完赛时只完成 (?<done>[0-9]+)/(?<required>[0-9]+) 次有效维修停留，判定未满足完赛条件。$", "server.event.minimumPitStopsMissed", "{0} 完赛时只完成 {1}/{2} 次有效维修停留，判定未满足完赛条件。", "name", "done", "required"),
+        Template("^(?<name>.+) 的补传换胎停留已确认，最低进站要求恢复为已完成。$", "server.event.minimumPitStopsRecovered", "{0} 的补传换胎停留已确认，最低进站要求恢复为已完成。", "name"),
+        Template("^(?<first>.+) 与 (?<second>.+) 发生疑似车辆接触，已交由总控调查（第 (?<lap>[0-9]+) 圈）。$", "server.event.collisionInvestigation", "{0} 与 {1} 发生疑似车辆接触，已交由总控调查（第 {2} 圈）。", "first", "second", "lap"),
+        Template("^连续疑似车辆接触（(?<count>[0-9]+) 次，(?<seconds>.+) 秒内）$", "server.collision.repeated", "连续疑似车辆接触（{0} 次，{1} 秒内）", "count", "seconds"),
+        Template("^偏离参考路线 (?<offset>.+) 米，估算获得约 (?<gain>.+) 米距离优势$", "server.trackLimits.deviation", "偏离参考路线 {0} 米，估算获得约 {1} 米距离优势", "offset", "gain"),
+        Template("^维修区超速：(?<speed>.+) km/h，限速 (?<limit>.+) km/h$", "server.pit.speeding", "维修区超速：{0} km/h，限速 {1} km/h", "speed", "limit"),
+        Template("^(?<team>.+) 已达到每队 (?<count>[0-9]+) 人上限。$", "server.error.teamFull", "{0} 已达到每队 {1} 人上限。", "team", "count"),
+        Template("^房间人数已达到 (?<count>[0-9]+) 人上限。$", "server.error.roomFull", "房间人数已达到 {0} 人上限。", "count"),
+        Template("^本场已达到 (?<count>[0-9]+) 人上限。$", "server.error.eventFull", "本场已达到 {0} 人上限。", "count"),
+        Template("^OB 席位已达到 (?<count>[0-9]+) 人上限。$", "server.error.observerFull", "OB 席位已达到 {0} 人上限。", "count"),
+        Template("^客户端赛道为 (?<client>[0-9]+) 个分段，房间设置为 (?<room>[0-9]+) 个分段。$", "server.error.sectorMismatch", "客户端赛道为 {0} 个分段，房间设置为 {1} 个分段。", "client", "room"),
+        Template("^首盏红灯将在 (?<seconds>[0-9]+) 秒后亮起$", "server.banner.firstLight", "首盏红灯将在 {0} 秒后亮起", "seconds"),
+        Template("^(?<count>[0-9]+) 名车手可完成已经开始的最后一圈$", "server.banner.finalLaps", "{0} 名车手可完成已经开始的最后一圈", "count"),
+        Template("^(?<session>.+) 计时结束，等待 (?<count>[0-9]+) 名车手完成最后一圈。$", "server.event.waitingFinalLaps", "{0} 计时结束，等待 {1} 名车手完成最后一圈。", "session", "count"),
+        Template("^(?<session>.+) 计时结束，成绩已冻结。$", "server.event.resultsFrozen", "{0} 计时结束，成绩已冻结。", "session"),
+        Template("^(?<session>.+) 计时结束，本节成绩已冻结。$", "server.event.sessionResultsFrozen", "{0} 计时结束，本节成绩已冻结。", "session"),
+        Template("^警告 · (?<reason>.+)$", "server.penalty.warning", "警告 · {0}", "reason"),
+        Template("^待执行 \\+(?<seconds>.+) 秒 · (?<reason>.+)$", "server.penalty.time", "待执行 +{0} 秒 · {1}", "seconds", "reason"),
+        Template("^通过维修区处罚 · (?<reason>.+)$", "server.penalty.driveThrough", "通过维修区处罚 · {0}", "reason"),
+        Template("^停车 (?<seconds>.+) 秒 · (?<reason>.+)$", "server.penalty.stopAndGo", "停车 {0} 秒 · {1}", "seconds", "reason"),
+        Template("^退后 (?<places>[0-9]+) 个发车位 · (?<reason>.+)$", "server.penalty.gridDrop", "退后 {0} 个发车位 · {1}", "places", "reason"),
+        Template("^取消比赛资格 · (?<reason>.+)$", "server.penalty.disqualification", "取消比赛资格 · {0}", "reason"),
+        Template("^(?<name>.+) 加入赛事。$", "server.event.joinedEvent", "{0} 加入赛事。", "name"),
+        Template("^(?<name>.+) 重新连接。$", "server.event.reconnected", "{0} 重新连接。", "name"),
+        Template("^(?<name>.+) 断开连接。$", "server.event.disconnected", "{0} 断开连接。", "name"),
+        Template("^(?<name>.+) 完成有效圈 (?<time>.+)。$", "server.event.validLap", "{0} 完成有效圈 {1}。", "name", "time"),
+        Template("^(?<name>.+) 完成计圈 (?<time>.+)，因赛道边界事件不计入最快圈。$", "server.event.lapExcluded", "{0} 完成计圈 {1}，因赛道边界事件不计入最快圈。", "name", "time"),
+        Template("^(?<name>.+) 完成无效圈：(?<reason>.+)。$", "server.event.invalidLap", "{0} 完成无效圈：{1}。", "name", "reason"),
+        Template("^(?<name>.+) 的异常状态已解除。$", "server.event.automaticHazardCleared", "{0} 的异常状态已解除。", "name"),
+        Template("^(?<name>.+) 的未执行停车并通过维修区处罚已折算为 \\+(?<seconds>.+) 秒完赛加时。$", "server.event.stopAndGoConverted", "{0} 的未执行停车并通过维修区处罚已折算为 +{1} 秒完赛加时。", "name", "seconds"),
+        Template("^(?<name>.+) 未正确执行 (?<seconds>.+) 秒停车罚时，处罚已转为通过维修区。$", "server.event.timePenaltyConverted", "{0} 未正确执行 {1} 秒停车罚时，处罚已转为通过维修区。", "name", "seconds"),
+        Template("^(?<name>.+) 未正确执行 (?<seconds>.+) 秒停车罚时；比赛已进入最后三圈，处罚替换为 20 秒完赛加时。$", "server.event.timePenaltyLateConverted", "{0} 未正确执行 {1} 秒停车罚时；比赛已进入最后三圈，处罚替换为 20 秒完赛加时。", "name", "seconds"),
+        Template("^(?<name>.+) 在红灯熄灭前移动，自动加罚 5 秒。$", "server.event.falseStart", "{0} 在红灯熄灭前移动，自动加罚 5 秒。", "name"),
+        Template("^(?<name>.+) 抢跑，记录 5 秒待执行罚时。$", "server.event.falseStartRecorded", "{0} 抢跑，记录 5 秒待执行罚时。", "name"),
+        Template("^(?<name>.+) 执行通过维修区处罚时停车，本次进站无效。$", "server.event.driveThroughStopped", "{0} 执行通过维修区处罚时停车，本次进站无效。", "name"),
+        Template("^(?<name>.+) 执行通过维修区处罚时暂停或回转，本次进站无效。$", "server.event.driveThroughInterrupted", "{0} 执行通过维修区处罚时暂停或回转，本次进站无效。", "name"),
+        Template("^(?<name>.+) 正在接受调查：(?<offense>.+)（第 (?<lap>[0-9]+) 圈）。$", "server.event.underInvestigation", "{0} 正在接受调查：{1}（第 {2} 圈）。", "name", "offense", "lap"),
+        Template("^(?<name>.+) 被标记为 (?<status>.+)：(?<reason>.+)。$", "server.event.markedStatus", "{0} 被标记为 {1}：{2}。", "name", "status", "reason"),
+        Template("^(?<session>.+) 计时结束，(?<count>[0-9]+) 名车手仍可完成最后飞驰圈。$", "server.event.qualifyingFinalLaps", "{0} 计时结束，{1} 名车手仍可完成最后飞驰圈。", "session", "count"),
+        Template("^(?<session>.+) 计时结束，(?<count>[0-9]+) 名车手仍可完成最后一圈。$", "server.event.practiceFinalLaps", "{0} 计时结束，{1} 名车手仍可完成最后一圈。", "session", "count"),
+        Template("^(?<count>[0-9]+) 名车手可完成最后飞驰圈$", "server.banner.qualifyingFinalLaps", "{0} 名车手可完成最后飞驰圈", "count"),
+        Template("^服务端协议版本为 (?<version>[0-9]+)。$", "server.error.protocolVersion", "服务端协议版本为 {0}。", "version"),
+        Template("^不支持消息类型：(?<type>.+)$", "server.error.unsupportedMessage", "不支持消息类型：{0}", "type"),
+        Template("^(?<team>.+) 的代表色不是有效的 #RRGGBB 颜色。$", "server.error.teamColor", "{0} 的代表色不是有效的 #RRGGBB 颜色。", "team"),
+        Template("^已开启车队，请完整配置 (?<count>[0-9]+) 支车队的名称和代表色。$", "server.error.teamConfiguration", "已开启车队，请完整配置 {0} 支车队的名称和代表色。", "count"),
+        Template("^处罚 · (?<name>.+)$", "server.banner.penalty", "处罚 · {0}", "name"),
+        Template("^调查结论 · (?<name>.+)$", "server.banner.investigationDecision", "调查结论 · {0}", "name"),
+        Template("^罚时执行失败 · (?<name>.+)$", "server.banner.penaltyServiceFailed", "罚时执行失败 · {0}", "name"),
+        Template("^抢跑 · (?<name>.+)$", "server.banner.falseStart", "抢跑 · {0}", "name"),
+        Template("^赛道边界警告 · (?<name>.+)$", "server.banner.trackLimitWarning", "赛道边界警告 · {0}", "name"),
+        Template("^通过维修区处罚逾期 · (?<name>.+)$", "server.banner.driveThroughOverdue", "通过维修区处罚逾期 · {0}", "name"),
+        Template("^正在调查 · (?<name>.+)$", "server.banner.investigating", "正在调查 · {0}", "name"),
+        Template("^自动判罚 · (?<name>.+)$", "server.banner.automaticPenalty", "自动判罚 · {0}", "name"),
+        Template("^停车罚时执行失败：(?<reason>.+)$", "server.penalty.serviceFailed", "停车罚时执行失败：{0}", "reason"),
+        Template("^通过维修区处罚未按期执行：(?<reason>.+)$", "server.penalty.driveThroughLate", "通过维修区处罚未按期执行：{0}", "reason"),
+        Template("^未完成规定的最少有效维修停留次数（(?<done>[0-9]+)/(?<required>[0-9]+)）。$", "server.penalty.minimumPitStops", "未完成规定的最少有效维修停留次数（{0}/{1}）。", "done", "required")
+    ];
+
     public static string CurrentLanguage { get; private set; } = StartupProfile.DefaultLanguage;
 
     public static IReadOnlyList<AppLanguageOption> SupportedLanguages => LanguageOptions;
@@ -197,10 +315,14 @@ internal static class AppLocalization
     public static string Literal(string text)
     {
         if (string.IsNullOrEmpty(text) || CurrentLanguage == StartupProfile.DefaultLanguage) return text;
-        if (!text.Any(character => character is >= '\u3400' and <= '\u9FFF')) return text;
         if (translations.TryGetValue($"literal:{text}", out var localized) &&
             !string.IsNullOrWhiteSpace(localized))
             return localized;
+        if (RaceServerLiteralTokens.TryGetValue(text, out var canonicalToken) &&
+            translations.TryGetValue($"literal:{canonicalToken}", out localized) &&
+            !string.IsNullOrWhiteSpace(localized))
+            return localized;
+        if (!text.Any(character => character is >= '\u3400' and <= '\u9FFF')) return text;
         var match = ConfirmingStartPattern.Match(text);
         if (match.Success)
             return Format(
@@ -266,12 +388,15 @@ internal static class AppLocalization
                 "template.startSequenceCountdown",
                 "{0} 秒后启动发车程序",
                 match.Groups["seconds"].Value);
-        foreach (var template in DynamicLiteralTemplates)
+        foreach (var template in DynamicLiteralTemplates.Concat(RaceServerLiteralTemplates))
         {
             match = template.Pattern.Match(text);
             if (!match.Success) continue;
             var arguments = template.Groups
-                .Select(group => (object?)Literal(match.Groups[group].Value))
+                .Select(group => (object?)(template.Key.StartsWith("server.", StringComparison.Ordinal) &&
+                                             RaceServerIdentityGroups.Contains(group)
+                    ? match.Groups[group].Value
+                    : Literal(match.Groups[group].Value)))
                 .ToArray();
             return Format(template.Key, template.Fallback, arguments);
         }

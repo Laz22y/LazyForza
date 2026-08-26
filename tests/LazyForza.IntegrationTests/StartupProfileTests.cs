@@ -226,6 +226,51 @@ public sealed class StartupProfileTests
     }
 
     [TestMethod]
+    public void RaceServerSystemTextUsesTheClientLanguage()
+    {
+        try
+        {
+            AppLocalization.UseLanguage("en");
+            Assert.AreEqual("Race start", AppLocalization.Literal("比赛开始"));
+            Assert.AreEqual(
+                "Driver One entered the room.",
+                AppLocalization.Literal("Driver One 进入房间。"));
+            Assert.AreEqual(
+                "Driver One completed lap 6: 1:08.424.",
+                AppLocalization.Literal("Driver One 完成第 6 圈：1:08.424。"));
+            Assert.AreEqual(
+                "Driver One lap invalid: Marked invalid by client.",
+                AppLocalization.Literal("Driver One 的本圈无效：客户端判定无效。"));
+            Assert.AreEqual(
+                "Driver One may cross the finish line 2 more times before serving the drive-through.",
+                AppLocalization.Literal("Driver One 的通过维修区处罚还可跨越终点线 2 次。"));
+            Assert.AreEqual(
+                "Possible contact between Driver One and Driver Two sent to Race Control for investigation (lap 4).",
+                AppLocalization.Literal("Driver One 与 Driver Two 发生疑似车辆接触，已交由总控调查（第 4 圈）。"));
+            Assert.AreEqual(
+                "+5 seconds pending · False start",
+                AppLocalization.Literal("待执行 +5 秒 · 抢跑"));
+            Assert.AreEqual(
+                "The room has reached its 12-driver limit.",
+                AppLocalization.Literal("房间人数已达到 12 人上限。"));
+            Assert.AreEqual("Warnings only", AppLocalization.Literal("WarningsOnly"));
+            Assert.AreEqual(
+                "比赛开始 entered the room.",
+                AppLocalization.Literal("比赛开始 进入房间。"));
+            Assert.AreEqual("Driver One", AppLocalization.Literal("Driver One"));
+
+            AppLocalization.UseLanguage("zh-Hans");
+            Assert.AreEqual(
+                "Driver One 进入房间。",
+                AppLocalization.Literal("Driver One 进入房间。"));
+        }
+        finally
+        {
+            AppLocalization.UseLanguage("zh-Hans");
+        }
+    }
+
+    [TestMethod]
     public void LanguageCanSwitchBothDirectionsWithoutLosingTranslations()
     {
         try
