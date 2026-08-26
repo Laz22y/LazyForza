@@ -73,7 +73,9 @@ internal sealed class UpdateOfferWindow : Window
         });
         var notes = new TextBox
         {
-            Text = UpdateReleaseMetadata.ToDisplayText(release.Notes),
+            Text = UpdateReleaseMetadata.ToDisplayText(
+                release.Notes,
+                AppLocalization.CurrentLanguage),
             IsReadOnly = true,
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,

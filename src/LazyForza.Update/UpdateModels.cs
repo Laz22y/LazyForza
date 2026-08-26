@@ -79,12 +79,16 @@ public static class UpdateReleaseMetadata
     public static string Marker(UpdateReleaseType type) =>
         $"{MarkerPrefix} {type.MarkerValue()} {MarkerSuffix}";
 
-    public static string ToDisplayText(string? notes)
+    public static string ToDisplayText(string? notes) =>
+        ToDisplayText(notes, language: null);
+
+    public static string ToDisplayText(string? notes, string? language)
     {
         if (string.IsNullOrWhiteSpace(notes))
             return "本次发行暂未提供更新说明。";
 
-        var displayLines = notes
+        var selectedNotes = SelectLocalizedNotes(notes, language);
+        var displayLines = selectedNotes
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace('\r', '\n')
             .Split('\n')
@@ -99,6 +103,63 @@ public static class UpdateReleaseMetadata
         return displayLines.Count == 0
             ? "本次发行暂未提供更新说明。"
             : string.Join(Environment.NewLine, displayLines);
+    }
+
+    private static string SelectLocalizedNotes(string notes, string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language))
+            return notes;
+
+        var lines = notes
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+        var sections = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        string? currentSection = null;
+
+        foreach (var line in lines)
+        {
+            var section = LocalizedSection(line);
+            if (section is not null)
+            {
+                currentSection = section;
+                sections.TryAdd(section, []);
+                continue;
+            }
+
+            if (currentSection is not null)
+                sections[currentSection].Add(line);
+        }
+
+        if (sections.Count == 0)
+            return notes;
+
+        var requestedSection = language.StartsWith("en", StringComparison.OrdinalIgnoreCase)
+            ? "en"
+            : "zh-Hans";
+        if (!sections.TryGetValue(requestedSection, out var selectedLines) ||
+            selectedLines.All(string.IsNullOrWhiteSpace))
+        {
+            selectedLines = sections.Values.FirstOrDefault(candidate =>
+                candidate.Any(line => !string.IsNullOrWhiteSpace(line)));
+        }
+
+        return selectedLines is null ? string.Empty : string.Join('\n', selectedLines);
+    }
+
+    private static string? LocalizedSection(string line)
+    {
+        var value = line.Trim();
+        var index = 0;
+        while (index < value.Length && value[index] == '#')
+            index++;
+        if (index == 0 || index >= value.Length || !char.IsWhiteSpace(value[index]))
+            return null;
+
+        var heading = value[(index + 1)..].Trim();
+        if (heading.Equals("English", StringComparison.OrdinalIgnoreCase))
+            return "en";
+        return heading is "简体中文" or "中文" ? "zh-Hans" : null;
     }
 
     private static string FormatMarkdownLine(string line)

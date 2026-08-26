@@ -7,6 +7,8 @@ param(
     [Parameter(Mandatory)]
     [string]$ReleaseNotesPath,
 
+    [string]$ReleaseNotesPathEn,
+
     [Parameter(Mandatory)]
     [ValidateSet('MajorFeature', 'Feature', 'Fix')]
     [string]$UpdateType,
@@ -25,6 +27,12 @@ $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $releaseRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts\release'))
 $logRoot = [IO.Path]::GetFullPath((Join-Path $releaseRoot 'logs'))
 $notesPath = [IO.Path]::GetFullPath($ReleaseNotesPath)
+$notesPathEn = if ([string]::IsNullOrWhiteSpace($ReleaseNotesPathEn)) {
+    $null
+}
+else {
+    [IO.Path]::GetFullPath($ReleaseNotesPathEn)
+}
 $tag = "v$Version"
 $packageName = "LazyForza-$Version-win-x64.zip"
 $packagePath = Join-Path $releaseRoot $packageName
@@ -421,21 +429,46 @@ $notes = [string](Get-Content -LiteralPath $notesPath -Raw -Encoding UTF8)
 if ([string]::IsNullOrWhiteSpace($notes)) {
     throw 'Release notes are empty.'
 }
-$publishedNotes = "$updateTypeMarker`r`n`r`n$($notes.Trim())"
+$notesEn = $null
+if ($notesPathEn) {
+    if (-not (Test-Path -LiteralPath $notesPathEn -PathType Leaf)) {
+        throw "English release notes not found: $notesPathEn"
+    }
+    $notesEn = [string](Get-Content -LiteralPath $notesPathEn -Raw -Encoding UTF8)
+    if ([string]::IsNullOrWhiteSpace($notesEn)) {
+        throw 'English release notes are empty.'
+    }
+}
+elseif ([Version]$Version -ge [Version]'1.5.0') {
+    throw 'ReleaseNotesPathEn is required for LazyForza 1.5.0 and later.'
+}
+
+$releaseNotesBody = if ($notesEn) {
+    "## 简体中文`r`n`r`n$($notes.Trim())`r`n`r`n## English`r`n`r`n$($notesEn.Trim())"
+}
+else {
+    $notes.Trim()
+}
+$publishedNotes = "$updateTypeMarker`r`n`r`n$releaseNotesBody"
 $publishedNotesPath = Join-Path $logRoot "release-notes-published-$Version.md"
 Set-Content -LiteralPath $publishedNotesPath -Value $publishedNotes -Encoding UTF8
-if ($notes -match "(?m)^#\s*($([regex]::Escape($baseTitle))|$([regex]::Escape($expectedTitle)))\s*$") {
-    throw 'Release notes must not repeat the release title as a top-level heading.'
-}
 $validationHeading = -join @([char]0x9A8C, [char]0x8BC1)
-if ($notes -match "(?m)^#{1,6}\s*$([regex]::Escape($validationHeading))\s*$") {
-    throw 'Release notes must not include a validation section.'
-}
 $forbiddenReleaseSentence = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String(
         '5Y+R6KGM5YyF5LiN5YyF5ZCr5byA5Y+R6ICF55qE6K6+572u44CB5ZyI6YCf44CB6L2m6L6G5a2m5Lmg44CB5pel5b+X44CB5b2V5Yi25oiW6Ieq5a6a5LmJ6LWb6YGT44CC'))
-if ($notes.Contains($forbiddenReleaseSentence)) {
-    throw 'Release notes contain the forbidden package-content sentence.'
+foreach ($releaseNotesVariant in @($notes, $notesEn)) {
+    if (-not $releaseNotesVariant) {
+        continue
+    }
+    if ($releaseNotesVariant -match "(?m)^#\s*($([regex]::Escape($baseTitle))|$([regex]::Escape($expectedTitle)))\s*$") {
+        throw 'Release notes must not repeat the release title as a top-level heading.'
+    }
+    if ($releaseNotesVariant -match "(?m)^#{1,6}\s*$([regex]::Escape($validationHeading))\s*$") {
+        throw 'Release notes must not include a validation section.'
+    }
+    if ($releaseNotesVariant.Contains($forbiddenReleaseSentence)) {
+        throw 'Release notes contain the forbidden package-content sentence.'
+    }
 }
 
 $branch = (git branch --show-current).Trim()
@@ -458,6 +491,9 @@ if ($ValidateOnly) {
     Write-Output "VERSION=$Version"
     Write-Output "UPDATE_TYPE=$UpdateType"
     Write-Output "NOTES=$notesPath"
+    if ($notesPathEn) {
+        Write-Output "NOTES_EN=$notesPathEn"
+    }
     return
 }
 

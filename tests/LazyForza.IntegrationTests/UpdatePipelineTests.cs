@@ -234,6 +234,35 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
+    public void ReleaseMetadataSelectsCurrentLanguageFromBilingualNotes()
+    {
+        const string notes = """
+            ## 简体中文
+
+            ### 更新内容
+
+            - 增加中英文更新日志
+
+            ## English
+
+            ### What's new
+
+            - Added bilingual release notes
+            """;
+
+        var chinese = UpdateReleaseMetadata.ToDisplayText(notes, "zh-Hans");
+        var english = UpdateReleaseMetadata.ToDisplayText(notes, "en");
+        var legacy = UpdateReleaseMetadata.ToDisplayText(notes);
+
+        StringAssert.Contains(chinese, "增加中英文更新日志");
+        Assert.IsFalse(chinese.Contains("Added bilingual", StringComparison.Ordinal));
+        StringAssert.Contains(english, "Added bilingual release notes");
+        Assert.IsFalse(english.Contains("增加中英文", StringComparison.Ordinal));
+        StringAssert.Contains(legacy, "增加中英文更新日志");
+        StringAssert.Contains(legacy, "Added bilingual release notes");
+    }
+
+    [TestMethod]
     public async Task GitCodeLatestReleaseAcceptsUploadedAssetsWithoutSizeAndRequiresChecksum()
     {
         var json = GitCodeReleaseJson("v1.2.3");
