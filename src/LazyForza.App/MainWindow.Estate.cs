@@ -72,7 +72,7 @@ internal sealed partial class MainWindow
         {
             if (moduleActivation.IsDriftActive)
             {
-                MessageBox.Show(
+                AppDialog.Show(
                     this,
                     AppLocalization.Literal("请先关闭漂移仪表盘，再录入地产环道。"),
                     AppLocalization.Literal("地产环道"),
@@ -187,7 +187,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法读取赛事赛道信息"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AppDialog.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法读取赛事赛道信息"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             };
             rowActions.Children.Add(raceInfo);
@@ -225,7 +225,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("导出地产环道"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AppDialog.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("导出地产环道"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             };
             rowActions.Children.Add(export);
@@ -244,7 +244,7 @@ internal sealed partial class MainWindow
                 var currentDefinition = store.LoadEstateTrackDefinition(track.Id);
                 if (loadedTrack is null || currentDefinition is null)
                 {
-                    MessageBox.Show(this, AppLocalization.Literal("赛道定义已经不存在，请刷新列表。"), AppLocalization.Literal("无法编辑地产环道"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AppDialog.Show(this, AppLocalization.Literal("赛道定义已经不存在，请刷新列表。"), AppLocalization.Literal("无法编辑地产环道"), MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
                 var window = new EstateTrackEditorWindow(
@@ -273,7 +273,7 @@ internal sealed partial class MainWindow
                 var current = estateModule.State;
                 if (current.IsEnrollmentActive)
                 {
-                    MessageBox.Show(
+                    AppDialog.Show(
                         this,
                         AppLocalization.Literal("请先完成或取消当前地产环道录入，再删除已有赛道。"),
                         AppLocalization.Literal("无法删除地产环道"),
@@ -283,7 +283,7 @@ internal sealed partial class MainWindow
                 }
                 if (current.IsTimingActive && current.TrackId == track.Id)
                 {
-                    MessageBox.Show(
+                    AppDialog.Show(
                         this,
                         AppLocalization.Literal("这条地产环道正在计时。请先停止计时，再删除赛道。"),
                         AppLocalization.Literal("无法删除地产环道"),
@@ -291,7 +291,7 @@ internal sealed partial class MainWindow
                         MessageBoxImage.Information);
                     return;
                 }
-                if (MessageBox.Show(
+                if (AppDialog.Show(
                         this,
                         AppLocalization.Format(
                             "estate.delete.confirmation",
@@ -316,7 +316,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("删除地产环道"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AppDialog.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("删除地产环道"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             };
             rowActions.Children.Add(delete);
@@ -334,7 +334,7 @@ internal sealed partial class MainWindow
             {
                 if (moduleActivation.IsDriftActive)
                 {
-                    MessageBox.Show(
+                    AppDialog.Show(
                         this,
                         AppLocalization.Literal("请先关闭漂移仪表盘，再启用地产环道计时。"),
                         AppLocalization.Literal("地产环道"),
@@ -351,7 +351,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("地产环道计时"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AppDialog.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("地产环道计时"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
                 RenderSelectedPage();
             };

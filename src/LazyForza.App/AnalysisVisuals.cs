@@ -552,15 +552,18 @@ internal sealed class LapTelemetryChart : FrameworkElement
     {
         Placement = PlacementMode.Relative,
         PlacementTarget = target,
-        Background = new SolidColorBrush(Color.FromRgb(14, 21, 29)),
-        Foreground = new SolidColorBrush(Color.FromRgb(244, 247, 250)),
-        BorderBrush = new SolidColorBrush(Color.FromRgb(32, 184, 207)),
+        Background = ResourceBrush("PanelBrush", Color.FromRgb(14, 21, 29)),
+        Foreground = ResourceBrush("TextBrush", Color.FromRgb(244, 247, 250)),
+        BorderBrush = ResourceBrush("AccentBrush", Color.FromRgb(32, 184, 207)),
         BorderThickness = new Thickness(1),
         Padding = new Thickness(11, 8, 11, 8),
         HasDropShadow = true,
         StaysOpen = true,
         IsOpen = false
     };
+
+    private static Brush ResourceBrush(string key, Color fallback) =>
+        Application.Current?.TryFindResource(key) as Brush ?? new SolidColorBrush(fallback);
 
     internal static TextBlock TooltipText(
         LapRecord lap,

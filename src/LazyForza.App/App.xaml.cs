@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.IO;
+using System.Diagnostics;
 using System.Windows;
 using System.ComponentModel;
 using LazyForza.Domain;
@@ -31,6 +32,7 @@ public partial class App : Application
     private InitializationStateStore? initializationStateStore;
     private ApplicationDistribution distribution = ApplicationDistribution.Detect(AppContext.BaseDirectory);
     private StartupProfile startupProfile = StartupProfile.CreateDefault();
+    private string[] startupArguments = [];
     private bool exitRequested;
     private bool minimizedNoticeShown;
     private static bool localizationHandlerRegistered;
@@ -38,6 +40,8 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        WaitForRestartParent(e.Args);
+        startupArguments = ArgumentsForRestart(e.Args);
         singleInstance = SingleInstanceCoordinator.TryAcquire(
             Dispatcher,
             ShowMainWindow,
@@ -56,6 +60,7 @@ public partial class App : Application
                 distribution.InitializationStatePath);
             var profileLoad = startupProfileStore.LoadWithMigration();
             startupProfile = profileLoad.Profile;
+            AppAccentColors.Apply(startupProfile.AccentColor);
             var initializationState = initializationStateStore.Load();
             if (!initializationState.Exists && profileLoad.LegacyInitializationCompleted)
             {
@@ -256,7 +261,7 @@ public partial class App : Application
         }
         catch (Exception exception)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 AppLocalization.Format("app.startupErrorMessage", "LazyForza 无法启动。\n\n{0}", exception),
                 AppLocalization.Text("app.startupError", "启动错误"),
                 MessageBoxButton.OK,
@@ -293,6 +298,9 @@ public partial class App : Application
 
     internal static void RequestExit() =>
         ((App)Current).ExitApplication();
+
+    internal static void RequestRestart() =>
+        ((App)Current).RestartApplication();
 
     private void OnMainWindowClosing(object? sender, CancelEventArgs e)
     {
@@ -338,6 +346,87 @@ public partial class App : Application
         if (exitRequested) return;
         exitRequested = true;
         Shutdown(exitCode);
+    }
+
+    private void RestartApplication()
+    {
+        if (exitRequested) return;
+        try
+        {
+            var executable = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executable))
+                throw new InvalidOperationException("The current executable path is unavailable.");
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = executable,
+                WorkingDirectory = AppContext.BaseDirectory,
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add("--restart-parent");
+            startInfo.ArgumentList.Add(
+                Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            foreach (var argument in startupArguments)
+                startInfo.ArgumentList.Add(argument);
+            if (Process.Start(startInfo) is null)
+                throw new InvalidOperationException("The restart process could not be created.");
+            ExitApplication();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            var message = AppLocalization.Format(
+                "settings.app.restartFailedMessage",
+                "无法重启 LazyForza。请稍后手动关闭并重新打开。\n\n{0}",
+                exception.Message);
+            if (MainWindow?.IsVisible == true)
+                AppDialog.Show(
+                    MainWindow,
+                    message,
+                    AppLocalization.Text("settings.app.restartFailedTitle", "无法重启"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            else
+                AppDialog.Show(
+                    message,
+                    AppLocalization.Text("settings.app.restartFailedTitle", "无法重启"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+        }
+    }
+
+    private static void WaitForRestartParent(IReadOnlyList<string> arguments)
+    {
+        for (var index = 0; index < arguments.Count - 1; index++)
+        {
+            if (!arguments[index].Equals("--restart-parent", StringComparison.OrdinalIgnoreCase) ||
+                !int.TryParse(arguments[index + 1], out var processId) ||
+                processId == Environment.ProcessId)
+                continue;
+            try
+            {
+                using var parent = Process.GetProcessById(processId);
+                _ = parent.WaitForExit(30_000);
+            }
+            catch (ArgumentException)
+            {
+                // The previous process has already exited.
+            }
+            return;
+        }
+    }
+
+    internal static string[] ArgumentsForRestart(IReadOnlyList<string> arguments)
+    {
+        var result = new List<string>(arguments.Count);
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            if (arguments[index].Equals("--restart-parent", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index + 1 < arguments.Count) index++;
+                continue;
+            }
+            result.Add(arguments[index]);
+        }
+        return [.. result];
     }
 
     private static string SourceModeText(TelemetrySourceKind kind) => kind switch

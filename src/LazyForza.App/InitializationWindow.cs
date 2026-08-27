@@ -211,8 +211,8 @@ internal sealed class InitializationWindow : Window
         footer.Children.Add(backButton);
         nextButton.MinWidth = 128;
         nextButton.Padding = new Thickness(20, 9, 20, 9);
-        nextButton.Background = new SolidColorBrush(Color.FromRgb(16, 126, 148));
-        nextButton.BorderBrush = new SolidColorBrush(Color.FromRgb(39, 198, 221));
+        nextButton.Background = ResourceBrush("AccentBrush");
+        nextButton.BorderBrush = ResourceBrush("AccentBrush");
         nextButton.Click += async (_, _) =>
         {
             if (step == FinalStep)
@@ -899,9 +899,9 @@ internal sealed class InitializationWindow : Window
             Width = 21,
             Height = 21,
             CornerRadius = new CornerRadius(11),
-            BorderBrush = new SolidColorBrush(selected
-                ? Color.FromRgb(53, 214, 230)
-                : Color.FromRgb(78, 93, 109)),
+            BorderBrush = selected
+                ? ResourceBrush("AccentBrush")
+                : new SolidColorBrush(Color.FromRgb(78, 93, 109)),
             BorderThickness = new Thickness(selected ? 6 : 1.5),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center
@@ -919,12 +919,12 @@ internal sealed class InitializationWindow : Window
         button.Content = content;
         return new Border
         {
-            Background = new SolidColorBrush(selected
-                ? Color.FromRgb(18, 45, 54)
-                : Color.FromRgb(20, 28, 38)),
-            BorderBrush = new SolidColorBrush(selected
-                ? Color.FromRgb(46, 170, 188)
-                : Color.FromRgb(43, 57, 71)),
+            Background = selected
+                ? ResourceBrush("AccentSoftBrush")
+                : new SolidColorBrush(Color.FromRgb(20, 28, 38)),
+            BorderBrush = selected
+                ? ResourceBrush("AccentBrush")
+                : new SolidColorBrush(Color.FromRgb(43, 57, 71)),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(11),
             Child = button

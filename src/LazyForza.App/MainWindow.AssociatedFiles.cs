@@ -12,7 +12,7 @@ internal sealed partial class MainWindow
         var fullPath = Path.GetFullPath(path);
         if (!File.Exists(fullPath))
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 this,
                 AppLocalization.Format("files.notFound", "找不到文件：\n{0}", fullPath),
                 AppLocalization.Text("files.openFailed", "无法打开文件"),
@@ -39,7 +39,7 @@ internal sealed partial class MainWindow
                 ImportEstateTrackPackage(fullPath);
                 break;
             default:
-                MessageBox.Show(
+                AppDialog.Show(
                     this,
                     AppLocalization.Text("files.unsupported", "该文件类型不能由 LazyForza 直接打开。"),
                     AppLocalization.Text("files.openFailed", "无法打开文件"),
@@ -64,7 +64,7 @@ internal sealed partial class MainWindow
         try
         {
             var preview = packageService.Preview(path);
-            var confirmation = MessageBox.Show(
+            var confirmation = AppDialog.Show(
                 this,
                 AppLocalization.Format(
                     "estate.import.confirmation",
@@ -82,7 +82,7 @@ internal sealed partial class MainWindow
             var result = packageService.Import(path, CurrentTrackSource);
             if (result.AlreadyExists && !result.ExistingTrackMatches)
             {
-                var replace = MessageBox.Show(
+                var replace = AppDialog.Show(
                     this,
                     AppLocalization.Format(
                         "estate.import.conflict",
@@ -98,7 +98,7 @@ internal sealed partial class MainWindow
                         replaceExisting: true);
             }
 
-            MessageBox.Show(
+            AppDialog.Show(
                 this,
                 result.Imported
                     ? AppLocalization.Format(
@@ -127,7 +127,7 @@ internal sealed partial class MainWindow
         }
         catch (Exception exception)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 this,
                 AppLocalization.Literal(exception.Message),
                 AppLocalization.Text("literal:导入地产环道", "导入地产环道"),

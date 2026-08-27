@@ -61,16 +61,18 @@ internal sealed record StartupProfile(
     int SchemaVersion,
     string Language,
     string DataDirectory,
-    MainWindowCloseBehavior CloseBehavior)
+    MainWindowCloseBehavior CloseBehavior,
+    AppAccentColor AccentColor)
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
     public const string DefaultLanguage = "zh-Hans";
 
     public static StartupProfile CreateDefault() => new(
         CurrentSchemaVersion,
         DefaultLanguage,
         StartupProfileStore.DefaultDataDirectory,
-        MainWindowCloseBehavior.MinimizeToTray);
+        MainWindowCloseBehavior.MinimizeToTray,
+        AppAccentColor.DefaultBlue);
 
     public StartupProfile Normalize()
     {
@@ -93,7 +95,10 @@ internal sealed record StartupProfile(
         {
             SchemaVersion = CurrentSchemaVersion,
             Language = language,
-            DataDirectory = dataDirectory
+            DataDirectory = dataDirectory,
+            AccentColor = AppAccentColors.IsDefined(AccentColor)
+                ? AccentColor
+                : AppAccentColor.DefaultBlue
         };
     }
 }

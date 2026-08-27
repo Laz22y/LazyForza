@@ -64,7 +64,7 @@ internal sealed partial class MainWindow
             .ToArray();
         if (laps.Length == 0)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 this,
                 AppLocalization.Text("lap.exchange.selectFirst", "请先在已保存圈速中勾选 1–4 圈。"),
                 AppLocalization.Text("lap.exchange.exportTitle", "导出圈速"),
@@ -75,7 +75,7 @@ internal sealed partial class MainWindow
         var trackId = laps[0].TrackId;
         if (laps.Any(lap => lap.TrackId != trackId) || store.LoadTrack(trackId) is not { } saved)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 this,
                 AppLocalization.Text("lap.exchange.incompleteTrack", "所选圈速的赛道数据不完整，无法导出。"),
                 AppLocalization.Text("lap.exchange.exportTitle", "导出圈速"),
@@ -113,7 +113,7 @@ internal sealed partial class MainWindow
                 playerCode,
                 laps,
                 lifetimeCancellation.Token);
-            MessageBox.Show(
+            AppDialog.Show(
                 this,
                 AppLocalization.Format("lap.exchange.exported", "已导出 {0} 圈：\n{1}", laps.Length, dialog.FileName),
                 AppLocalization.Text("common.exportComplete", "导出完成"),
@@ -122,7 +122,7 @@ internal sealed partial class MainWindow
         }
         catch (Exception exception)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 this,
                 AppLocalization.Format("lap.exchange.exportFailedMessage", "无法导出圈速：{0}", exception.Message),
                 AppLocalization.Text("common.exportFailed", "导出失败"),
@@ -178,7 +178,7 @@ internal sealed partial class MainWindow
                 .Distinct(StringComparer.CurrentCulture)
                 .ToArray();
             var playerText = string.Join(AppLocalization.Text("common.listSeparator", "、"), players);
-            if (MessageBox.Show(
+            if (AppDialog.Show(
                     this,
                     AppLocalization.Format(
                         "lap.exchange.importConfirmation",
@@ -214,7 +214,7 @@ internal sealed partial class MainWindow
             selectedLapIds.UnionWith(imported.Select(lap => lap.Id));
             displayedLapIds.Clear();
             RenderSelectedPage(true);
-            MessageBox.Show(
+            AppDialog.Show(
                 this,
                 imported.Length == 0
                     ? AppLocalization.Format(
@@ -235,7 +235,7 @@ internal sealed partial class MainWindow
         }
         catch (Exception exception)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 this,
                 AppLocalization.Literal(exception.Message),
                 AppLocalization.Text("lap.exchange.importFailed", "无法导入圈速"),

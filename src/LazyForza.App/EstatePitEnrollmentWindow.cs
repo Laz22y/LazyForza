@@ -201,7 +201,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
             !double.TryParse(speedLimit.Text, out var limit) ||
             !double.TryParse(serviceSeconds.Text, out var seconds))
         {
-            MessageBox.Show(this,
+            AppDialog.Show(this,
                 AppLocalization.Literal("请输入有效的通道半宽、限速和最短服务时间。"),
                 AppLocalization.Literal("参数无效"), MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
@@ -247,7 +247,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
         try { action(); }
         catch (Exception exception)
         {
-            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+            AppDialog.Show(this, AppLocalization.Literal(exception.Message),
                 AppLocalization.Literal(title), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         Refresh();
@@ -340,7 +340,7 @@ internal sealed class EstatePitEnrollmentWindow : Window
     private void OnClosing(object? sender, CancelEventArgs eventArgs)
     {
         if (acceptedClose || !module.PitState.IsActive) return;
-        if (MessageBox.Show(this,
+        if (AppDialog.Show(this,
                 AppLocalization.Literal("当前维修区录入尚未保存。确认放弃吗？"),
                 AppLocalization.Literal("放弃维修区录入"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)

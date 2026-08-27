@@ -788,7 +788,7 @@ internal sealed partial class MainWindow : Window
                     : (Guid?)null;
                 if (selectedTrackId == module.CurrentTrack?.Id ||
                     selectedTrackId is null && module.CurrentTrack is null) return;
-                if (module.HasCurrentCompetitionSession && MessageBox.Show(
+                if (module.HasCurrentCompetitionSession && AppDialog.Show(
                         AppLocalization.Literal("切换赛道会结束当前比赛的分析。仍要继续吗？"),
                         AppLocalization.Literal("切换分析赛道"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                 {
@@ -807,7 +807,7 @@ internal sealed partial class MainWindow : Window
                 }
                 catch (InvalidOperationException exception)
                 {
-                    MessageBox.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法选择赛道"), MessageBoxButton.OK, MessageBoxImage.Error);
+                    AppDialog.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法选择赛道"), MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             };
             var selectedTrackIdForActions = selector.SelectedItem is ComboBoxItem { Tag: Guid selectedId }
@@ -898,7 +898,7 @@ internal sealed partial class MainWindow : Window
                 var laps = TrackLaps(selectedTrackId);
                 if (laps.Length == 0)
                 {
-                    MessageBox.Show(AppLocalization.Literal("该赛道没有已保存圈速。"), AppLocalization.Literal("删除赛道圈速"), MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppDialog.Show(AppLocalization.Literal("该赛道没有已保存圈速。"), AppLocalization.Literal("删除赛道圈速"), MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -938,7 +938,7 @@ internal sealed partial class MainWindow : Window
                     .ToArray();
                 if (selectedLaps.Length == 0)
                 {
-                    MessageBox.Show(AppLocalization.Literal("请先勾选要删除的圈速。"), AppLocalization.Literal("删除所选圈速"), MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppDialog.Show(AppLocalization.Literal("请先勾选要删除的圈速。"), AppLocalization.Literal("删除所选圈速"), MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -961,7 +961,7 @@ internal sealed partial class MainWindow : Window
                         "\n\n其中 {0} 条是对应性能等级当前保留的历史最快圈；删除后，下一条最快有效圈会成为新的历史最快。",
                         selectedHistoricalBestCount)
                     : string.Empty;
-                if (MessageBox.Show(
+                if (AppDialog.Show(
                         AppLocalization.Format(
                             "lap.deleteSelected.confirmation",
                             "确认删除所选 {0} 条圈速？\n\n{1}{2}\n\n此操作不可撤销。",
@@ -1121,7 +1121,7 @@ internal sealed partial class MainWindow : Window
                                 if (selectedLapIds.Count >= 4)
                                 {
                                     check.IsChecked = false;
-                                    MessageBox.Show(AppLocalization.Literal("一次最多比较 4 圈。"), AppLocalization.Literal("圈选择"), MessageBoxButton.OK, MessageBoxImage.Information);
+                                    AppDialog.Show(AppLocalization.Literal("一次最多比较 4 圈。"), AppLocalization.Literal("圈选择"), MessageBoxButton.OK, MessageBoxImage.Information);
                                     return;
                                 }
                                 selectedLapIds.Add(selectableLap.Id);
@@ -1154,7 +1154,7 @@ internal sealed partial class MainWindow : Window
                             var fastestWarning = historicalBest
                                 ? AppLocalization.Literal("\n\n这是程序当前保留的历史最快圈。手动删除后，下一条最快有效圈会成为新的历史最快。")
                                 : string.Empty;
-                            if (MessageBox.Show(
+                            if (AppDialog.Show(
                                     AppLocalization.Format(
                                         "lap.deleteOne.confirmation",
                                         "确认删除 {0:MM-dd HH:mm:ss} 的圈速 {1}？此操作不可撤销。{2}",
@@ -1836,7 +1836,7 @@ internal sealed partial class MainWindow : Window
         };
         add.Click += (_, _) =>
         {
-            if (MessageBox.Show(
+            if (AppDialog.Show(
                     AppLocalization.Literal("下场比赛将用于学习赛道。请完整跑完路线，期间不要倒带、传送或退出。开始学习吗？"),
                     AppLocalization.Literal("添加自定义赛道"),
                     MessageBoxButton.YesNo,
@@ -2062,7 +2062,7 @@ internal sealed partial class MainWindow : Window
             };
             delete.Click += (_, _) =>
             {
-                if (MessageBox.Show(
+                if (AppDialog.Show(
                         AppLocalization.Format(
                             "tracks.delete.confirmation",
                             "删除“{0}”及其 {1} 圈记录？此操作不可撤销。",
@@ -2138,7 +2138,7 @@ internal sealed partial class MainWindow : Window
     {
         if (lapModule.CurrentTrack?.Id != summary.Id)
         {
-            if (lapModule.HasCurrentCompetitionSession && MessageBox.Show(
+            if (lapModule.HasCurrentCompetitionSession && AppDialog.Show(
                     AppLocalization.Literal("切换赛道会结束当前比赛的分析。仍要继续吗？"),
                     AppLocalization.Literal("切换分析赛道"),
                     MessageBoxButton.YesNo,
@@ -2151,7 +2151,7 @@ internal sealed partial class MainWindow : Window
             }
             catch (InvalidOperationException exception)
             {
-                MessageBox.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法选择赛道"), MessageBoxButton.OK, MessageBoxImage.Error);
+                AppDialog.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法选择赛道"), MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
         }
@@ -2474,7 +2474,7 @@ internal sealed partial class MainWindow : Window
         {
             badges.Children.Add(new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(38, 49, 214, 231)),
+                Background = Brush("AccentSoftBrush"),
                 BorderBrush = Brush("AccentBrush"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
@@ -2521,7 +2521,7 @@ internal sealed partial class MainWindow : Window
         {
             var active = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(38, 49, 214, 231)),
+                Background = Brush("AccentSoftBrush"),
                 BorderBrush = Brush("AccentBrush"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(9),
@@ -2623,7 +2623,7 @@ internal sealed partial class MainWindow : Window
         };
         delete.Click += (_, _) =>
         {
-            if (MessageBox.Show(
+            if (AppDialog.Show(
                     AppLocalization.Format(
                         "shift.profile.deleteConfirmation",
                         "删除车辆配置“{0}”及其学习数据？此操作不可撤销。",
@@ -2721,7 +2721,7 @@ internal sealed partial class MainWindow : Window
             status?.SetCurrentValue(
                 TextBlock.TextProperty,
                 AppLocalization.Literal("更新失败，可稍后重试。"));
-            MessageBox.Show(
+            AppDialog.Show(
                 AppLocalization.Format(
                     "update.install.failedMessage",
                     "更新未安装，当前版本没有被更改。\n\n{0}",
@@ -2819,7 +2819,7 @@ internal sealed partial class MainWindow : Window
                 tracks.IsChecked == true);
             if (!selection.HasAny)
             {
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Literal("请至少选择一类数据。"),
                     AppLocalization.Literal("没有可导出的内容"),
                     MessageBoxButton.OK,
@@ -2853,7 +2853,7 @@ internal sealed partial class MainWindow : Window
                     "已导出 · Schema {0} · 应用 {1}",
                     manifest.SchemaVersion,
                     manifest.ApplicationVersion);
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Format(
                         "backup.export.complete",
                         "备份已生成并完成 SHA-256 校验。\n\n{0}",
@@ -2869,7 +2869,7 @@ internal sealed partial class MainWindow : Window
             catch (Exception exception)
             {
                 exportStatus.Text = AppLocalization.Literal("导出失败。");
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Literal(exception.Message),
                     AppLocalization.Literal("无法导出备份"),
                     MessageBoxButton.OK,
@@ -3001,7 +3001,7 @@ internal sealed partial class MainWindow : Window
                 selectedBackup = null;
                 preview = null;
                 previewLabel.Text = AppLocalization.Literal("备份校验失败。");
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Literal(exception.Message),
                     AppLocalization.Literal("无法读取备份"),
                     MessageBoxButton.OK,
@@ -3020,7 +3020,7 @@ internal sealed partial class MainWindow : Window
                 : BackupImportMode.Merge;
             if (mode == BackupImportMode.Overwrite &&
                 preview.Conflicts.Count > 0 &&
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Format(
                         "backup.import.confirmOverwrite",
                         "将覆盖 {0} 项冲突数据。继续前会保留现有自动备份，是否继续？",
@@ -3055,16 +3055,14 @@ internal sealed partial class MainWindow : Window
                     result.ImportedVehicles,
                     result.ImportedLaps,
                     result.ImportedCustomTracks);
-                MessageBox.Show(
-                    AppLocalization.Literal("数据导入完成。为使后台模块重新载入赛道与车辆缓存，请重启 LazyForza。"),
-                    AppLocalization.Literal("导入完成"),
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                AppRestartPrompt.Show(
+                    this,
+                    AppLocalization.Literal("数据导入完成。为使后台模块重新载入赛道与车辆缓存，请重启 LazyForza。"));
             }
             catch (Exception exception)
             {
                 previewLabel.Text += AppLocalization.Literal("\n导入失败，数据库事务已回滚。");
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Literal(exception.Message),
                     AppLocalization.Literal("无法导入备份"),
                     MessageBoxButton.OK,
@@ -3167,7 +3165,7 @@ internal sealed partial class MainWindow : Window
             if (!IPAddress.TryParse(address.Text.Trim(), out _) ||
                 !int.TryParse(port.Text.Trim(), out var parsedPort) || parsedPort is < 1 or > 65535 || parsedPort is >= 5200 and <= 5300)
             {
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Literal("请输入有效 IP 地址和 1–65535 端口，并避开 5200–5300。"),
                     AppLocalization.Literal("监听设置无效"),
                     MessageBoxButton.OK,
@@ -3176,11 +3174,9 @@ internal sealed partial class MainWindow : Window
             }
             store.SetAppSetting("telemetry.listenAddress", address.Text.Trim());
             store.SetAppSetting("telemetry.port", parsedPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            MessageBox.Show(
-                AppLocalization.Literal("监听设置已保存，重启后生效。"),
-                AppLocalization.Literal("设置已保存"),
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            AppRestartPrompt.Show(
+                this,
+                AppLocalization.Literal("监听设置已保存，重启后生效。"));
         };
         Grid.SetRow(saveNetwork, 3);
         Grid.SetColumnSpan(saveNetwork, 2);
@@ -3272,7 +3268,7 @@ internal sealed partial class MainWindow : Window
         };
         resetDefaults.Click += async (_, _) =>
         {
-            if (MessageBox.Show(
+            if (AppDialog.Show(
                     AppLocalization.Literal("确定重置 Overlay 设置吗？\n\n位置、尺寸、仪表盘部件、地产赛事部件、透明度、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。"),
                     AppLocalization.Literal("重置 Overlay"),
                     MessageBoxButton.YesNo,
@@ -3760,7 +3756,7 @@ internal sealed partial class MainWindow : Window
             "管理应用更新、数据备份迁移与诊断入口。"),
         _ => AppLocalization.Text(
             "settings.category.general.pageDetail",
-            "管理玩家代号、界面语言、数据目录和窗口关闭行为。")
+            "管理玩家代号、界面语言、UI 强调色、数据目录和窗口关闭行为。")
     };
 
     private Border BuildSettingsCategoryNavigation()
@@ -3885,7 +3881,7 @@ internal sealed partial class MainWindow : Window
                     diagnosticCapture.BufferedSamples,
                     diagnosticCapture.EventCount,
                     diagnosticCapture.AnomalyCount);
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Format("diagnostics.export.complete", "诊断包已生成。\n\n{0}", path),
                     AppLocalization.Literal("导出完成"),
                     MessageBoxButton.OK,
@@ -3894,7 +3890,7 @@ internal sealed partial class MainWindow : Window
             catch (Exception exception)
             {
                 packageStatus.Text = AppLocalization.Literal("诊断包导出失败。");
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Literal(exception.Message),
                     AppLocalization.Literal("无法导出诊断包"),
                     MessageBoxButton.OK,
@@ -3928,7 +3924,7 @@ internal sealed partial class MainWindow : Window
                 try
                 {
                     var result = lapAnalysisModule.CorrectTrackMatch(trackId);
-                    MessageBox.Show(
+                    AppDialog.Show(
                         AppLocalization.Literal(result.Message),
                         AppLocalization.Literal("赛道已纠正"),
                         MessageBoxButton.OK,
@@ -3937,7 +3933,7 @@ internal sealed partial class MainWindow : Window
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(
+                    AppDialog.Show(
                         AppLocalization.Literal(exception.Message),
                         AppLocalization.Literal("无法应用纠正"),
                         MessageBoxButton.OK,

@@ -55,7 +55,7 @@ internal sealed class EstateStartFinishRevisionWindow : Window
         });
         save.Click += (_, _) => Run(() =>
         {
-            if (existingLapCount > 0 && MessageBox.Show(
+            if (existingLapCount > 0 && AppDialog.Show(
                     this,
                     AppLocalization.Format(
                         "estate.startFinish.confirmSave",
@@ -184,7 +184,7 @@ internal sealed class EstateStartFinishRevisionWindow : Window
         try { action(); }
         catch (Exception exception)
         {
-            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+            AppDialog.Show(this, AppLocalization.Literal(exception.Message),
                 AppLocalization.Literal("重设起终点线"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         Refresh();
@@ -193,7 +193,7 @@ internal sealed class EstateStartFinishRevisionWindow : Window
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (saved || !module.State.IsEnrollmentActive) return;
-        if (MessageBox.Show(this,
+        if (AppDialog.Show(this,
                 AppLocalization.Literal("放弃本次起终点线重设？原定义不会改变。"),
                 AppLocalization.Literal("取消重设"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)

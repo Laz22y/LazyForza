@@ -1,6 +1,8 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 using Microsoft.Win32;
 
 namespace LazyForza.App;
@@ -12,11 +14,11 @@ internal sealed partial class MainWindow
         var profile = startupProfileStore.Load();
         var panel = new StackPanel();
         panel.Children.Add(Label(
-            AppLocalization.Text("settings.app.title", "语言、数据与关闭方式"),
+            AppLocalization.Text("settings.app.title", "界面、数据与关闭方式"),
             17,
             FontWeights.SemiBold));
         var description = Label(
-            AppLocalization.Text("settings.app.description", "管理界面语言、数据存储位置和主窗口关闭行为。"),
+            AppLocalization.Text("settings.app.description", "管理界面语言、强调色、数据存储位置和主窗口关闭行为。"),
             11,
             FontWeights.Normal,
             "MutedBrush");
@@ -37,6 +39,59 @@ internal sealed partial class MainWindow
             AppLocalization.Text("settings.app.language", "界面语言"),
             AppLocalization.Text("settings.app.languageDetail", "选择主界面与初始化指引使用的语言。"),
             language));
+
+        var selectedAccentColor = profile.AccentColor;
+        var accentButtons = new Dictionary<AppAccentColor, ToggleButton>();
+        var accentPicker = new WrapPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(-4, -4, 0, 0)
+        };
+        foreach (var definition in AppAccentColors.Definitions)
+        {
+            var content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            content.Children.Add(new Border
+            {
+                Width = 18,
+                Height = 18,
+                CornerRadius = new CornerRadius(9),
+                Background = new SolidColorBrush(definition.Color),
+                BorderBrush = definition.Value == AppAccentColor.PureWhite
+                    ? Brush("BorderBrush")
+                    : Brushes.Transparent,
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(0, 0, 8, 0)
+            });
+            content.Children.Add(Label(definition.DisplayName, 11, FontWeights.SemiBold));
+            var button = new ToggleButton
+            {
+                Content = content,
+                IsChecked = definition.Value == selectedAccentColor,
+                MinWidth = 112,
+                Padding = new Thickness(9, 8, 9, 8),
+                Margin = new Thickness(3),
+                Tag = definition.Value
+            };
+            button.Click += (_, _) =>
+            {
+                selectedAccentColor = (AppAccentColor)button.Tag;
+                foreach (var (value, candidate) in accentButtons)
+                    candidate.IsChecked = value == selectedAccentColor;
+                AppAccentColors.Apply(selectedAccentColor);
+                profile = profile with { AccentColor = selectedAccentColor };
+                startupProfileStore.Save(profile);
+            };
+            accentButtons.Add(definition.Value, button);
+            accentPicker.Children.Add(button);
+        }
+        panel.Children.Add(StartupSettingRow(
+            AppLocalization.Text("settings.app.accent", "UI 强调色"),
+            AppLocalization.Text("settings.app.accentDetail", "用于高亮、选中状态和主要交互提示。"),
+            accentPicker));
 
         var storageChoices = new[]
         {
@@ -165,7 +220,8 @@ internal sealed partial class MainWindow
             {
                 Language = selectedLanguage,
                 DataDirectory = normalizedDataDirectory,
-                CloseBehavior = selectedCloseBehavior
+                CloseBehavior = selectedCloseBehavior,
+                AccentColor = selectedAccentColor
             };
             startupProfileStore.Save(updatedProfile);
             var restartRequired =
@@ -173,11 +229,11 @@ internal sealed partial class MainWindow
                 !PathsEqual(normalizedDataDirectory, directories.Root);
             save.Content = AppLocalization.Text("literal:已保存", "已保存");
             if (restartRequired)
-                MessageBox.Show(
-                    AppLocalization.Text("settings.app.restartMessage", "设置已保存，重启 LazyForza 后应用语言和数据目录。"),
-                    AppLocalization.Text("settings.app.restartTitle", "需要重启"),
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                AppRestartPrompt.Show(
+                    this,
+                    AppLocalization.Text(
+                        "settings.app.restartMessage",
+                        "设置已保存，重启 LazyForza 后应用语言和数据目录。"));
             profile = updatedProfile;
         };
         Grid.SetColumn(save, 1);

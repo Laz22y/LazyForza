@@ -175,7 +175,7 @@ internal sealed partial class MainWindow
                         ? currentLap with { PlayerCode = CurrentPlayerCode() }
                         : currentLap,
                     lifetimeCancellation.Token);
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Format("common.exportedPath", "已导出：\n{0}", dialog.FileName),
                     AppLocalization.Text("common.exportComplete", "导出完成"),
                     MessageBoxButton.OK,
@@ -183,7 +183,7 @@ internal sealed partial class MainWindow
             }
             catch (Exception exception)
             {
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Format("replay.exportFailedMessage", "无法导出单圈遥测：{0}", exception.Message),
                     AppLocalization.Text("common.exportFailed", "导出失败"),
                     MessageBoxButton.OK,
@@ -276,7 +276,7 @@ internal sealed partial class MainWindow
             catch (Exception exception)
             {
                 fileStatus.Text = AppLocalization.Text("replay.readFailed", "无法读取该录制文件。");
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Literal(exception.Message),
                     AppLocalization.Text("replay.invalidFile", "回放文件无效"),
                     MessageBoxButton.OK,

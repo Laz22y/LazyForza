@@ -17,8 +17,8 @@ internal sealed class DriftDashboardIntroductionWindow : Window
         WindowStyle = WindowStyle.SingleBorderWindow;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ShowInTaskbar = false;
-        Background = new SolidColorBrush(Color.FromRgb(15, 19, 24));
-        Foreground = new SolidColorBrush(Color.FromRgb(243, 244, 245));
+        Background = ResourceBrush("WindowBrush");
+        Foreground = ResourceBrush("TextBrush");
         FontFamily = new FontFamily("Microsoft YaHei UI");
 
         var stack = new StackPanel { Margin = new Thickness(26, 22, 26, 22) };
@@ -98,7 +98,7 @@ internal sealed class DriftDashboardIntroductionWindow : Window
             Text = AppLocalization.Literal(title),
             FontSize = 14,
             FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(32, 184, 207))
+            Foreground = ResourceBrush("AccentBrush")
         });
         stack.Children.Add(Paragraph(
             description,
@@ -115,6 +115,9 @@ internal sealed class DriftDashboardIntroductionWindow : Window
         FontSize = 12.5,
         LineHeight = 21,
         TextWrapping = TextWrapping.Wrap,
-        Foreground = new SolidColorBrush(Color.FromRgb(188, 195, 203))
+        Foreground = ResourceBrush("MutedBrush")
     };
+
+    private static Brush ResourceBrush(string key) =>
+        (Brush)Application.Current.FindResource(key);
 }

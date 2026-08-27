@@ -130,7 +130,7 @@ internal sealed partial class MainWindow
                     }
                     catch (Exception exception)
                     {
-                        MessageBox.Show(
+                        AppDialog.Show(
                             AppLocalization.Literal(exception.Message),
                             AppLocalization.Literal("漂移仪表盘设置失败"),
                             MessageBoxButton.OK,
@@ -206,7 +206,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("模块切换失败"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AppDialog.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("模块切换失败"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
                 finally
                 {

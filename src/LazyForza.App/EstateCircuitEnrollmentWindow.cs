@@ -239,7 +239,7 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
     {
         if (draftStore.Exists && !module.State.IsEnrollmentActive)
         {
-            if (MessageBox.Show(this,
+            if (AppDialog.Show(this,
                     AppLocalization.Literal("开始新的录入会删除现有暂存。继续吗？"),
                     AppLocalization.Literal("开始新录入"),
                     MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
@@ -265,7 +265,7 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+            AppDialog.Show(this, AppLocalization.Literal(exception.Message),
                 AppLocalization.Literal("无法恢复暂存"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         Refresh();
@@ -273,7 +273,7 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
 
     private void DiscardSavedDraft()
     {
-        if (MessageBox.Show(this,
+        if (AppDialog.Show(this,
                 AppLocalization.Literal("确认删除这份未完成的录入暂存？"),
                 AppLocalization.Literal("删除暂存"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
@@ -291,14 +291,14 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+            AppDialog.Show(this, AppLocalization.Literal(exception.Message),
                 AppLocalization.Literal("无法暂存录入"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
     private void CancelEnrollment()
     {
-        if (MessageBox.Show(this,
+        if (AppDialog.Show(this,
                 AppLocalization.Literal("确认放弃当前录入？已完成但尚未保存的步骤会丢失。"),
                 AppLocalization.Literal("放弃录入"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
@@ -386,7 +386,7 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
         try { action(); }
         catch (Exception exception)
         {
-            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+            AppDialog.Show(this, AppLocalization.Literal(exception.Message),
                 AppLocalization.Literal("地产环道录入"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         Refresh();
@@ -395,7 +395,7 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (acceptedClose || !module.State.IsEnrollmentActive) return;
-        var result = MessageBox.Show(this,
+        var result = AppDialog.Show(this,
             AppLocalization.Literal("录入尚未完成。\n\n选择“是”暂存并关闭；选择“否”放弃录入；选择“取消”返回向导。"),
             AppLocalization.Literal("关闭录入向导"), MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (result == MessageBoxResult.Cancel) { e.Cancel = true; return; }
@@ -404,7 +404,7 @@ internal sealed class EstateCircuitEnrollmentWindow : Window
             try { draftStore.Save(module.PauseEnrollmentForDraft()); }
             catch (Exception exception)
             {
-                MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+                AppDialog.Show(this, AppLocalization.Literal(exception.Message),
                     AppLocalization.Literal("无法暂存录入"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 e.Cancel = true;
             }

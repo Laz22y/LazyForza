@@ -93,10 +93,13 @@ internal sealed class EstateGeometryPreview : FrameworkElement
         }
 
         var transform = CreateTransform(points, bounds);
+        var accent = Application.Current?.TryFindResource("AccentBrush") is SolidColorBrush accentBrush
+            ? accentBrush.Color
+            : Color.FromRgb(32, 184, 207);
         DrawTrackPoints(drawingContext, route, transform,
             Color.FromArgb(72, 94, 125, 145), 7, Color.FromRgb(90, 174, 197), 2.3);
         DrawTrackPoints(drawingContext, captureRoute, transform,
-            Color.FromArgb(70, 32, 184, 207), 7, Color.FromRgb(32, 184, 207), 2.6);
+            Color.FromArgb(70, accent.R, accent.G, accent.B), 7, accent, 2.6);
         DrawGatePoints(drawingContext, firstTrace, transform, Color.FromRgb(54, 190, 229), 2);
         DrawGatePoints(drawingContext, secondTrace, transform, Color.FromRgb(206, 103, 230), 2);
         DrawGatePoints(drawingContext, directionTrace, transform, Color.FromRgb(74, 214, 143), 2.2);

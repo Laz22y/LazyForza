@@ -40,6 +40,8 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 安装版默认安装到 `C:\Program Files\LazyForza`，创建开始菜单入口；桌面快捷方式和 `.lfztelemetry`、`.lfzlap`、`.lfzestate` 文件关联可在安装时选择。便携版不写入这些系统项。每个便携版目录独立保存初始化状态；安装版卸载时保留数据库，并在重新安装后再次显示初始化指引。安装版默认启动检查更新，便携版默认关闭，两者都可在设置中修改。发行说明同时提供中文和英文，程序按当前界面语言显示对应内容。两种版本都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。需要通过命令行固定目录时可使用：
 
+设置页提供默认蓝、暗夜紫、清新绿、鲜艳红、纯粹白和低调灰六种 UI 强调色；切换只影响界面高亮与选中状态，不改变 HUD、图表语义色或其他界面样式。
+
 ```powershell
 LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 ```
@@ -118,6 +120,8 @@ The experimental drift HUD is disabled by default. It estimates slip and control
 3. Follow the guide to enable FH6 Data Out. The main window opens after valid telemetry arrives, or you can skip the connection step.
 
 The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu entry, and can optionally create a desktop shortcut and associate `.lfztelemetry`, `.lfzlap` and `.lfzestate` files. The portable build does not write those system entries. Installed builds check for updates by default; portable builds do not. Both settings can be changed later. Both packages include the .NET runtime.
+
+Settings provides six UI accent colors: Default Blue, Midnight Purple, Fresh Green, Vivid Red, Pure White and Subtle Gray. The selection changes interface highlights and selected states without recoloring HUDs, chart semantics or other interface styling.
 
 Use an explicit data directory from the command line when needed:
 

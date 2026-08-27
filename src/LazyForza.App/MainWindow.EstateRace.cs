@@ -160,7 +160,7 @@ internal sealed partial class MainWindow
             }
             catch (Exception exception)
             {
-                MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法连接地产赛事"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                AppDialog.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法连接地产赛事"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             finally
             {
@@ -187,11 +187,11 @@ internal sealed partial class MainWindow
                         participant.DisplayName,
                         DateTime.Now));
                 if (path is not null)
-                    MessageBox.Show(this, AppLocalization.Format("common.exportedPath", "已导出：\n{0}", path), AppLocalization.Literal("导出完成"), MessageBoxButton.OK, MessageBoxImage.Information);
+                    AppDialog.Show(this, AppLocalization.Format("common.exportedPath", "已导出：\n{0}", path), AppLocalization.Literal("导出完成"), MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception exception)
             {
-                MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法导出成绩"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                AppDialog.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法导出成绩"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         };
 
@@ -276,7 +276,7 @@ internal sealed partial class MainWindow
                 }
                 catch (Exception exception)
                 {
-                    MessageBox.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法更新练习测试"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AppDialog.Show(this, AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法更新练习测试"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             };
             Grid.SetColumn(action, 1);
@@ -542,7 +542,7 @@ internal sealed partial class MainWindow
         var message = replaceExisting
             ? AppLocalization.Format("estate.race.replaceHostedTrack", "本机的“{0}”与本场赛道摘要不同。\n\n是否从服务端下载并替换？{1}\n\n替换会删除这条本地赛道及其已有圈速记录，其他赛道和用户数据不受影响。", descriptor.ActiveTrackName ?? descriptor.ActiveTrackId, sizeText)
             : AppLocalization.Format("estate.race.downloadHostedTrack", "本机没有“{0}”。\n\n是否从赛事服务端下载并导入？{1}\n下载完成并校验 SHA-256 后才会进入房间。", descriptor.ActiveTrackName ?? descriptor.ActiveTrackId, sizeText);
-        if (MessageBox.Show(this, message, AppLocalization.Literal("下载赛事赛道"), MessageBoxButton.YesNo,
+        if (AppDialog.Show(this, message, AppLocalization.Literal("下载赛事赛道"), MessageBoxButton.YesNo,
                 replaceExisting ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes)
             throw new InvalidOperationException(AppLocalization.Literal("你已取消下载赛事赛道，未进入房间。"));
 
@@ -692,7 +692,7 @@ internal sealed partial class MainWindow
         try { Process.Start(new ProcessStartInfo(address) { UseShellExecute = true }); }
         catch (Exception exception)
         {
-            MessageBox.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法打开链接"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppDialog.Show(AppLocalization.Literal(exception.Message), AppLocalization.Literal("无法打开链接"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -781,7 +781,7 @@ internal sealed partial class MainWindow
         {
             BorderBrush = Brush("BorderBrush"),
             BorderThickness = new Thickness(0, 1, 0, 0),
-            Background = participant.Id == localParticipantId ? new SolidColorBrush(Color.FromArgb(24, 66, 215, 232)) : Brushes.Transparent,
+            Background = participant.Id == localParticipantId ? Brush("AccentFaintBrush") : Brushes.Transparent,
             Child = grid
         };
     }

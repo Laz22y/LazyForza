@@ -28,8 +28,8 @@ internal sealed class LapBulkDeleteDialog : Window
         SizeToContent = SizeToContent.Height;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new SolidColorBrush(Color.FromRgb(14, 23, 33));
-        Foreground = Brushes.White;
+        Background = ResourceBrush("WindowBrush");
+        Foreground = ResourceBrush("TextBrush");
         FontFamily = new FontFamily("Microsoft YaHei UI");
         ShowInTaskbar = false;
 
@@ -47,7 +47,7 @@ internal sealed class LapBulkDeleteDialog : Window
             Content = "仅删除已筛选的性能等级",
             IsChecked = false,
             IsEnabled = this.selectedPerformanceClasses.Count > 0,
-            Foreground = Brushes.White,
+            Foreground = ResourceBrush("TextBrush"),
             FontSize = 14,
             Margin = new Thickness(0, 0, 0, 4)
         };
@@ -67,7 +67,7 @@ internal sealed class LapBulkDeleteDialog : Window
         {
             Content = "同时删除历史最快圈",
             IsChecked = false,
-            Foreground = Brushes.White,
+            Foreground = ResourceBrush("TextBrush"),
             FontSize = 14,
             Margin = new Thickness(0, 0, 0, 4)
         };
@@ -113,7 +113,7 @@ internal sealed class LapBulkDeleteDialog : Window
             Margin = new Thickness(1),
             Padding = new Thickness(1),
             BorderThickness = new Thickness(1),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(49, 69, 90)),
+            BorderBrush = ResourceBrush("BorderBrush"),
             Child = root
         };
         UpdatePreview();
@@ -170,4 +170,7 @@ internal sealed class LapBulkDeleteDialog : Window
     };
 
     private static string PerformanceClassName(int value) => PerformanceClassCatalog.Name(value);
+
+    private static Brush ResourceBrush(string key) =>
+        (Brush)Application.Current.FindResource(key);
 }

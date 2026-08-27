@@ -225,7 +225,7 @@ internal sealed class EstateTrackEditorWindow : Window
                         "修订号将从“{0}”改为“{1}”。\n\n修订号应对应 FH6 地图的实际版本。确认继续吗？",
                         definition.MapRevision,
                         nextRevision);
-                if (MessageBox.Show(this, message, AppLocalization.Literal("更新地图修订"),
+                if (AppDialog.Show(this, message, AppLocalization.Literal("更新地图修订"),
                         MessageBoxButton.YesNo, MessageBoxImage.Warning) !=
                     MessageBoxResult.Yes)
                     return;
@@ -254,7 +254,7 @@ internal sealed class EstateTrackEditorWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+            AppDialog.Show(this, AppLocalization.Literal(exception.Message),
                 AppLocalization.Literal("无法保存地图信息"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -268,7 +268,7 @@ internal sealed class EstateTrackEditorWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+            AppDialog.Show(this, AppLocalization.Literal(exception.Message),
                 AppLocalization.Literal("无法重设起终点线"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -282,7 +282,7 @@ internal sealed class EstateTrackEditorWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, AppLocalization.Literal(exception.Message),
+            AppDialog.Show(this, AppLocalization.Literal(exception.Message),
                 AppLocalization.Literal("无法编辑维修区"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }

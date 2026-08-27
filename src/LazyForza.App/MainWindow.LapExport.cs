@@ -34,7 +34,7 @@ internal sealed partial class MainWindow
                 report,
                 $"LazyForza-{AppLocalization.Text("png.lapAnalysis.fileStem", "圈速分析")}-{trackName}-{DateTime.Now:yyyyMMdd-HHmm}.png");
             if (path is not null)
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Format("common.exportedPath", "已导出：\n{0}", path),
                     AppLocalization.Text("common.exportComplete", "导出完成"),
                     MessageBoxButton.OK,
@@ -42,7 +42,7 @@ internal sealed partial class MainWindow
         }
         catch (Exception exception)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 AppLocalization.Format("png.export.failedMessage", "无法导出 PNG：{0}", exception.Message),
                 AppLocalization.Text("common.exportFailed", "导出失败"),
                 MessageBoxButton.OK,

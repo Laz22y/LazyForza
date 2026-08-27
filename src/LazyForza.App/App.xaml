@@ -10,9 +10,14 @@
         <SolidColorBrush x:Key="TextBrush" Color="#F3F4F5" />
         <SolidColorBrush x:Key="MutedBrush" Color="#9AA4B2" />
         <SolidColorBrush x:Key="AccentBrush" Color="#20B8CF" />
+        <SolidColorBrush x:Key="AccentSoftBrush" Color="#2620B8CF" />
+        <SolidColorBrush x:Key="AccentFaintBrush" Color="#1820B8CF" />
         <SolidColorBrush x:Key="PurpleBrush" Color="#C05CFF" />
         <SolidColorBrush x:Key="SuccessBrush" Color="#39D98A" />
         <SolidColorBrush x:Key="WarningBrush" Color="#F4C95D" />
+        <SolidColorBrush x:Key="DangerBrush" Color="#FF6476" />
+        <SolidColorBrush x:Key="SurfaceAltBrush" Color="#101923" />
+        <SolidColorBrush x:Key="InputBrush" Color="#0A0E14" />
         <Style TargetType="Window">
             <Setter Property="Background" Value="{StaticResource WindowBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
@@ -35,7 +40,7 @@
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#304154" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AccentBrush}" /></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#304154" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}" /></Trigger>
                             <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#193B47" /></Trigger>
                             <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.45" /></Trigger>
                         </ControlTemplate.Triggers>
@@ -60,8 +65,8 @@
                                               VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#304154" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AccentBrush}" /></Trigger>
-                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#174C58" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AccentBrush}" /></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#304154" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}" /></Trigger>
+                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AccentSoftBrush}" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}" /></Trigger>
                             <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.45" /></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -139,7 +144,7 @@
                                                               StrokeLineJoin="Round" />
                                                         <Path x:Name="CollapseChevron"
                                                               Data="M 1,7 L 6,2 L 11,7"
-                                                              Stroke="{StaticResource AccentBrush}"
+                                                              Stroke="{DynamicResource AccentBrush}"
                                                               StrokeThickness="1.7"
                                                               StrokeStartLineCap="Round"
                                                               StrokeEndLineCap="Round"
@@ -223,7 +228,7 @@
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="TabSurface" Property="Background" Value="#162A34" />
-                                <Setter TargetName="SelectionIndicator" Property="Background" Value="{StaticResource AccentBrush}" />
+                                <Setter TargetName="SelectionIndicator" Property="Background" Value="{DynamicResource AccentBrush}" />
                                 <Setter Property="Foreground" Value="#FFFFFF" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
@@ -279,11 +284,11 @@
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="SelectionChrome" Property="Background" Value="#1D2A35" />
-                                <Setter TargetName="SelectionChrome" Property="BorderBrush" Value="#55D4E7" />
+                                <Setter TargetName="SelectionChrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="SelectionChrome" Property="Background" Value="{StaticResource AccentBrush}" />
-                                <Setter TargetName="SelectionChrome" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                <Setter TargetName="SelectionChrome" Property="Background" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="SelectionChrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                                 <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
                             </Trigger>
                             <MultiTrigger>
@@ -291,11 +296,11 @@
                                     <Condition Property="IsChecked" Value="True" />
                                     <Condition Property="IsMouseOver" Value="True" />
                                 </MultiTrigger.Conditions>
-                                <Setter TargetName="SelectionChrome" Property="Background" Value="#55D4E7" />
-                                <Setter TargetName="SelectionChrome" Property="BorderBrush" Value="#8AE6F3" />
+                                <Setter TargetName="SelectionChrome" Property="Background" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="SelectionChrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                             </MultiTrigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="SelectionChrome" Property="BorderBrush" Value="#B7F2FA" />
+                                <Setter TargetName="SelectionChrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="SelectionChrome" Property="Opacity" Value="0.4" />
@@ -325,7 +330,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ItemChrome" Property="Background" Value="#1D2936" /><Setter Property="Foreground" Value="#FFFFFF" /></Trigger>
-                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemChrome" Property="Background" Value="#213646" /><Setter TargetName="ItemChrome" Property="BorderBrush" Value="#41647A" /><Setter Property="Foreground" Value="{StaticResource AccentBrush}" /></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemChrome" Property="Background" Value="#213646" /><Setter TargetName="ItemChrome" Property="BorderBrush" Value="#41647A" /><Setter Property="Foreground" Value="{DynamicResource AccentBrush}" /></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -334,7 +339,7 @@
         <Style TargetType="TextBox">
             <Setter Property="Background" Value="#111923" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource AccentBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="10,7" />
@@ -388,7 +393,7 @@
                                                   Stretch="Uniform" />
                                             <Path x:Name="ChevronUp"
                                                   Data="M 1,8 L 7,2 L 13,8"
-                                                  Stroke="{StaticResource AccentBrush}"
+                                                  Stroke="{DynamicResource AccentBrush}"
                                                   StrokeThickness="1.7"
                                                   StrokeStartLineCap="Round"
                                                   StrokeEndLineCap="Round"
@@ -416,10 +421,10 @@
                                 <Setter TargetName="ChevronDown" Property="Stroke" Value="#FFFFFF" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                                <Setter TargetName="DropDownToggle" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                <Setter TargetName="DropDownToggle" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                             </Trigger>
                             <Trigger Property="IsDropDownOpen" Value="True">
-                                <Setter TargetName="DropDownToggle" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                <Setter TargetName="DropDownToggle" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                                 <Setter TargetName="ChevronDown" Property="Visibility" Value="Collapsed" />
                                 <Setter TargetName="ChevronUp" Property="Visibility" Value="Visible" />
                             </Trigger>
@@ -445,7 +450,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemChrome" Property="Background" Value="#26394A" /></Trigger>
-                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemChrome" Property="Background" Value="#174C58" /></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource AccentSoftBrush}" /></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -464,10 +469,10 @@
                                 CornerRadius="4" />
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ThumbChrome" Property="Background" Value="{StaticResource AccentBrush}" />
+                                <Setter TargetName="ThumbChrome" Property="Background" Value="{DynamicResource AccentBrush}" />
                             </Trigger>
                             <Trigger Property="IsDragging" Value="True">
-                                <Setter TargetName="ThumbChrome" Property="Background" Value="#55D4E7" />
+                                <Setter TargetName="ThumbChrome" Property="Background" Value="{DynamicResource AccentBrush}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ThumbChrome" Property="Opacity" Value="0" />

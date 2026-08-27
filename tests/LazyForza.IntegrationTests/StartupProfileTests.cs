@@ -6,6 +6,17 @@ namespace LazyForza.IntegrationTests;
 public sealed class StartupProfileTests
 {
     [TestMethod]
+    public void AccentColorCatalogContainsSixDistinctChoices()
+    {
+        var definitions = AppAccentColors.Definitions;
+
+        Assert.AreEqual(6, definitions.Count);
+        Assert.AreEqual(6, definitions.Select(definition => definition.Value).Distinct().Count());
+        Assert.AreEqual(6, definitions.Select(definition => definition.Color).Distinct().Count());
+        Assert.AreEqual(AppAccentColor.DefaultBlue, definitions[0].Value);
+    }
+
+    [TestMethod]
     public void MissingProfileUsesDefaultsAndInitializationStateIsSeparate()
     {
         var root = CreateTemporaryDirectory();
@@ -20,6 +31,7 @@ public sealed class StartupProfileTests
                 Path.GetFullPath(StartupProfileStore.DefaultDataDirectory),
                 profile.DataDirectory);
             Assert.AreEqual(MainWindowCloseBehavior.MinimizeToTray, profile.CloseBehavior);
+            Assert.AreEqual(AppAccentColor.DefaultBlue, profile.AccentColor);
             var state = new InitializationStateStore(
                 Path.Combine(root, "initialization-state.json")).Load();
             Assert.IsFalse(state.Exists);
@@ -45,7 +57,8 @@ public sealed class StartupProfileTests
                 StartupProfile.CurrentSchemaVersion,
                 "en",
                 dataPath,
-                MainWindowCloseBehavior.ExitApplication));
+                MainWindowCloseBehavior.ExitApplication,
+                AppAccentColor.MidnightPurple));
             var stateStore = new InitializationStateStore(
                 Path.Combine(root, "initialization-state.json"));
             var completedAt = DateTimeOffset.Parse("2026-08-22T12:00:00+08:00");
@@ -57,6 +70,7 @@ public sealed class StartupProfileTests
             Assert.AreEqual("en", reloaded.Language);
             Assert.AreEqual(Path.GetFullPath(dataPath), reloaded.DataDirectory);
             Assert.AreEqual(MainWindowCloseBehavior.ExitApplication, reloaded.CloseBehavior);
+            Assert.AreEqual(AppAccentColor.MidnightPurple, reloaded.AccentColor);
             Assert.AreEqual(
                 Path.GetFullPath(explicitPath),
                 store.ResolveDataDirectory(explicitPath, reloaded));
@@ -139,6 +153,7 @@ public sealed class StartupProfileTests
                 loaded.LegacyInitializationCompletedAt);
             Assert.AreEqual(StartupProfile.CurrentSchemaVersion, loaded.Profile.SchemaVersion);
             Assert.AreEqual("en", loaded.Profile.Language);
+            Assert.AreEqual(AppAccentColor.DefaultBlue, loaded.Profile.AccentColor);
         }
         finally
         {
@@ -222,6 +237,35 @@ public sealed class StartupProfileTests
         finally
         {
             AppLocalization.UseLanguage("zh-Hans");
+        }
+    }
+
+    [TestMethod]
+    public void InvalidAccentColorFallsBackToDefault()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var profilePath = Path.Combine(root, "startup-profile.json");
+            File.WriteAllText(
+                profilePath,
+                """
+                {
+                  "schemaVersion": 3,
+                  "language": "zh-Hans",
+                  "dataDirectory": "C:\\LazyForzaData",
+                  "closeBehavior": 0,
+                  "accentColor": 999
+                }
+                """);
+
+            var loaded = new StartupProfileStore(profilePath).Load();
+
+            Assert.AreEqual(AppAccentColor.DefaultBlue, loaded.AccentColor);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
         }
     }
 
@@ -340,6 +384,23 @@ public sealed class StartupProfileTests
             path.EndsWith(".lfztelemetry", StringComparison.OrdinalIgnoreCase) ||
             path.EndsWith(".lfzlap", StringComparison.OrdinalIgnoreCase) ||
             path.EndsWith(".lfzestate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void RestartPreservesLaunchArgumentsWithoutPreviousParentMarker()
+    {
+        var arguments = LazyForza.App.App.ArgumentsForRestart(
+        [
+            "--demo",
+            "--restart-parent",
+            "1234",
+            "--data-dir",
+            "C:\\LazyForzaData"
+        ]);
+
+        CollectionAssert.AreEqual(
+            new[] { "--demo", "--data-dir", "C:\\LazyForzaData" },
+            arguments);
     }
 
     [TestMethod]

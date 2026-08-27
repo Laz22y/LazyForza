@@ -28,7 +28,7 @@ internal sealed partial class MainWindow
                   "仍可在当前显示器上使用示例 HUD 编辑布局，但画布可能与游戏实际窗口不同。" +
                   "建议先打开游戏并进入驾驶画面后再设置。\n\n" +
                   "现在仍要打开布局设置吗？");
-            if (MessageBox.Show(
+            if (AppDialog.Show(
                     telemetryPrompt,
                     AppLocalization.Literal("尚未收到 FH6 遥测"),
                     MessageBoxButton.YesNo,
@@ -42,7 +42,7 @@ internal sealed partial class MainWindow
         {
             if (!hasForzaWindow)
             {
-                MessageBox.Show(
+                AppDialog.Show(
                     AppLocalization.Text("overlay.layout.windowNotFoundMessage", "已经收到 FH6 遥测，但没有找到可用的 Forza Horizon 6 窗口。\n\n" +
                     "请确认游戏窗口没有最小化。建议使用窗口化或无边框窗口模式后重试。"),
                     AppLocalization.Literal("未找到 FH6 窗口"),
@@ -51,7 +51,7 @@ internal sealed partial class MainWindow
                 return;
             }
 
-            if (MessageBox.Show(
+            if (AppDialog.Show(
                     AppLocalization.Text("overlay.layout.setupPrompt", "开始前请先在 Forza Horizon 6 中关闭“失去焦点时暂停”：\n\n" +
                     "设置 → 抬头显示与游戏 → 失去焦点时暂停\n\n" +
                     "回到 LazyForza 点击“是”之前，请让游戏保持在驾驶状态。" +
@@ -80,7 +80,7 @@ internal sealed partial class MainWindow
         }
         catch (Exception exception)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 AppLocalization.Format("overlay.layout.openFailed", "无法打开 Overlay 布局设置：{0}", exception.Message),
                 AppLocalization.Literal("布局设置失败"),
                 MessageBoxButton.OK,
