@@ -22,5 +22,6 @@
     <ProjectReference Include="..\..\src\LazyForza.Modules.EstateRace\LazyForza.Modules.EstateRace.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Overlay\LazyForza.Overlay.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.App\LazyForza.App.csproj" />
+    <ProjectReference Include="..\..\tools\LazyForza.Fh5MapProbe\LazyForza.Fh5MapProbe.csproj" />
   </ItemGroup>
 </Project>

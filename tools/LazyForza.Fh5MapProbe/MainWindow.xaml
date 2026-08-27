@@ -1,0 +1,178 @@
+<Window x:Class="LazyForza.Fh5MapProbe.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FH5 地图坐标采集工具"
+        Width="1060" Height="780" MinWidth="900" MinHeight="680"
+        WindowStartupLocation="CenterScreen" Closing="Window_Closing">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="Forza Horizon 5 地图坐标采集工具"
+                           FontSize="23" FontWeight="SemiBold" />
+                <TextBlock Margin="0,4,0,0" Foreground="#555"
+                           Text="分别采集墨西哥、风火轮公园和 Sierra Nueva 的 Data Out 三维坐标，供后续比较。" />
+            </StackPanel>
+            <Border Grid.Column="1" BorderBrush="#B8B8B8" BorderThickness="1"
+                    CornerRadius="4" Padding="12,7" VerticalAlignment="Center">
+                <TextBlock x:Name="StatusText" Text="未开始" FontWeight="SemiBold" />
+            </Border>
+        </Grid>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <GroupBox Header="1. 采集设置">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="1.7*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="1.2*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="1.1*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="90" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="地图" VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <ComboBox x:Name="MapBox" Grid.Row="0" Grid.Column="1" Margin="0,0,14,8"
+                                  SelectionChanged="MapBox_SelectionChanged" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="采集批次" VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <TextBox x:Name="SessionLabelBox" Grid.Row="0" Grid.Column="3" Text="第 1 轮"
+                                 Margin="0,0,14,8" LostFocus="SessionLabelBox_LostFocus" />
+                        <TextBlock Grid.Row="0" Grid.Column="4" Text="监听地址" VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <TextBox x:Name="ListenAddressBox" Grid.Row="0" Grid.Column="5" Text="0.0.0.0" Margin="0,0,14,8" />
+                        <TextBlock Grid.Row="0" Grid.Column="6" Text="端口" VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <TextBox x:Name="PortBox" Grid.Row="0" Grid.Column="7" Text="2299" Margin="0,0,0,8" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="输出文件" VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <TextBox x:Name="OutputPathBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="6"
+                                 IsReadOnly="True" Margin="0,0,8,8" />
+                        <Button x:Name="BrowseOutputButton" Grid.Row="1" Grid.Column="7" Content="选择…"
+                                Margin="0,0,0,8" Click="BrowseOutputButton_Click" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="备注" VerticalAlignment="Top" Margin="0,6,7,0" />
+                        <TextBox x:Name="NotesBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="7"
+                                 Height="46" AcceptsReturn="True" TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="记录游戏版本、进入方式、车辆和采集路线等信息。" />
+
+                        <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="8"
+                                    Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button x:Name="StartButton" Content="开始采集" Click="StartButton_Click" />
+                            <Button x:Name="StopButton" Content="停止并保存" IsEnabled="False"
+                                    Margin="8,0,0,0" Click="StopButton_Click" />
+                            <Button x:Name="OpenOutputButton" Content="打开输出目录"
+                                    Margin="8,0,0,0" Click="OpenOutputButton_Click" />
+                            <TextBlock x:Name="TargetAddressText" Margin="18,7,0,0" Foreground="#555"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="2. 实时数据与自检">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.2*" />
+                            <ColumnDefinition Width="1.6*" />
+                            <ColumnDefinition Width="1.3*" />
+                            <ColumnDefinition Width="1.5*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,14,10">
+                            <TextBlock Text="包率 / 有效 / 无效" Foreground="#666" />
+                            <TextBlock x:Name="PacketRateText" Text="—" FontSize="17" FontWeight="SemiBold" Margin="0,4,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,14,10">
+                            <TextBlock Text="位置 X / Y / Z（米）" Foreground="#666" />
+                            <TextBlock x:Name="PositionText" Text="—" FontFamily="Consolas" FontSize="17"
+                                       FontWeight="SemiBold" Margin="0,4,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,14,10">
+                            <TextBlock Text="速度 / 物理一致性误差" Foreground="#666" />
+                            <TextBlock x:Name="SpeedText" Text="—" FontSize="17" FontWeight="SemiBold" Margin="0,4,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="3" Margin="0,0,0,10">
+                            <TextBlock Text="包长 / IsRaceOn / 时间戳" Foreground="#666" />
+                            <TextBlock x:Name="PacketDetailText" Text="—" FontSize="17" FontWeight="SemiBold" Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,14,0">
+                            <TextBlock Text="驾驶状态坐标范围" Foreground="#666" />
+                            <TextBlock x:Name="BoundsText" Text="—" FontFamily="Consolas" Margin="0,4,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2">
+                            <TextBlock Text="最近状态" Foreground="#666" />
+                            <TextBlock x:Name="LatestStateText" Text="等待采集" Margin="0,4,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="3. 地标采样">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="MarkerNameBox" Text="入口出生点" />
+                            <Button Grid.Column="1" Content="采样最近 1 秒" Margin="8,0,0,0"
+                                    Click="CaptureMarkerButton_Click" />
+                            <Button Grid.Column="2" Content="删除所选" Margin="8,0,0,0"
+                                    Click="DeleteMarkerButton_Click" />
+                        </Grid>
+                        <DataGrid x:Name="MarkerGrid" Grid.Row="1" Height="96" Margin="0,9,0,0"
+                                  AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
+                                  SelectionMode="Single" HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="1.4*" />
+                                <DataGridTextColumn Header="X" Binding="{Binding X, StringFormat=F3}" Width="*" />
+                                <DataGridTextColumn Header="Y" Binding="{Binding Y, StringFormat=F3}" Width="*" />
+                                <DataGridTextColumn Header="Z" Binding="{Binding Z, StringFormat=F3}" Width="*" />
+                                <DataGridTextColumn Header="离散" Binding="{Binding SpreadMeters, StringFormat={}{0:F3} m}" Width="*" />
+                                <DataGridTextColumn Header="样本" Binding="{Binding SampleCount}" Width="0.7*" />
+                                <DataGridTextColumn Header="均速" Binding="{Binding MeanSpeedMps, StringFormat={}{0:F2} m/s}" Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Grid.Row="2" Margin="0,8,0,0" Foreground="#555" TextWrapping="Wrap"
+                                   Text="停车后采样。每张地图建议记录入口、中心、四角、最高点、最低点以及路线关键点；完整行驶轨迹会自动记录。" />
+                    </Grid>
+                </GroupBox>
+
+                <Border BorderBrush="#D0D0D0" BorderThickness="1" CornerRadius="3" Padding="8" Margin="0">
+                    <TextBlock x:Name="LogText" Text="最近操作：工具已就绪。" TextWrapping="Wrap" />
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Background="#FFF7D6" BorderBrush="#D8C270" BorderThickness="1"
+                CornerRadius="4" Padding="10" Margin="0,12,0,0">
+            <TextBlock TextWrapping="Wrap"
+                       Text="请关闭 LazyForza 主程序后再采集。FH5 设置中打开 Data Out，并把目标 IP 和端口设为本窗口显示的地址与端口。工具不读取内存，不修改游戏。" />
+        </Border>
+    </Grid>
+</Window>
