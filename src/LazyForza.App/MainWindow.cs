@@ -252,6 +252,47 @@ internal sealed partial class MainWindow : Window
         await Task.Delay(300);
         CaptureVisual(this, Path.Combine(directory, "estate-race-page-1440x900.png"));
 
+        var joinDescriptor = new EstateRaceServerDescriptor(
+            "LazyForza 周末杯",
+            EstateRaceModule.ProtocolVersion,
+            12,
+            true,
+            null,
+            null,
+            RaceSessionPhase.Lobby,
+            DateTimeOffset.UtcNow,
+            SupportsObservers: true,
+            MaximumObservers: 12);
+        var join = new EstateRaceJoinWindow(
+            new EstateRaceConnectionProfile(
+                "https://race.example.com",
+                string.Empty,
+                "LF-27",
+                "#42D7E8",
+                null),
+            [
+                new EstateRaceServerFavorite(
+                    Guid.NewGuid(),
+                    "LazyForza 周末杯",
+                    "https://race.example.com",
+                    DateTimeOffset.UtcNow),
+                new EstateRaceServerFavorite(
+                    Guid.NewGuid(),
+                    "练习服务器",
+                    "http://192.168.1.20:24876",
+                    DateTimeOffset.UtcNow.AddDays(-1))
+            ],
+            (_, _) => Task.FromResult(joinDescriptor),
+            (_, _) => Task.FromResult(new EstateRaceConnectionTestResult(
+                joinDescriptor,
+                TimeSpan.FromMilliseconds(28)))) { Owner = this };
+        join.Show();
+        join.UpdateLayout();
+        await Task.Delay(300);
+        CaptureVisual(join, Path.Combine(directory, "estate-race-join-820x790.png"));
+        CollectHanText(join, "estate race join", englishHanAudit);
+        join.Close();
+
         var summary = store.ListTracks(CurrentTrackSource)
             .First(track => track.TimingKind == TrackTimingKind.EstateGeometry);
         var loaded = store.LoadTrack(summary.Id);

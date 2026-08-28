@@ -26,15 +26,19 @@ internal sealed class EstateRaceJoinWindow : Window
     ];
 
     private readonly TextBox serverAddress;
+    private readonly ComboBox favoriteSelector;
     private readonly TextBox displayName;
     private readonly ComboBox roleSelector;
     private readonly ComboBox teamSelector;
     private readonly PasswordBox password;
     private readonly TextBlock error;
     private readonly TextBlock roomInfo;
+    private readonly TextBlock connectionTestInfo;
     private readonly StackPanel teamField;
     private readonly StackPanel colorPanel;
     private readonly Func<string, CancellationToken, Task<EstateRaceServerDescriptor>> descriptorReader;
+    private readonly Func<string, CancellationToken, Task<EstateRaceConnectionTestResult>> connectionTester;
+    private readonly List<EstateRaceServerFavorite> favorites;
     private readonly Dictionary<string, Button> swatches = new(StringComparer.OrdinalIgnoreCase);
     private readonly Border colorBase;
     private readonly Ellipse colorIndicator;
@@ -48,6 +52,8 @@ internal sealed class EstateRaceJoinWindow : Window
     private readonly string? savedTeamId;
     private readonly string? savedTeamName;
     private CancellationTokenSource? descriptorRefreshCancellation;
+    private CancellationTokenSource? connectionTestCancellation;
+    private bool selectingFavorite;
     private string selectedColor;
     private double selectedHue;
     private double selectedSaturation = 0.72;
@@ -56,14 +62,19 @@ internal sealed class EstateRaceJoinWindow : Window
 
     public EstateRaceJoinWindow(
         EstateRaceConnectionProfile saved,
-        Func<string, CancellationToken, Task<EstateRaceServerDescriptor>> descriptorReader)
+        IReadOnlyList<EstateRaceServerFavorite> favorites,
+        Func<string, CancellationToken, Task<EstateRaceServerDescriptor>> descriptorReader,
+        Func<string, CancellationToken, Task<EstateRaceConnectionTestResult>> connectionTester)
     {
         this.descriptorReader = descriptorReader;
+        this.connectionTester = connectionTester;
+        this.favorites = favorites.Take(EstateRaceModule.MaximumServerFavorites).ToList();
         savedTeamId = saved.TeamId;
         savedTeamName = saved.TeamName;
         Title = "进入地产赛事房间";
-        Width = 720;
-        Height = Math.Min(710, SystemParameters.WorkArea.Height * 0.90);
+        Width = 820;
+        Height = Math.Min(790, SystemParameters.WorkArea.Height * 0.92);
+        MinWidth = 680;
         MinHeight = Math.Min(600, SystemParameters.WorkArea.Height * 0.80);
         ResizeMode = ResizeMode.CanResize;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -74,7 +85,15 @@ internal sealed class EstateRaceJoinWindow : Window
         selectedColor = TryColor(saved.ThemeColor, out _) ? saved.ThemeColor.ToUpperInvariant() : Palette[0].Value;
 
         serverAddress = Input(saved.ServerAddress);
-        serverAddress.TextChanged += (_, _) => ScheduleDescriptorRefresh(TimeSpan.FromSeconds(1));
+        favoriteSelector = new ComboBox
+        {
+            MinHeight = 42,
+            Padding = new Thickness(8, 5, 8, 5),
+            Background = ResourceBrush("InputBrush", Color.FromRgb(10, 14, 20)),
+            Foreground = Foreground,
+            BorderBrush = ResourceBrush("BorderBrush", Color.FromRgb(47, 58, 72))
+        };
+        favoriteSelector.SelectionChanged += (_, _) => ApplySelectedFavorite();
         displayName = Input(saved.DisplayName);
         roleSelector = new ComboBox
         {
@@ -111,8 +130,22 @@ internal sealed class EstateRaceJoinWindow : Window
             ResourceBrush("DangerBrush", Color.FromRgb(255, 100, 118)));
         roomInfo = Text("正在读取房间设置…", 12, FontWeights.Normal,
             ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185)), new Thickness(0, 8, 0, 0));
+        connectionTestInfo = Text(
+            "连接测试只检查服务端可达性、协议版本和房间信息，不验证赛事密码。",
+            12,
+            FontWeights.Normal,
+            ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185)),
+            new Thickness(0, 7, 0, 0));
+        serverAddress.TextChanged += (_, _) =>
+        {
+            if (!selectingFavorite) SelectMatchingFavorite();
+            CancelConnectionTest();
+            connectionTestInfo.Text = AppLocalization.Literal("连接测试只检查服务端可达性、协议版本和房间信息，不验证赛事密码。");
+            connectionTestInfo.Foreground = ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185));
+            ScheduleDescriptorRefresh(TimeSpan.FromSeconds(1));
+        };
 
-        var root = new StackPanel { Margin = new Thickness(30, 24, 30, 26) };
+        var root = new StackPanel { Margin = new Thickness(32, 26, 32, 28) };
         root.Children.Add(Text("进入房间", 28, FontWeights.SemiBold));
         root.Children.Add(Text(
             "参赛车手需要使用本场地产环道；OB 只接收赛事数据并显示 HUD，不上传遥测，也不计入参赛名额。比赛密码不会保存到本地。",
@@ -120,8 +153,55 @@ internal sealed class EstateRaceJoinWindow : Window
             ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185)),
             new Thickness(0, 6, 0, 20)));
 
-        root.Children.Add(Field("服务端域名或 IP", "公网房间建议使用 https:// 域名；可信局域网可以填写主机 IP 和端口。进入房间前会读取服务端的赛道与车队设置。", serverAddress));
-        root.Children.Add(roomInfo);
+        var serverSection = new StackPanel();
+        serverSection.Children.Add(Text("赛事服务器", 18, FontWeights.SemiBold));
+        serverSection.Children.Add(Text(
+            "收藏常用服务器，或先测试可达性与协议兼容性。收藏只保存名称和地址，不保存赛事密码。",
+            12,
+            FontWeights.Normal,
+            ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185)),
+            new Thickness(0, 4, 0, 2)));
+        serverSection.Children.Add(Field(
+            "收藏的服务器",
+            "选择后会填入地址；同一地址只保留一条收藏。",
+            favoriteSelector));
+        serverSection.Children.Add(Field(
+            "服务端域名或 IP",
+            "公网房间建议使用 https:// 域名；可信局域网可以填写主机 IP 和端口。",
+            serverAddress));
+
+        var serverActions = new WrapPanel { Margin = new Thickness(-4, 8, 0, 0) };
+        var saveFavorite = new Button
+        {
+            Content = "收藏当前",
+            MinWidth = 104,
+            Padding = new Thickness(14, 7, 14, 7)
+        };
+        var removeFavorite = new Button
+        {
+            Content = "移除收藏",
+            MinWidth = 104,
+            Padding = new Thickness(14, 7, 14, 7)
+        };
+        var testConnection = new Button
+        {
+            Content = "测试连接",
+            MinWidth = 112,
+            Padding = new Thickness(15, 7, 15, 7),
+            FontWeight = FontWeights.SemiBold
+        };
+        testConnection.SetResourceReference(Control.BackgroundProperty, "AccentSoftBrush");
+        testConnection.SetResourceReference(Control.BorderBrushProperty, "AccentBrush");
+        saveFavorite.Click += (_, _) => SaveCurrentFavorite();
+        removeFavorite.Click += (_, _) => RemoveSelectedFavorite();
+        testConnection.Click += async (_, _) => await TestConnectionAsync(testConnection);
+        serverActions.Children.Add(saveFavorite);
+        serverActions.Children.Add(removeFavorite);
+        serverActions.Children.Add(testConnection);
+        serverSection.Children.Add(serverActions);
+        serverSection.Children.Add(roomInfo);
+        serverSection.Children.Add(connectionTestInfo);
+        root.Children.Add(Card(serverSection));
         root.Children.Add(Field(
             "连接身份",
             "参赛车手参与计时、排名和判罚；OB 仅用于观赛或转播，排行榜以榜首为比较基准。",
@@ -405,17 +485,239 @@ internal sealed class EstateRaceJoinWindow : Window
                 SelectColor(team.ThemeColor);
         };
         roleSelector.SelectionChanged += (_, _) => UpdateRoleFields();
+        RefreshFavoriteSelector();
         UpdateRoleFields();
         Loaded += (_, _) => ScheduleDescriptorRefresh(TimeSpan.Zero);
         Closed += (_, _) =>
         {
             colorPickerPopup.IsOpen = false;
             CancelDescriptorRefresh();
+            CancelConnectionTest();
         };
         AppLocalization.ApplyTo(this);
     }
 
     public EstateRaceConnectionProfile? Profile { get; private set; }
+
+    public IReadOnlyList<EstateRaceServerFavorite> FavoriteServers => favorites.ToArray();
+
+    private void RefreshFavoriteSelector(Guid? selectedId = null)
+    {
+        selectingFavorite = true;
+        try
+        {
+            var selectedAddress = TryNormalizeAddress(serverAddress.Text, out var currentAddress)
+                ? currentAddress
+                : null;
+            favoriteSelector.ItemsSource = null;
+            favoriteSelector.ItemsSource = favorites;
+            favoriteSelector.IsEnabled = favorites.Count > 0;
+            favoriteSelector.SelectedItem = selectedId is { } id
+                ? favorites.FirstOrDefault(item => item.Id == id)
+                : favorites.FirstOrDefault(item => string.Equals(
+                    item.ServerAddress,
+                    selectedAddress,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            selectingFavorite = false;
+        }
+    }
+
+    private void SelectMatchingFavorite()
+    {
+        if (!TryNormalizeAddress(serverAddress.Text, out var address))
+        {
+            favoriteSelector.SelectedItem = null;
+            return;
+        }
+        selectingFavorite = true;
+        try
+        {
+            favoriteSelector.SelectedItem = favorites.FirstOrDefault(item => string.Equals(
+                item.ServerAddress,
+                address,
+                StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            selectingFavorite = false;
+        }
+    }
+
+    private void ApplySelectedFavorite()
+    {
+        if (selectingFavorite || favoriteSelector.SelectedItem is not EstateRaceServerFavorite favorite) return;
+        selectingFavorite = true;
+        try
+        {
+            serverAddress.Text = favorite.ServerAddress;
+            serverAddress.CaretIndex = serverAddress.Text.Length;
+        }
+        finally
+        {
+            selectingFavorite = false;
+        }
+        connectionTestInfo.Text = AppLocalization.Format(
+            "estate.join.favoriteSelected",
+            "已选择收藏：{0}。赛事密码需要本次单独填写。",
+            favorite.Name);
+        connectionTestInfo.Foreground = ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185));
+    }
+
+    private void SaveCurrentFavorite()
+    {
+        error.Text = string.Empty;
+        if (!TryNormalizeAddress(serverAddress.Text, out var address))
+        {
+            error.Text = AppLocalization.Literal("服务端地址无效。请输入域名或 IP，可包含端口。");
+            serverAddress.Focus();
+            return;
+        }
+
+        var existing = favorites.FirstOrDefault(item => string.Equals(
+            item.ServerAddress,
+            address,
+            StringComparison.OrdinalIgnoreCase));
+        var name = descriptor?.ServerName?.Trim();
+        if (string.IsNullOrWhiteSpace(name)) name = new Uri(address).Authority;
+        var favorite = new EstateRaceServerFavorite(
+            existing?.Id ?? Guid.NewGuid(),
+            name,
+            address,
+            DateTimeOffset.UtcNow);
+        if (existing is not null) favorites.Remove(existing);
+        favorites.Insert(0, favorite);
+        if (favorites.Count > EstateRaceModule.MaximumServerFavorites)
+            favorites.RemoveRange(EstateRaceModule.MaximumServerFavorites, favorites.Count - EstateRaceModule.MaximumServerFavorites);
+        selectingFavorite = true;
+        try
+        {
+            serverAddress.Text = address;
+            serverAddress.CaretIndex = address.Length;
+        }
+        finally
+        {
+            selectingFavorite = false;
+        }
+        RefreshFavoriteSelector(favorite.Id);
+        connectionTestInfo.Text = AppLocalization.Format(
+            "estate.join.favoriteSaved",
+            "已收藏 {0}。仅保存名称和地址。",
+            favorite.Name);
+        connectionTestInfo.Foreground = ResourceBrush("SuccessBrush", Color.FromRgb(57, 217, 138));
+    }
+
+    private void RemoveSelectedFavorite()
+    {
+        if (favoriteSelector.SelectedItem is not EstateRaceServerFavorite favorite)
+        {
+            connectionTestInfo.Text = AppLocalization.Literal("请先选择要移除的服务器收藏。");
+            connectionTestInfo.Foreground = ResourceBrush("WarningBrush", Color.FromRgb(244, 201, 93));
+            return;
+        }
+        favorites.Remove(favorite);
+        RefreshFavoriteSelector();
+        connectionTestInfo.Text = AppLocalization.Format(
+            "estate.join.favoriteRemoved",
+            "已移除收藏：{0}。",
+            favorite.Name);
+        connectionTestInfo.Foreground = ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185));
+    }
+
+    private async Task TestConnectionAsync(Button button)
+    {
+        error.Text = string.Empty;
+        if (!TryNormalizeAddress(serverAddress.Text, out var address))
+        {
+            error.Text = AppLocalization.Literal("服务端地址无效。请输入域名或 IP，可包含端口。");
+            serverAddress.Focus();
+            return;
+        }
+
+        CancelDescriptorRefresh();
+        CancelConnectionTest();
+        var cancellation = new CancellationTokenSource();
+        connectionTestCancellation = cancellation;
+        button.IsEnabled = false;
+        connectionTestInfo.Text = AppLocalization.Literal("正在测试服务端连接…");
+        connectionTestInfo.Foreground = ResourceBrush("MutedBrush", Color.FromRgb(157, 170, 185));
+        try
+        {
+            var result = await connectionTester(address, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (!TryNormalizeAddress(serverAddress.Text, out var currentAddress) ||
+                !string.Equals(address, currentAddress, StringComparison.OrdinalIgnoreCase))
+                return;
+            descriptor = result.Descriptor;
+            ApplyDescriptor(result.Descriptor);
+            var milliseconds = Math.Max(1, (int)Math.Round(result.RoundTripTime.TotalMilliseconds));
+            if (result.Descriptor.ProtocolVersion == EstateRaceModule.ProtocolVersion)
+            {
+                connectionTestInfo.Text = AppLocalization.Format(
+                    "estate.join.connectionTestPassed",
+                    "连接成功 · {0} ms · {1} · 协议 v{2} 兼容",
+                    milliseconds,
+                    result.Descriptor.ServerName,
+                    result.Descriptor.ProtocolVersion);
+                connectionTestInfo.Foreground = ResourceBrush("SuccessBrush", Color.FromRgb(57, 217, 138));
+            }
+            else
+            {
+                connectionTestInfo.Text = AppLocalization.Format(
+                    "estate.join.connectionTestIncompatible",
+                    "服务端可达 · {0} ms · 协议 v{1}，当前客户端需要 v{2}",
+                    milliseconds,
+                    result.Descriptor.ProtocolVersion,
+                    EstateRaceModule.ProtocolVersion);
+                connectionTestInfo.Foreground = ResourceBrush("WarningBrush", Color.FromRgb(244, 201, 93));
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            descriptor = null;
+            UpdateRoleFields();
+            connectionTestInfo.Text = AppLocalization.Format(
+                "estate.join.connectionTestFailed",
+                "连接测试失败：{0}",
+                AppLocalization.Literal(exception.Message));
+            connectionTestInfo.Foreground = ResourceBrush("DangerBrush", Color.FromRgb(255, 100, 118));
+        }
+        finally
+        {
+            if (ReferenceEquals(connectionTestCancellation, cancellation))
+                connectionTestCancellation = null;
+            cancellation.Dispose();
+            button.IsEnabled = true;
+        }
+    }
+
+    private void CancelConnectionTest()
+    {
+        connectionTestCancellation?.Cancel();
+        connectionTestCancellation = null;
+    }
+
+    private static bool TryNormalizeAddress(string value, out string address)
+    {
+        try
+        {
+            address = EstateRaceModule.NormalizeServerAddress(value);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            address = string.Empty;
+            return false;
+        }
+        catch (UriFormatException)
+        {
+            address = string.Empty;
+            return false;
+        }
+    }
 
     private async Task AcceptAsync(Button join)
     {
@@ -450,6 +752,16 @@ internal sealed class EstateRaceJoinWindow : Window
                     showError: true,
                     refreshCancellation))
                 return;
+            if (descriptor?.ProtocolVersion != EstateRaceModule.ProtocolVersion)
+            {
+                error.Text = AppLocalization.Format(
+                    "estate.join.protocolIncompatible",
+                    "服务端协议为 v{0}，当前客户端需要 v{1}。",
+                    descriptor?.ProtocolVersion ?? 0,
+                    EstateRaceModule.ProtocolVersion);
+                serverAddress.Focus();
+                return;
+            }
             var isObserver = IsObserverSelected;
             if (isObserver && descriptor?.SupportsObservers != true)
             {
@@ -471,7 +783,7 @@ internal sealed class EstateRaceJoinWindow : Window
             }
 
             Profile = new EstateRaceConnectionProfile(
-                serverAddress.Text.Trim(),
+                EstateRaceModule.NormalizeServerAddress(serverAddress.Text),
                 password.Password,
                 displayName.Text.Trim(),
                 selectedColor,
@@ -546,41 +858,11 @@ internal sealed class EstateRaceJoinWindow : Window
         try
         {
             roomInfo.Text = AppLocalization.Literal("正在读取房间设置…");
-            var previous = teamSelector.SelectedItem as EstateRaceTeam;
             var received = await descriptorReader(address, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             if (!string.Equals(address, serverAddress.Text.Trim(), StringComparison.Ordinal)) return false;
             descriptor = received;
-            UpdateRoleFields();
-            var choices = descriptor.Teams?.Where(team =>
-                    !string.IsNullOrWhiteSpace(team.Id) && !string.IsNullOrWhiteSpace(team.Name))
-                .ToArray() ?? [];
-            teamSelector.IsEditable = descriptor.AllowTeams && choices.Length == 0;
-            teamSelector.ItemsSource = choices;
-            if (descriptor.AllowTeams && choices.Length > 0)
-            {
-                teamSelector.SelectedItem = choices.FirstOrDefault(team =>
-                    string.Equals(team.Id, previous?.Id ?? savedTeamId, StringComparison.OrdinalIgnoreCase)) ??
-                    choices.FirstOrDefault(team =>
-                        string.Equals(team.Name, previous?.Name ?? savedTeamName, StringComparison.OrdinalIgnoreCase)) ??
-                    choices[0];
-            }
-            else if (descriptor.AllowTeams)
-            {
-                teamSelector.Text = previous?.Name ?? savedTeamName ?? string.Empty;
-            }
-            roomInfo.Text = descriptor.ActiveTrackId is null
-                ? AppLocalization.Format(
-                    "estate.join.roomWithoutTrack",
-                    "{0} · 服务端尚未指定赛道 · {1}",
-                    descriptor.ServerName,
-                    RoomModeText(descriptor))
-                : AppLocalization.Format(
-                    "estate.join.roomWithTrack",
-                    "{0} · {1} · {2}",
-                    descriptor.ServerName,
-                    AppLocalization.Literal(descriptor.ActiveTrackName ?? descriptor.ActiveTrackId),
-                    RoomModeText(descriptor));
+            ApplyDescriptor(received);
             return true;
         }
         catch (Exception exception)
@@ -597,6 +879,41 @@ internal sealed class EstateRaceJoinWindow : Window
                     AppLocalization.Literal(exception.Message));
             return false;
         }
+    }
+
+    private void ApplyDescriptor(EstateRaceServerDescriptor received)
+    {
+        var previous = teamSelector.SelectedItem as EstateRaceTeam;
+        UpdateRoleFields();
+        var choices = received.Teams?.Where(team =>
+                !string.IsNullOrWhiteSpace(team.Id) && !string.IsNullOrWhiteSpace(team.Name))
+            .ToArray() ?? [];
+        teamSelector.IsEditable = received.AllowTeams && choices.Length == 0;
+        teamSelector.ItemsSource = choices;
+        if (received.AllowTeams && choices.Length > 0)
+        {
+            teamSelector.SelectedItem = choices.FirstOrDefault(team =>
+                string.Equals(team.Id, previous?.Id ?? savedTeamId, StringComparison.OrdinalIgnoreCase)) ??
+                choices.FirstOrDefault(team =>
+                    string.Equals(team.Name, previous?.Name ?? savedTeamName, StringComparison.OrdinalIgnoreCase)) ??
+                choices[0];
+        }
+        else if (received.AllowTeams)
+        {
+            teamSelector.Text = previous?.Name ?? savedTeamName ?? string.Empty;
+        }
+        roomInfo.Text = received.ActiveTrackId is null
+            ? AppLocalization.Format(
+                "estate.join.roomWithoutTrack",
+                "{0} · 服务端尚未指定赛道 · {1}",
+                received.ServerName,
+                RoomModeText(received))
+            : AppLocalization.Format(
+                "estate.join.roomWithTrack",
+                "{0} · {1} · {2}",
+                received.ServerName,
+                AppLocalization.Literal(received.ActiveTrackName ?? received.ActiveTrackId),
+                RoomModeText(received));
     }
 
     private static string RoomModeText(EstateRaceServerDescriptor value)
@@ -775,6 +1092,17 @@ internal sealed class EstateRaceJoinWindow : Window
         panel.Children.Add(input);
         return panel;
     }
+
+    private static Border Card(UIElement content) => new()
+    {
+        Margin = new Thickness(0, 0, 0, 4),
+        Padding = new Thickness(20, 17, 20, 18),
+        Background = ResourceBrush("CardBrush", Color.FromRgb(23, 31, 42)),
+        BorderBrush = ResourceBrush("BorderBrush", Color.FromRgb(47, 58, 72)),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(10),
+        Child = content
+    };
 
     private static TextBox Input(string value) => new()
     {

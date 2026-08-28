@@ -144,6 +144,19 @@ public sealed record EstateRaceServerDescriptor(
     bool SupportsObservers = false,
     int MaximumObservers = 0);
 
+public sealed record EstateRaceServerFavorite(
+    Guid Id,
+    string Name,
+    string ServerAddress,
+    DateTimeOffset UpdatedAt)
+{
+    public override string ToString() => $"{Name} · {ServerAddress}";
+}
+
+public sealed record EstateRaceConnectionTestResult(
+    EstateRaceServerDescriptor Descriptor,
+    TimeSpan RoundTripTime);
+
 public sealed record EstateCompletedLapEvent(
     Guid EventId,
     int LapNumber,

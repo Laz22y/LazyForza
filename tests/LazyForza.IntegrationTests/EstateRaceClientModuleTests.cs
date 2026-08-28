@@ -59,6 +59,95 @@ public sealed class EstateRaceClientModuleTests
     }
 
     [TestMethod]
+    public async Task ServerFavoritesAreCanonicalizedDeduplicatedBoundedAndDoNotContainPasswords()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            $"lazyforza-estate-race-favorites-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var module = new EstateRaceModule(() => null);
+            await module.InitializeAsync(new TestContext(new TestFeed(), store), CancellationToken.None);
+            var now = DateTimeOffset.Parse("2026-08-28T12:00:00Z");
+            var favorites = Enumerable.Range(0, 24)
+                .Select(index => new EstateRaceServerFavorite(
+                    Guid.NewGuid(),
+                    $"服务器 {index}",
+                    $"server-{index}.example:24876",
+                    now.AddMinutes(-index - 2)))
+                .Concat(
+                [
+                    new EstateRaceServerFavorite(Guid.NewGuid(), "旧名称", "example.com", now),
+                    new EstateRaceServerFavorite(Guid.NewGuid(), "当前名称", "HTTP://EXAMPLE.COM/ws?unused=1", now.AddMinutes(1))
+                ])
+                .ToArray();
+
+            await module.SaveServerFavoritesAsync(favorites, CancellationToken.None);
+            var loaded = await module.LoadServerFavoritesAsync(CancellationToken.None);
+
+            Assert.HasCount(EstateRaceModule.MaximumServerFavorites, loaded);
+            Assert.AreEqual("当前名称", loaded[0].Name);
+            Assert.AreEqual("http://example.com", loaded[0].ServerAddress);
+            Assert.HasCount(1, loaded.Where(item =>
+                string.Equals(item.ServerAddress, "http://example.com", StringComparison.OrdinalIgnoreCase)));
+            var stored = await store.GetAsync(
+                EstateRaceModule.ModuleId,
+                "serverFavorites",
+                CancellationToken.None);
+            Assert.IsNotNull(stored);
+            Assert.IsFalse(stored.Contains("password", StringComparison.OrdinalIgnoreCase));
+
+            await store.SetAsync(
+                EstateRaceModule.ModuleId,
+                "serverFavorites",
+                "{not-json",
+                CancellationToken.None);
+            Assert.IsEmpty(await module.LoadServerFavoritesAsync(CancellationToken.None));
+        }
+        finally
+        {
+            DeleteDatabase(path);
+        }
+    }
+
+    [TestMethod]
+    public async Task ConnectionTestReadsDescriptorAndReportsRoundTripTime()
+    {
+        var descriptor = new EstateRaceServerDescriptor(
+            "连接测试服务器",
+            EstateRaceModule.ProtocolVersion,
+            12,
+            true,
+            null,
+            null,
+            RaceSessionPhase.Lobby,
+            DateTimeOffset.UtcNow,
+            SupportsObservers: true,
+            MaximumObservers: 24);
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        app.MapGet("/.well-known/lazyforza-race.json", () => Results.Json(descriptor));
+        await app.StartAsync();
+        try
+        {
+            var address = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+            var result = await EstateRaceModule.TestServerAsync(address, CancellationToken.None);
+
+            Assert.AreEqual(descriptor.ServerName, result.Descriptor.ServerName);
+            Assert.AreEqual(EstateRaceModule.ProtocolVersion, result.Descriptor.ProtocolVersion);
+            Assert.IsTrue(result.RoundTripTime >= TimeSpan.Zero);
+            Assert.AreEqual(address, EstateRaceModule.NormalizeServerAddress(address + "/ws"));
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [TestMethod]
     public void LeaderboardTimingUsesSessionDeltaRulesForQualifyingRaceAndOtherViews()
     {
         var leader = Participant(Guid.NewGuid()) with

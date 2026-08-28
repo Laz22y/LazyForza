@@ -21,6 +21,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private const string ResumeTokenSetting = "resumeToken";
     private const string ObserverResumeTokenSetting = "observerResumeToken";
     private const string ConnectionRoleSetting = "connectionRole";
+    private const string ServerFavoritesSetting = "serverFavorites";
+    public const int MaximumServerFavorites = 20;
     private const int MaximumOrganizerLogoBytes = 262_144;
     private static readonly TimeSpan TelemetryInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan TelemetrySendTimeout = TimeSpan.FromMilliseconds(750);
@@ -210,6 +212,47 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             savedRole);
     }
 
+    public async Task<IReadOnlyList<EstateRaceServerFavorite>> LoadServerFavoritesAsync(
+        CancellationToken cancellationToken)
+    {
+        var json = await Context.Settings.GetAsync(
+            ModuleId, ServerFavoritesSetting, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            var favorites = JsonSerializer.Deserialize<IReadOnlyList<EstateRaceServerFavorite>>(
+                json, EstateRaceWireProtocol.JsonOptions);
+            return NormalizeServerFavorites(favorites ?? []);
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public async Task SaveServerFavoritesAsync(
+        IEnumerable<EstateRaceServerFavorite> favorites,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(favorites);
+        var normalized = NormalizeServerFavorites(favorites);
+        await Context.Settings.SetAsync(
+            ModuleId,
+            ServerFavoritesSetting,
+            JsonSerializer.Serialize(normalized, EstateRaceWireProtocol.JsonOptions),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task<EstateRaceConnectionTestResult> TestServerAsync(
+        string serverAddress,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var descriptor = await ReadServerDescriptorAsync(serverAddress, cancellationToken).ConfigureAwait(false);
+        stopwatch.Stop();
+        return new EstateRaceConnectionTestResult(descriptor, stopwatch.Elapsed);
+    }
+
     public async Task ConnectAsync(
         EstateRaceConnectionProfile profile,
         CancellationToken cancellationToken,
@@ -248,6 +291,47 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                    EstateRaceWireProtocol.JsonOptions,
                    cancellationToken).ConfigureAwait(false) ??
                throw new InvalidOperationException("服务端没有返回有效的房间信息。");
+    }
+
+    public static string NormalizeServerAddress(string value)
+    {
+        var websocket = ServerWebSocketUri(value);
+        var builder = new UriBuilder(websocket)
+        {
+            Scheme = websocket.Scheme == "wss" ? "https" : "http",
+            Path = websocket.AbsolutePath == "/ws" ? "/" : websocket.AbsolutePath,
+            Query = string.Empty,
+            Fragment = string.Empty
+        };
+        return builder.Uri.GetComponents(
+            UriComponents.SchemeAndServer | UriComponents.Path,
+            UriFormat.SafeUnescaped).TrimEnd('/');
+    }
+
+    private static IReadOnlyList<EstateRaceServerFavorite> NormalizeServerFavorites(
+        IEnumerable<EstateRaceServerFavorite> favorites)
+    {
+        var result = new List<EstateRaceServerFavorite>(MaximumServerFavorites);
+        var addresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var favorite in favorites.OrderByDescending(item => item.UpdatedAt))
+        {
+            string address;
+            try { address = NormalizeServerAddress(favorite.ServerAddress); }
+            catch (Exception exception) when (exception is ArgumentException or UriFormatException) { continue; }
+            if (!addresses.Add(address)) continue;
+            var name = string.Concat((favorite.Name ?? string.Empty).Trim()
+                .Where(character => !char.IsControl(character)));
+            if (name.Length > 48) name = name[..48];
+            if (name.Length == 0) name = address;
+            result.Add(favorite with
+            {
+                Id = favorite.Id == Guid.Empty ? Guid.NewGuid() : favorite.Id,
+                Name = name,
+                ServerAddress = address
+            });
+            if (result.Count == MaximumServerFavorites) break;
+        }
+        return result;
     }
 
     private async Task<bool> ConnectOnceAsync(

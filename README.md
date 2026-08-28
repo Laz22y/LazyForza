@@ -55,6 +55,8 @@ LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 - 1–12 名车手和额外 OB 席位；
 - 练习、多节排位、正赛、稳定秒差、旗语、处罚、碰撞调查和可选断线计圈恢复；
 - 维修区、车队、赛道文件托管与阶段赛果归档；
+- 客户端可收藏常用服务器并在进入房间前测试可达性和协议兼容性；
+- Web 总控支持超管、管理员和裁判多账号分权；
 - Windows、Linux、macOS 自托管包和 Cloudflare Durable Objects 版本。
 
 只使用实时 HUD 和圈速分析时不需要部署服务端。部署前阅读[赛事服务端指引](https://laz22y.github.io/LazyForza/docs/#race-server)。
@@ -133,7 +135,7 @@ See the [complete documentation](https://laz22y.github.io/LazyForza/docs/) for s
 
 ### RaceServer
 
-[LazyForza.RaceServer](https://github.com/Laz22y/LazyForza.RaceServer) is the independent estate-racing server. It provides 1–12 driver slots plus observers, practice, multi-session qualifying, races, stable gaps, flags, penalties, collision investigations, optional disconnected-lap recovery, pit lanes, teams, hosted track files and archived session results. Native Windows/Linux/macOS packages and a Cloudflare Durable Objects implementation are available.
+[LazyForza.RaceServer](https://github.com/Laz22y/LazyForza.RaceServer) is the independent estate-racing server. It provides 1–12 driver slots plus observers, practice, multi-session qualifying, races, stable gaps, flags, penalties, collision investigations, optional disconnected-lap recovery, pit lanes, teams, hosted track files and archived session results. The client can save frequently used servers and test reachability and protocol compatibility before joining. Race Control supports separate super-admin, administrator and steward accounts. Native Windows/Linux/macOS packages and a Cloudflare Durable Objects implementation are available.
 
 RaceServer is not required for the live HUD or lap analysis. Read the [deployment and connection guide](https://laz22y.github.io/LazyForza/docs/#race-server) before hosting a race.
 

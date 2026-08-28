@@ -105,8 +105,47 @@ internal sealed partial class MainWindow
                 UpdateRacePageState();
                 return;
             }
-            var dialog = new EstateRaceJoinWindow(savedProfile, EstateRaceModule.ReadServerDescriptorAsync) { Owner = this };
-            if (dialog.ShowDialog() != true || dialog.Profile is not { } profile) return;
+            IReadOnlyList<EstateRaceServerFavorite> favorites;
+            try
+            {
+                favorites = await module.LoadServerFavoritesAsync(lifetimeCancellation.Token);
+            }
+            catch (Exception exception)
+            {
+                favorites = [];
+                AppDialog.Show(
+                    this,
+                    AppLocalization.Format(
+                        "estate.join.favoriteLoadFailed",
+                        "服务器收藏暂时无法读取：{0}",
+                        AppLocalization.Literal(exception.Message)),
+                    AppLocalization.Literal("服务器收藏"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            var dialog = new EstateRaceJoinWindow(
+                savedProfile,
+                favorites,
+                EstateRaceModule.ReadServerDescriptorAsync,
+                EstateRaceModule.TestServerAsync) { Owner = this };
+            var accepted = dialog.ShowDialog() == true && dialog.Profile is not null;
+            try
+            {
+                await module.SaveServerFavoritesAsync(dialog.FavoriteServers, lifetimeCancellation.Token);
+            }
+            catch (Exception exception)
+            {
+                AppDialog.Show(
+                    this,
+                    AppLocalization.Format(
+                        "estate.join.favoriteSaveFailed",
+                        "服务器收藏暂时无法保存：{0}",
+                        AppLocalization.Literal(exception.Message)),
+                    AppLocalization.Literal("服务器收藏"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            if (!accepted || dialog.Profile is not { } profile) return;
             enterRoom.IsEnabled = false;
             try
             {
