@@ -6,8 +6,10 @@ using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -17,6 +19,14 @@ namespace LazyForza.Fh5MapProbe;
 
 public partial class MainWindow : Window
 {
+    private const int HotkeyMessage = 0x0312;
+    private const int CaptureMarkerHotkeyId = 1;
+    private const int StopAndSaveHotkeyId = 2;
+    private const uint ModifierShift = 0x0004;
+    private const uint ModifierControl = 0x0002;
+    private const uint ModifierNoRepeat = 0x4000;
+    private const uint VirtualKeyF8 = 0x77;
+    private const uint VirtualKeyF9 = 0x78;
     private static readonly Fh5MapOption[] MapOptions =
     [
         new(Fh5MapRegion.Mexico, "主地图 · 墨西哥", "Mexico"),
@@ -31,6 +41,9 @@ public partial class MainWindow : Window
     private bool outputPathCustomized;
     private bool closeAfterStop;
     private string? lastCompletedOutput;
+    private HwndSource? windowSource;
+    private bool hotkeysEnabled;
+    private int markerSequence;
 
     public MainWindow()
     {
@@ -42,6 +55,17 @@ public partial class MainWindow : Window
         SetAutomaticOutputPath();
         uiTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, UpdateLiveUi, Dispatcher);
         uiTimer.Start();
+        SourceInitialized += (_, _) =>
+        {
+            windowSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+            windowSource?.AddHook(WindowMessageHook);
+        };
+        Closed += (_, _) =>
+        {
+            DisableBackgroundHotkeys();
+            windowSource?.RemoveHook(WindowMessageHook);
+            windowSource = null;
+        };
         AppendLog("工具已就绪。先选择地图和输出文件，再开始采集。");
     }
 
@@ -104,6 +128,9 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("端口必须是 1–65535 的整数。");
             if (string.IsNullOrWhiteSpace(OutputPathBox.Text))
                 throw new InvalidOperationException("请选择输出文件。");
+            if (!EnableBackgroundHotkeys())
+                throw new InvalidOperationException(
+                    "无法注册 Ctrl+Shift+F8 / Ctrl+Shift+F9 全局快捷键。请关闭占用这些快捷键的软件后重试。");
 
             var settings = new Fh5CaptureSettings(
                 map.Value,
@@ -115,6 +142,7 @@ public partial class MainWindow : Window
                 DateTimeOffset.UtcNow);
             session = new Fh5MapCaptureSession(settings);
             markers.Clear();
+            markerSequence = 0;
             rateSampleAt = DateTimeOffset.UtcNow;
             rateSamplePackets = 0;
             SetRunningControls(true);
@@ -122,10 +150,14 @@ public partial class MainWindow : Window
             LatestStateText.Text = "等待 FH5 Data Out 数据…";
             AppendLog($"开始采集：{map.DisplayName} · {settings.SessionLabel}");
             AppendLog($"原始数据恢复目录：{session.RecoveryDirectory}");
+            Dispatcher.BeginInvoke(
+                () => WindowState = WindowState.Minimized,
+                DispatcherPriority.ApplicationIdle);
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IOException or
                                            UnauthorizedAccessException or SocketException)
         {
+            DisableBackgroundHotkeys();
             MessageBox.Show(this, exception.Message, "无法开始采集", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -133,24 +165,34 @@ public partial class MainWindow : Window
     private async void StopButton_Click(object sender, RoutedEventArgs e) =>
         await StopAndSaveAsync();
 
-    private void CaptureMarkerButton_Click(object sender, RoutedEventArgs e)
+    private void CaptureMarkerButton_Click(object sender, RoutedEventArgs e) =>
+        CaptureMarker(showDialog: true);
+
+    private void CaptureMarker(bool showDialog)
     {
         if (session is null)
         {
-            MessageBox.Show(this, "请先开始采集。", "尚未采集", MessageBoxButton.OK, MessageBoxImage.Information);
+            if (showDialog)
+                MessageBox.Show(this, "请先开始采集。", "尚未采集", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         try
         {
-            var marker = session.CaptureMarker(MarkerNameBox.Text);
+            var prefix = string.IsNullOrWhiteSpace(MarkerNameBox.Text) ? "地标" : MarkerNameBox.Text.Trim();
+            var marker = session.CaptureMarker($"{prefix} {++markerSequence:00}");
             markers.Add(marker);
             AppendLog($"已记录地标“{marker.Name}”：({marker.X:F3}, {marker.Y:F3}, {marker.Z:F3})，离散 {marker.SpreadMeters:F3} m");
-            MarkerNameBox.SelectAll();
-            MarkerNameBox.Focus();
+            LatestStateText.Text = $"已记录 {marker.Name} · {marker.SampleCount} 个有效样本";
+            System.Media.SystemSounds.Asterisk.Play();
         }
         catch (InvalidOperationException exception)
         {
-            MessageBox.Show(this, exception.Message, "无法记录地标", MessageBoxButton.OK, MessageBoxImage.Information);
+            markerSequence = Math.Max(0, markerSequence - 1);
+            AppendLog($"地标未记录：{exception.Message}");
+            LatestStateText.Text = $"地标未记录：{exception.Message}";
+            System.Media.SystemSounds.Hand.Play();
+            if (showDialog)
+                MessageBox.Show(this, exception.Message, "无法记录地标", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 
@@ -201,6 +243,7 @@ public partial class MainWindow : Window
     private async Task<bool> StopAndSaveAsync()
     {
         if (session is null) return true;
+        DisableBackgroundHotkeys();
         StopButton.IsEnabled = false;
         SetStatus("正在保存", Brushes.DarkOrange);
         var current = session;
@@ -212,6 +255,7 @@ public partial class MainWindow : Window
             AppendLog($"采集包已保存：{snapshot.OutputPath}");
             AppendLog($"有效包 {snapshot.ValidPackets:N0}，无效包 {snapshot.InvalidPackets:N0}，地标 {snapshot.Markers.Count}。 ");
             SetStatus("已保存", Brushes.DarkGreen);
+            System.Media.SystemSounds.Exclamation.Play();
             await current.DisposeAsync();
             session = null;
             SetRunningControls(false);
@@ -222,6 +266,7 @@ public partial class MainWindow : Window
             AppendLog($"保存失败：{exception.Message}");
             AppendLog($"未打包数据仍保留在：{current.RecoveryDirectory}");
             SetStatus("保存失败", Brushes.DarkRed);
+            System.Media.SystemSounds.Hand.Play();
             MessageBox.Show(
                 this,
                 $"无法完成采集包。未打包数据仍保留在下面的恢复目录：\n\n{current.RecoveryDirectory}\n\n{exception.Message}",
@@ -233,6 +278,50 @@ public partial class MainWindow : Window
             SetRunningControls(false);
             return false;
         }
+    }
+
+    private bool EnableBackgroundHotkeys()
+    {
+        if (hotkeysEnabled) return true;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero) return false;
+        var modifiers = ModifierControl | ModifierShift | ModifierNoRepeat;
+        var markerRegistered = RegisterHotKey(handle, CaptureMarkerHotkeyId, modifiers, VirtualKeyF8);
+        var stopRegistered = markerRegistered &&
+                             RegisterHotKey(handle, StopAndSaveHotkeyId, modifiers, VirtualKeyF9);
+        hotkeysEnabled = markerRegistered && stopRegistered;
+        if (hotkeysEnabled) return true;
+        UnregisterHotKey(handle, CaptureMarkerHotkeyId);
+        UnregisterHotKey(handle, StopAndSaveHotkeyId);
+        return false;
+    }
+
+    private void DisableBackgroundHotkeys()
+    {
+        if (!hotkeysEnabled) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            UnregisterHotKey(handle, CaptureMarkerHotkeyId);
+            UnregisterHotKey(handle, StopAndSaveHotkeyId);
+        }
+        hotkeysEnabled = false;
+    }
+
+    private IntPtr WindowMessageHook(
+        IntPtr window,
+        int message,
+        IntPtr wordParameter,
+        IntPtr longParameter,
+        ref bool handled)
+    {
+        if (message != HotkeyMessage) return IntPtr.Zero;
+        handled = true;
+        if (wordParameter.ToInt32() == CaptureMarkerHotkeyId)
+            CaptureMarker(showDialog: false);
+        else if (wordParameter.ToInt32() == StopAndSaveHotkeyId)
+            _ = StopAndSaveAsync();
+        return IntPtr.Zero;
     }
 
     private void UpdateLiveUi(object? sender, EventArgs e)
@@ -328,4 +417,12 @@ public partial class MainWindow : Window
     {
         LogText.Text = $"最近操作 [{DateTime.Now:HH:mm:ss}]：{message}";
     }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint virtualKey);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterHotKey(IntPtr window, int id);
 }

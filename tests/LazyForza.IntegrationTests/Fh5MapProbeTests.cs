@@ -174,10 +174,67 @@ public sealed class Fh5MapProbeTests
         }
     }
 
-    private static byte[] BuildPacket(int length)
+    [TestMethod]
+    public async Task PausedPacketsDoNotExpandActiveDrivingCoordinateBounds()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"lazyforza-fh5-paused-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, $"paused{CapturePackageWriter.Extension}");
+            var port = AvailableUdpPort();
+            var settings = new Fh5CaptureSettings(
+                Fh5MapRegion.HotWheelsPark,
+                "风火轮地图 · Hot Wheels Park",
+                "暂停过滤测试",
+                "127.0.0.1",
+                port,
+                path,
+                DateTimeOffset.UtcNow);
+            await using var session = new Fh5MapCaptureSession(settings);
+            using var sender = new UdpClient();
+            for (var index = 0; index < 8; index++)
+                await sender.SendAsync(
+                    BuildPacket(Fh5DataOutParser.PaddedPacketLength),
+                    new IPEndPoint(IPAddress.Loopback, port));
+            for (var index = 0; index < 8; index++)
+                await sender.SendAsync(
+                    BuildPacket(
+                        Fh5DataOutParser.PaddedPacketLength,
+                        isRaceOn: 0,
+                        positionX: 50_000,
+                        positionY: 60_000,
+                        positionZ: 70_000),
+                    new IPEndPoint(IPAddress.Loopback, port));
+
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+            while (session.Snapshot().ValidPackets < 16 && DateTimeOffset.UtcNow < deadline)
+                await Task.Delay(20);
+
+            var snapshot = session.Snapshot();
+            Assert.AreEqual(16, snapshot.ValidPackets);
+            Assert.AreEqual(8, snapshot.ActiveDrivingPackets);
+            Assert.IsNotNull(snapshot.ActiveCoordinateBounds);
+            Assert.AreEqual(101.25, snapshot.ActiveCoordinateBounds.MaximumX, 0.001);
+            Assert.AreEqual(202.5, snapshot.ActiveCoordinateBounds.MaximumY, 0.001);
+            Assert.AreEqual(-303.75, snapshot.ActiveCoordinateBounds.MaximumZ, 0.001);
+            await session.StopAndSaveAsync("paused packets excluded");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static byte[] BuildPacket(
+        int length,
+        int isRaceOn = 1,
+        float positionX = 101.25f,
+        float positionY = 202.5f,
+        float positionZ = -303.75f)
     {
         var packet = new byte[length];
-        WriteInt32(packet, 0, 1);
+        WriteInt32(packet, 0, isRaceOn);
         WriteUInt32(packet, 4, 123456);
         WriteFloat(packet, 8, 8000);
         WriteFloat(packet, 16, 3500);
@@ -195,9 +252,9 @@ public sealed class Fh5MapProbeTests
         WriteInt32(packet, 232, 11);
         WriteUInt32(packet, 236, 0x10203040);
         WriteUInt32(packet, 240, 0x50607080);
-        WriteFloat(packet, 244, 101.25f);
-        WriteFloat(packet, 248, 202.5f);
-        WriteFloat(packet, 252, -303.75f);
+        WriteFloat(packet, 244, positionX);
+        WriteFloat(packet, 248, positionY);
+        WriteFloat(packet, 252, positionZ);
         WriteFloat(packet, 256, 5);
         WriteFloat(packet, 292, 1500);
         WriteFloat(packet, 304, 12.5f);

@@ -47,6 +47,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="地图" VerticalAlignment="Center" Margin="0,0,7,0" />
@@ -72,10 +73,17 @@
                                  VerticalScrollBarVisibility="Auto"
                                  Text="记录游戏版本、进入方式、车辆和采集路线等信息。" />
 
-                        <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="8"
+                        <Border Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="8"
+                                Background="#EDF7FF" BorderBrush="#84BDE8" BorderThickness="1"
+                                CornerRadius="4" Padding="9" Margin="0,5,0,0">
+                            <TextBlock TextWrapping="Wrap"
+                                       Text="点击开始后工具会立即最小化，让 FH5 恢复运行。游戏保持前台时按 Ctrl+Shift+F8 记录地标，按 Ctrl+Shift+F9 停止并保存；成功或失败会播放不同提示音，全程不需要切回本窗口。" />
+                        </Border>
+
+                        <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="8"
                                     Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button x:Name="StartButton" Content="开始采集" Click="StartButton_Click" />
-                            <Button x:Name="StopButton" Content="停止并保存" IsEnabled="False"
+                            <Button x:Name="StartButton" Content="开始后台采集并最小化" Click="StartButton_Click" />
+                            <Button x:Name="StopButton" Content="停止并保存（Ctrl+Shift+F9）" IsEnabled="False"
                                     Margin="8,0,0,0" Click="StopButton_Click" />
                             <Button x:Name="OpenOutputButton" Content="打开输出目录"
                                     Margin="8,0,0,0" Click="OpenOutputButton_Click" />
@@ -126,7 +134,7 @@
                     </Grid>
                 </GroupBox>
 
-                <GroupBox Header="3. 地标采样">
+                <GroupBox Header="3. 后台地标采样">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -139,8 +147,8 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="MarkerNameBox" Text="入口出生点" />
-                            <Button Grid.Column="1" Content="采样最近 1 秒" Margin="8,0,0,0"
+                            <TextBox x:Name="MarkerNameBox" Text="地标" ToolTip="地标名称前缀" />
+                            <Button Grid.Column="1" Content="记录地标（Ctrl+Shift+F8）" Margin="8,0,0,0"
                                     Click="CaptureMarkerButton_Click" />
                             <Button Grid.Column="2" Content="删除所选" Margin="8,0,0,0"
                                     Click="DeleteMarkerButton_Click" />
@@ -159,7 +167,7 @@
                             </DataGrid.Columns>
                         </DataGrid>
                         <TextBlock Grid.Row="2" Margin="0,8,0,0" Foreground="#555" TextWrapping="Wrap"
-                                   Text="停车后采样。每张地图建议记录入口、中心、四角、最高点、最低点以及路线关键点；完整行驶轨迹会自动记录。" />
+                                   Text="在目标位置停车约 1 秒后按 Ctrl+Shift+F8。工具会按“名称前缀 + 两位序号”记录最近一秒的有效驾驶数据；完整行驶轨迹始终自动记录。" />
                     </Grid>
                 </GroupBox>
 
@@ -172,7 +180,7 @@
         <Border Grid.Row="2" Background="#FFF7D6" BorderBrush="#D8C270" BorderThickness="1"
                 CornerRadius="4" Padding="10" Margin="0,12,0,0">
             <TextBlock TextWrapping="Wrap"
-                       Text="请关闭 LazyForza 主程序后再采集。FH5 设置中打开 Data Out，并把目标 IP 和端口设为本窗口显示的地址与端口。工具不读取内存，不修改游戏。" />
+                       Text="请关闭 LazyForza 主程序后再采集。FH5 设置中打开 Data Out，并把目标 IP 和端口设为本窗口显示的地址与端口。暂停或菜单状态不会进入驾驶坐标范围；工具不读取内存，不修改游戏。" />
         </Border>
     </Grid>
 </Window>
