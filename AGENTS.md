@@ -13,7 +13,7 @@
 3. 涉及整体数据流时阅读 [`ARCHITECTURE.md`](ARCHITECTURE.md)；
 4. 涉及 FH6 UDP 字段时阅读 [`FH6_TELEMETRY_DEVELOPMENT_GUIDE.md`](FH6_TELEMETRY_DEVELOPMENT_GUIDE.md) 并核对当前解析器；
 5. 涉及真实游戏、Overlay 或多人联机结论时阅读 [`VALIDATION_WITH_FH6.md`](VALIDATION_WITH_FH6.md)；
-6. 涉及地产赛事协议或服务端行为时，同时检查 `../LazyForza.RaceServer\AGENTS.md` 和对应实现。
+6. 涉及地产赛事协议或服务端行为时，同时检查 `../LazyForza.RaceServer/AGENTS.md` 和对应实现。
 
 ## 系统概览
 
@@ -78,10 +78,10 @@ LazyForza 是 Windows 10/11 x64 的 .NET 9 WPF 应用。它接收 FH6 官方 324
 
 地产赛事协议由 RaceServer 仓库中的单一 Schema 生成：
 
-- 唯一源：`../LazyForza.RaceServer\protocol\race-protocol.schema.json`；
+- 唯一源：`../LazyForza.RaceServer/protocol/race-protocol.schema.json`；
 - 客户端产物：`src/LazyForza.Modules.EstateRace/EstateRaceProtocol.g.cs`；
-- 原生服务端产物：`../LazyForza.RaceServer\src\LazyForza.RaceServer.Protocol\RaceProtocolModels.g.cs`；
-- Cloudflare 产物：`../LazyForza.RaceServer\cloudflare\src\protocol.generated.ts`。
+- 原生服务端产物：`../LazyForza.RaceServer/src/LazyForza.RaceServer.Protocol/RaceProtocolModels.g.cs`；
+- Cloudflare 产物：`../LazyForza.RaceServer/cloudflare/src/protocol.generated.ts`。
 
 不要手工修改生成文件。协议辅助逻辑仍分别位于客户端 `EstateRaceWireProtocol.cs`、原生 `RaceProtocolJson.cs`/`RaceProtocolValidation.cs` 和 Cloudflare `protocol.ts`。在两个仓库并列存在的开发环境中，从 RaceServer 根目录运行 `node scripts/generate-protocol.mjs`，会同时更新三端产物；客户端独立构建使用已提交的生成文件，不依赖 RaceServer 或 Node.js。
 
