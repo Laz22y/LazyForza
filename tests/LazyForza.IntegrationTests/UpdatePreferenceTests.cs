@@ -78,7 +78,7 @@ public sealed class UpdatePreferenceTests
     }
 
     [TestMethod]
-    public void PreviewForcesStartupChecksAndGitHubWithoutChangingStablePreferences()
+    public void PreviewForcesStartupChecksAndKeepsItsSourcePreferenceSeparateFromStable()
     {
         var root = Path.Combine(Path.GetTempPath(), $"lazyforza-preview-update-{Guid.NewGuid():N}");
         try
@@ -94,13 +94,15 @@ public sealed class UpdatePreferenceTests
 
             Assert.IsTrue(preview.IsUpdateMandatory);
             Assert.IsTrue(preview.CheckOnStartup);
-            Assert.AreEqual(UpdateSourceKind.GitHub, preview.PreferredSource);
+            Assert.AreEqual(UpdateSourceKind.GitCode, preview.PreferredSource);
+            Assert.AreEqual("GitHub", preview.FallbackSourceName);
 
             preview.CheckOnStartup = false;
-            preview.PreferredSource = UpdateSourceKind.GitCode;
+            preview.PreferredSource = UpdateSourceKind.GitHub;
 
             Assert.IsTrue(preview.CheckOnStartup);
             Assert.AreEqual(UpdateSourceKind.GitHub, preview.PreferredSource);
+            Assert.AreEqual("GitCode", preview.FallbackSourceName);
 
             using var stable = new ApplicationUpdateManager(
                 store,
@@ -109,6 +111,13 @@ public sealed class UpdatePreferenceTests
                 _ => { });
             Assert.IsFalse(stable.IsUpdateMandatory);
             Assert.AreEqual(UpdateSourceKind.GitCode, stable.PreferredSource);
+
+            using var reopenedPreview = new ApplicationUpdateManager(
+                store,
+                directories,
+                Distribution(root, ApplicationDistributionKind.Preview),
+                _ => { });
+            Assert.AreEqual(UpdateSourceKind.GitHub, reopenedPreview.PreferredSource);
         }
         finally
         {

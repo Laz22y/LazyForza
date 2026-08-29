@@ -51,20 +51,16 @@ internal sealed partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Right,
             SelectedValuePath = nameof(ComboBoxItem.Tag)
         };
-        if (!updateManager.IsUpdateMandatory)
-            sourceSelector.Items.Add(new ComboBoxItem
-            {
-                Content = AppLocalization.Text("settings.update.gitcode", "GitCode（中国大陆优先）"),
-                Tag = UpdateSourceKind.GitCode
-            });
         sourceSelector.Items.Add(new ComboBoxItem
         {
-            Content = updateManager.IsUpdateMandatory
-                ? AppLocalization.Text("settings.update.previewGithub", "GitHub（预览版专用）")
-                : "GitHub",
+            Content = AppLocalization.Text("settings.update.gitcode", "GitCode（中国大陆优先）"),
+            Tag = UpdateSourceKind.GitCode
+        });
+        sourceSelector.Items.Add(new ComboBoxItem
+        {
+            Content = "GitHub",
             Tag = UpdateSourceKind.GitHub
         });
-        sourceSelector.IsEnabled = !updateManager.IsUpdateMandatory;
         sourceSelector.SelectedValue = updateManager.PreferredSource;
         sourceSelector.SelectionChanged += (_, _) =>
         {
@@ -79,8 +75,10 @@ internal sealed partial class MainWindow
             updateManager.IsUpdateMandatory
                 ? AppLocalization.Format(
                     "settings.update.statusPreview",
-                    "当前预览版 {0} · 每次启动强制检查 GitHub 预览通道，发现新版后自动安装。",
-                    CurrentApplicationVersion())
+                    "当前预览版 {0} · 每次启动强制检查；首选 {1}，失败时自动尝试 {2}。发现新版后自动安装。",
+                    CurrentApplicationVersion(),
+                    updateManager.PreferredSourceName,
+                    updateManager.FallbackSourceName)
                 : AppLocalization.Format(
                     updateManager.CanInstallAutomatically
                         ? "settings.update.statusInstall"

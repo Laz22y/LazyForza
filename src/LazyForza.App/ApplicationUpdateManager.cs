@@ -8,12 +8,13 @@ internal sealed class ApplicationUpdateManager : IDisposable
 {
     internal const string CheckOnStartupSetting = "updates.checkOnStartup";
     internal const string PreferredSourceSetting = "updates.preferredSource";
+    internal const string PreviewPreferredSourceSetting = "updates.preview.preferredSource";
 
     private readonly LazyForzaStore store;
     private readonly DataDirectoryService directories;
     private readonly ApplicationDistribution distribution;
     private readonly MultiSourceUpdateClient stableClient;
-    private readonly GitHubPreviewReleaseClient previewClient;
+    private readonly PreviewMultiSourceUpdateClient previewClient;
     private readonly Action<string> log;
 
     public ApplicationUpdateManager(
@@ -26,8 +27,12 @@ internal sealed class ApplicationUpdateManager : IDisposable
         this.directories = directories;
         this.distribution = distribution;
         this.log = log;
-        stableClient = new MultiSourceUpdateClient(PreferredSource, log);
-        previewClient = new GitHubPreviewReleaseClient();
+        stableClient = new MultiSourceUpdateClient(
+            ReadPreferredSource(PreferredSourceSetting),
+            log);
+        previewClient = new PreviewMultiSourceUpdateClient(
+            ReadPreferredSource(PreviewPreferredSourceSetting),
+            log);
         WindowsUpdateLauncher.CleanupCompletedUpdates(directories.UpdatesPath);
         WindowsInstallerUpdateLauncher.CleanupUpdateCache(
             directories.UpdatesPath,
@@ -75,29 +80,33 @@ internal sealed class ApplicationUpdateManager : IDisposable
     {
         get
         {
-            if (IsUpdateMandatory) return UpdateSourceKind.GitHub;
-            var saved = store.GetAppSetting(PreferredSourceSetting);
-            return Enum.TryParse<UpdateSourceKind>(saved, true, out var source) &&
-                   source == UpdateSourceKind.GitHub
-                ? UpdateSourceKind.GitHub
-                : UpdateSourceKind.GitCode;
+            return ReadPreferredSource(
+                IsUpdateMandatory
+                    ? PreviewPreferredSourceSetting
+                    : PreferredSourceSetting);
         }
         set
         {
-            if (IsUpdateMandatory) return;
             var normalized = value == UpdateSourceKind.GitHub
                 ? UpdateSourceKind.GitHub
                 : UpdateSourceKind.GitCode;
-            store.SetAppSetting(PreferredSourceSetting, normalized.ToString());
-            stableClient.PreferredSource = normalized;
+            if (IsUpdateMandatory)
+            {
+                store.SetAppSetting(PreviewPreferredSourceSetting, normalized.ToString());
+                previewClient.PreferredSource = normalized;
+            }
+            else
+            {
+                store.SetAppSetting(PreferredSourceSetting, normalized.ToString());
+                stableClient.PreferredSource = normalized;
+            }
         }
     }
 
     public string PreferredSourceName => PreferredSource == UpdateSourceKind.GitHub ? "GitHub" : "GitCode";
 
-    public string FallbackSourceName => IsUpdateMandatory
-        ? "无"
-        : PreferredSource == UpdateSourceKind.GitHub ? "GitCode" : "GitHub";
+    public string FallbackSourceName =>
+        PreferredSource == UpdateSourceKind.GitHub ? "GitCode" : "GitHub";
 
     public ApplicationDistributionKind DistributionKind => distribution.Kind;
 
@@ -119,7 +128,6 @@ internal sealed class ApplicationUpdateManager : IDisposable
                 release,
                 directories.UpdatesPath,
                 progress,
-                UpdatePackageKind.Portable,
                 cancellationToken)
             : stableClient.DownloadAndPrepareAsync(
                 release,
@@ -166,4 +174,13 @@ internal sealed class ApplicationUpdateManager : IDisposable
 
     private string ModeCheckOnStartupSetting =>
         $"{CheckOnStartupSetting}.{distribution.Kind.ToString().ToLowerInvariant()}";
+
+    private UpdateSourceKind ReadPreferredSource(string setting)
+    {
+        var saved = store.GetAppSetting(setting);
+        return Enum.TryParse<UpdateSourceKind>(saved, true, out var source) &&
+               source == UpdateSourceKind.GitHub
+            ? UpdateSourceKind.GitHub
+            : UpdateSourceKind.GitCode;
+    }
 }

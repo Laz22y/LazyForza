@@ -38,7 +38,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 2. 启动 LazyForza，按首次启动指引选择语言、玩家代号、数据目录和关闭方式；
 3. 在指引中按提示开启 FH6 Data Out。收到有效遥测后会自动进入主窗口，也可暂时跳过连接。
 
-安装版默认安装到 `C:\Program Files\LazyForza`，创建开始菜单入口；桌面快捷方式和 `.lfztelemetry`、`.lfzlap`、`.lfzestate` 文件关联可在安装时选择。便携版不写入这些系统项。每个便携版目录独立保存初始化状态；安装版卸载时保留数据库，并在重新安装后再次显示初始化指引。正式安装版默认启动检查更新，正式便携版默认关闭，两者都可在设置中修改。预览版使用独立初始化状态和 GitHub 预发布更新通道，每次启动强制检查并自动安装可用更新。发行说明同时提供中文和英文，程序按当前界面语言显示对应内容。所有包都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。需要通过命令行固定目录时可使用：
+安装版默认安装到 `C:\Program Files\LazyForza`，创建开始菜单入口；桌面快捷方式和 `.lfztelemetry`、`.lfzlap`、`.lfzestate` 文件关联可在安装时选择。便携版不写入这些系统项。每个便携版目录独立保存初始化状态；安装版卸载时保留数据库，并在重新安装后再次显示初始化指引。正式安装版默认启动检查更新，正式便携版默认关闭，两者都可在设置中修改。预览版使用独立初始化状态和 GitCode/GitHub 预发布更新通道，每次启动强制检查并自动安装可用更新。发行说明同时提供中文和英文，程序按当前界面语言显示对应内容。所有包都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。需要通过命令行固定目录时可使用：
 
 设置页提供默认蓝、暗夜紫、清新绿、鲜艳红、纯粹白和低调灰六种 UI 强调色；切换只影响界面高亮与选中状态，不改变 HUD、图表语义色或其他界面样式。
 
@@ -121,7 +121,7 @@ The experimental drift HUD is disabled by default. It estimates slip and control
 2. Start LazyForza and choose your language, player alias, data directory and close behavior in the first-run guide.
 3. Follow the guide to enable FH6 Data Out. The main window opens after valid telemetry arrives, or you can skip the connection step.
 
-The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu entry, and can optionally create a desktop shortcut and associate `.lfztelemetry`, `.lfzlap` and `.lfzestate` files. The portable build does not write those system entries. Stable installed builds check for updates by default; stable portable builds do not, and both settings can be changed later. Preview builds use separate initialization state and a GitHub prerelease channel; they check on every startup and install available updates automatically. Every package includes the .NET runtime.
+The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu entry, and can optionally create a desktop shortcut and associate `.lfztelemetry`, `.lfzlap` and `.lfzestate` files. The portable build does not write those system entries. Stable installed builds check for updates by default; stable portable builds do not, and both settings can be changed later. Preview builds use separate initialization state and GitCode/GitHub prerelease channels; they check on every startup and install available updates automatically. Every package includes the .NET runtime.
 
 Settings provides six UI accent colors: Default Blue, Midnight Purple, Fresh Green, Vivid Red, Pure White and Subtle Gray. The selection changes interface highlights and selected states without recoloring HUDs, chart semantics or other interface styling.
 
