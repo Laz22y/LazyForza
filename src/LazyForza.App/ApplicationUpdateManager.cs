@@ -12,7 +12,8 @@ internal sealed class ApplicationUpdateManager : IDisposable
     private readonly LazyForzaStore store;
     private readonly DataDirectoryService directories;
     private readonly ApplicationDistribution distribution;
-    private readonly MultiSourceUpdateClient client;
+    private readonly MultiSourceUpdateClient stableClient;
+    private readonly GitHubPreviewReleaseClient previewClient;
     private readonly Action<string> log;
 
     public ApplicationUpdateManager(
@@ -25,7 +26,8 @@ internal sealed class ApplicationUpdateManager : IDisposable
         this.directories = directories;
         this.distribution = distribution;
         this.log = log;
-        client = new MultiSourceUpdateClient(PreferredSource, log);
+        stableClient = new MultiSourceUpdateClient(PreferredSource, log);
+        previewClient = new GitHubPreviewReleaseClient();
         WindowsUpdateLauncher.CleanupCompletedUpdates(directories.UpdatesPath);
         WindowsInstallerUpdateLauncher.CleanupUpdateCache(
             directories.UpdatesPath,
@@ -47,23 +49,33 @@ internal sealed class ApplicationUpdateManager : IDisposable
         }
     }
 
+    public UpdateSemanticVersion CurrentUpdateVersion => ApplicationVersionInfo.UpdateVersion;
+
+    public bool IsUpdateMandatory => distribution.IsPreview || CurrentUpdateVersion.IsPrerelease;
+
     public bool CheckOnStartup
     {
         get
         {
+            if (IsUpdateMandatory) return true;
             var saved = store.GetAppSetting(ModeCheckOnStartupSetting) ??
                         store.GetAppSetting(CheckOnStartupSetting);
             return bool.TryParse(saved, out var enabled)
                 ? enabled
                 : distribution.DefaultUpdateCheckEnabled;
         }
-        set => store.SetAppSetting(ModeCheckOnStartupSetting, value.ToString());
+        set
+        {
+            if (IsUpdateMandatory) return;
+            store.SetAppSetting(ModeCheckOnStartupSetting, value.ToString());
+        }
     }
 
     public UpdateSourceKind PreferredSource
     {
         get
         {
+            if (IsUpdateMandatory) return UpdateSourceKind.GitHub;
             var saved = store.GetAppSetting(PreferredSourceSetting);
             return Enum.TryParse<UpdateSourceKind>(saved, true, out var source) &&
                    source == UpdateSourceKind.GitHub
@@ -72,17 +84,20 @@ internal sealed class ApplicationUpdateManager : IDisposable
         }
         set
         {
+            if (IsUpdateMandatory) return;
             var normalized = value == UpdateSourceKind.GitHub
                 ? UpdateSourceKind.GitHub
                 : UpdateSourceKind.GitCode;
             store.SetAppSetting(PreferredSourceSetting, normalized.ToString());
-            client.PreferredSource = normalized;
+            stableClient.PreferredSource = normalized;
         }
     }
 
     public string PreferredSourceName => PreferredSource == UpdateSourceKind.GitHub ? "GitHub" : "GitCode";
 
-    public string FallbackSourceName => PreferredSource == UpdateSourceKind.GitHub ? "GitCode" : "GitHub";
+    public string FallbackSourceName => IsUpdateMandatory
+        ? "无"
+        : PreferredSource == UpdateSourceKind.GitHub ? "GitCode" : "GitHub";
 
     public ApplicationDistributionKind DistributionKind => distribution.Kind;
 
@@ -91,20 +106,29 @@ internal sealed class ApplicationUpdateManager : IDisposable
         WindowsUpdateLauncher.IsPackagedInstall(AppContext.BaseDirectory);
 
     public Task<UpdateReleaseInfo?> CheckAsync(CancellationToken cancellationToken) =>
-        client.CheckForUpdateAsync(CurrentVersion, cancellationToken);
+        IsUpdateMandatory
+            ? previewClient.CheckForUpdateAsync(CurrentUpdateVersion, cancellationToken)
+            : stableClient.CheckForUpdateAsync(CurrentVersion, cancellationToken);
 
     public Task<PreparedUpdate> DownloadAsync(
         UpdateReleaseInfo release,
         IProgress<UpdateProgress> progress,
         CancellationToken cancellationToken) =>
-        client.DownloadAndPrepareAsync(
-            release,
-            directories.UpdatesPath,
-            progress,
-            distribution.IsInstalled
-                ? UpdatePackageKind.Installer
-                : UpdatePackageKind.Portable,
-            cancellationToken);
+        IsUpdateMandatory
+            ? previewClient.DownloadAndPrepareAsync(
+                release,
+                directories.UpdatesPath,
+                progress,
+                UpdatePackageKind.Portable,
+                cancellationToken)
+            : stableClient.DownloadAndPrepareAsync(
+                release,
+                directories.UpdatesPath,
+                progress,
+                distribution.IsInstalled
+                    ? UpdatePackageKind.Installer
+                    : UpdatePackageKind.Portable,
+                cancellationToken);
 
     public void InstallAndRestart(PreparedUpdate update)
     {
@@ -134,7 +158,11 @@ internal sealed class ApplicationUpdateManager : IDisposable
     public void ReportFailure(string context, Exception exception) =>
         log($"{context}: {exception.GetType().Name}: {exception.Message}");
 
-    public void Dispose() => client.Dispose();
+    public void Dispose()
+    {
+        previewClient.Dispose();
+        stableClient.Dispose();
+    }
 
     private string ModeCheckOnStartupSetting =>
         $"{CheckOnStartupSetting}.{distribution.Kind.ToString().ToLowerInvariant()}";

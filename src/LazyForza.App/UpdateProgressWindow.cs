@@ -13,7 +13,7 @@ internal sealed class UpdateProgressWindow : Window
     private readonly CancellationTokenSource cancellation = new();
     private bool completed;
 
-    public UpdateProgressWindow(Window owner, string version)
+    public UpdateProgressWindow(Window owner, string version, bool canCancel = true)
     {
         Owner = owner;
         Title = "更新 LazyForza";
@@ -53,7 +53,8 @@ internal sealed class UpdateProgressWindow : Window
             Content = "取消",
             HorizontalAlignment = HorizontalAlignment.Right,
             Padding = new Thickness(16, 7, 16, 7),
-            Margin = new Thickness(0, 14, 0, 0)
+            Margin = new Thickness(0, 14, 0, 0),
+            Visibility = canCancel ? Visibility.Visible : Visibility.Collapsed
         };
         cancel.Click += (_, _) => cancellation.Cancel();
         stack.Children.Add(cancel);
@@ -61,10 +62,13 @@ internal sealed class UpdateProgressWindow : Window
         Closing += (_, args) =>
         {
             if (completed) return;
-            cancellation.Cancel();
             args.Cancel = true;
-            status.Text = AppLocalization.Literal("正在取消…");
-            cancel.IsEnabled = false;
+            if (canCancel)
+            {
+                cancellation.Cancel();
+                status.Text = AppLocalization.Literal("正在取消…");
+                cancel.IsEnabled = false;
+            }
         };
         AppLocalization.ApplyTo(this);
     }

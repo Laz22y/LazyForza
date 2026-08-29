@@ -160,7 +160,7 @@
     "不伪造官方 UDP 未提供的赛道 ID、调校 ID、车辆尺寸或轮胎位置；": "Track IDs, tune IDs, vehicle dimensions or tire positions absent from official UDP data are not fabricated.",
     "录制容量、轮换、备份和更新均由用户控制。": "Recording limits, rotation, backups and updates remain under user control.",
     "更新": "Updates",
-    "启动检查默认开启，可在设置中关闭。程序只提示，不强制安装，更新说明按当前界面语言显示中文或英文。下载优先使用 GitCode，失败时回退 GitHub；安装前校验发行包 SHA-256 和包内清单，失败时恢复原版本。": "Startup update checks are enabled by default and can be disabled in Settings. Updates are offered, never forced, and release notes follow the current interface language. Downloads prefer GitCode and fall back to GitHub. SHA-256 and the internal manifest are verified before installation, with rollback on failure.",
+    "正式安装版默认启动检查更新，正式便携版默认关闭，两者都可在设置中修改。正式版只提示、不强制安装，下载优先使用 GitCode，失败时回退 GitHub。预览版使用独立初始化状态和 GitHub 预发布更新通道，每次启动强制检查并自动安装可用更新；检查或安装失败时需重试或退出。安装前均校验发行包 SHA-256 和包内清单，失败时恢复原版本。": "Stable installed builds check for updates by default; stable portable builds do not, and both settings can be changed. Stable updates are offered rather than forced, with GitCode preferred and GitHub as fallback. Preview builds use separate initialization state and a GitHub prerelease channel, check on every startup, and install available updates automatically; a failed check or installation must be retried or the app exits. Every package verifies SHA-256 and its internal manifest before installation, with rollback on failure.",
     "RaceServer 是独立项目，只进行日常驾驶和圈速分析时无需安装。": "RaceServer is a separate project and is not required for daily driving or lap analysis.",
     "参赛车手": "Drivers",
     "额外 OB 席位": "Additional observer slots",

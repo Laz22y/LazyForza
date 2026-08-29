@@ -243,8 +243,11 @@ public sealed record UpdateReleaseInfo(
     UpdateSourceKind Source,
     UpdateReleaseType Type = UpdateReleaseType.Fix,
     UpdateReleaseAsset? Installer = null,
-    UpdateReleaseAsset? InstallerChecksum = null)
+    UpdateReleaseAsset? InstallerChecksum = null,
+    string? VersionLabel = null)
 {
+    public string ArtifactVersion => VersionLabel ?? Version.ToString(3);
+
     public string SourceName => Source switch
     {
         UpdateSourceKind.GitCode => "GitCode",
@@ -274,7 +277,11 @@ public sealed record PreparedUpdate(
     string WorkDirectory,
     string PackageRoot,
     string ArchivePath,
-    UpdatePackageKind Kind = UpdatePackageKind.Portable);
+    UpdatePackageKind Kind = UpdatePackageKind.Portable,
+    string? VersionLabel = null)
+{
+    public string ArtifactVersion => VersionLabel ?? Version.ToString(3);
+}
 
 public sealed class UpdateException : Exception
 {

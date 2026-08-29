@@ -65,8 +65,8 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
             ? release.InstallerChecksum
             : release.Checksum;
         var expectedName = packageKind == UpdatePackageKind.Installer
-            ? $"LazyForza-{release.Version.ToString(3)}-win-x64-setup.exe"
-            : $"LazyForza-{release.Version.ToString(3)}-win-x64.zip";
+            ? $"LazyForza-{release.ArtifactVersion}-win-x64-setup.exe"
+            : $"LazyForza-{release.ArtifactVersion}-win-x64.zip";
         if (!string.Equals(artifact.Name, expectedName, StringComparison.OrdinalIgnoreCase) ||
             artifact.Size is <= 0 or > MaxArchiveBytes)
             throw new UpdateException("待下载的发行版文件与版本信息不匹配。");
@@ -76,7 +76,7 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
         Directory.CreateDirectory(updatesRoot);
         var workDirectory = Path.Combine(
             Path.GetFullPath(updatesRoot),
-            $"{release.Version.ToString(3)}-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}");
+            $"{release.ArtifactVersion}-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workDirectory);
         try
         {
@@ -112,7 +112,8 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
                     workDirectory,
                     string.Empty,
                     archivePath,
-                    UpdatePackageKind.Installer);
+                    UpdatePackageKind.Installer,
+                    release.VersionLabel);
             }
 
             var extractionRoot = Path.Combine(workDirectory, "package");
@@ -127,7 +128,8 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
                 workDirectory,
                 packageRoot,
                 archivePath,
-                UpdatePackageKind.Portable);
+                UpdatePackageKind.Portable,
+                release.VersionLabel);
         }
         catch
         {

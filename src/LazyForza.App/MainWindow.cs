@@ -144,6 +144,11 @@ internal sealed partial class MainWindow : Window
 
     public async Task CheckForUpdatesOnStartupAsync()
     {
+        if (updateManager.IsUpdateMandatory)
+        {
+            await EnforcePreviewUpdateAsync();
+            return;
+        }
         if (!updateManager.CheckOnStartup) return;
         try
         {
@@ -157,6 +162,76 @@ internal sealed partial class MainWindow : Window
         catch (Exception exception)
         {
             updateManager.ReportFailure("Startup update check failed", exception);
+        }
+    }
+
+    private async Task EnforcePreviewUpdateAsync(TextBlock? status = null)
+    {
+        while (!lifetimeCancellation.IsCancellationRequested)
+        {
+            IsEnabled = false;
+            var progressWindow = new UpdateProgressWindow(
+                this,
+                ApplicationVersionInfo.Display,
+                canCancel: false);
+            progressWindow.Show();
+            try
+            {
+                progressWindow.Progress.Report(new UpdateProgress("正在检查预览版强制更新…"));
+                var release = await updateManager.CheckAsync(lifetimeCancellation.Token);
+                if (release is null)
+                {
+                    progressWindow.Finish();
+                    IsEnabled = true;
+                    status?.SetCurrentValue(
+                        TextBlock.TextProperty,
+                        AppLocalization.Format(
+                            "settings.update.previewCurrent",
+                            "当前预览版 {0} 已是最新版本。",
+                            ApplicationVersionInfo.Display));
+                    return;
+                }
+
+                progressWindow.Progress.Report(new UpdateProgress(
+                    AppLocalization.Format(
+                        "update.preview.required",
+                        "发现必需更新 {0}，正在准备下载…",
+                        release.Tag)));
+                var prepared = await updateManager.DownloadAsync(
+                    release,
+                    progressWindow.Progress,
+                    lifetimeCancellation.Token);
+                progressWindow.Finish();
+                status?.SetCurrentValue(
+                    TextBlock.TextProperty,
+                    AppLocalization.Literal("更新已校验，正在重启安装…"));
+                updateManager.InstallAndRestart(prepared);
+                return;
+            }
+            catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested)
+            {
+                progressWindow.Finish();
+                return;
+            }
+            catch (Exception exception)
+            {
+                progressWindow.Finish();
+                IsEnabled = true;
+                updateManager.ReportFailure("Mandatory preview update failed", exception);
+                var retry = AppDialog.ShowChoice(
+                    this,
+                    AppLocalization.Format(
+                        "update.preview.failed",
+                        "预览版必须完成更新检查和安装后才能继续使用。\n\n{0}",
+                        AppLocalization.Literal(exception.Message)),
+                    AppLocalization.Literal("预览版更新失败"),
+                    AppLocalization.Literal("重试"),
+                    AppLocalization.Literal("退出"),
+                    MessageBoxImage.Error);
+                if (retry == MessageBoxResult.Yes) continue;
+                App.RequestExit();
+                return;
+            }
         }
     }
 
@@ -2736,7 +2811,7 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        var progressWindow = new UpdateProgressWindow(this, release.Version.ToString(3));
+        var progressWindow = new UpdateProgressWindow(this, release.ArtifactVersion);
         progressWindow.Show();
         try
         {

@@ -13,6 +13,7 @@ internal enum ApplicationDistributionKind
 {
     Installed,
     Portable,
+    Preview,
     Development
 }
 
@@ -22,13 +23,16 @@ internal sealed record ApplicationDistribution(
     string InitializationStatePath)
 {
     public const string InstalledMarkerFileName = "LazyForza.Installation";
+    public const string PreviewMarkerFileName = "LazyForza.Preview";
     public const string DevelopmentMarkerFileName = "LazyForza.Development";
 
     public bool IsInstalled => Kind == ApplicationDistributionKind.Installed;
 
+    public bool IsPreview => Kind == ApplicationDistributionKind.Preview;
+
     public bool IsDevelopment => Kind == ApplicationDistributionKind.Development;
 
-    public bool DefaultUpdateCheckEnabled => IsInstalled;
+    public bool DefaultUpdateCheckEnabled => IsInstalled || IsPreview;
 
     public static ApplicationDistribution Detect(
         string baseDirectory,
@@ -40,16 +44,22 @@ internal sealed record ApplicationDistribution(
                                          Environment.GetFolderPath(
                                              Environment.SpecialFolder.LocalApplicationData));
         var installed = File.Exists(Path.Combine(applicationRoot, InstalledMarkerFileName));
-        var development = !installed &&
+        var preview = !installed &&
+                      File.Exists(Path.Combine(applicationRoot, PreviewMarkerFileName));
+        var development = !installed && !preview &&
                           File.Exists(Path.Combine(applicationRoot, DevelopmentMarkerFileName));
         var kind = installed
             ? ApplicationDistributionKind.Installed
-            : development
-                ? ApplicationDistributionKind.Development
-                : ApplicationDistributionKind.Portable;
+            : preview
+                ? ApplicationDistributionKind.Preview
+                : development
+                    ? ApplicationDistributionKind.Development
+                    : ApplicationDistributionKind.Portable;
         var stateRoot = installed
             ? Path.Combine(localRoot, "LazyForza")
-            : Path.Combine(applicationRoot, "LazyForza_Data");
+            : Path.Combine(
+                applicationRoot,
+                preview ? "LazyForza_Preview_Data" : "LazyForza_Data");
         return new ApplicationDistribution(
             kind,
             Path.Combine(stateRoot, "startup-profile.json"),

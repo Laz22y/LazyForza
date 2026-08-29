@@ -19,14 +19,19 @@ internal sealed partial class MainWindow
         var updateToggle = new ToggleButton
         {
             IsChecked = updateManager.CheckOnStartup,
+            IsEnabled = !updateManager.IsUpdateMandatory,
             HorizontalAlignment = HorizontalAlignment.Right,
             Padding = new Thickness(12, 7, 12, 7)
         };
         void RefreshUpdateToggle() =>
-            updateToggle.Content = AppLocalization.Format(
-                "settings.update.checkOnStartup",
-                "启动检查：{0}",
-                AppLocalization.Literal(updateToggle.IsChecked == true ? "开" : "关"));
+            updateToggle.Content = updateManager.IsUpdateMandatory
+                ? AppLocalization.Text(
+                    "settings.update.previewForced",
+                    "启动检查：强制开启")
+                : AppLocalization.Format(
+                    "settings.update.checkOnStartup",
+                    "启动检查：{0}",
+                    AppLocalization.Literal(updateToggle.IsChecked == true ? "开" : "关"));
         RefreshUpdateToggle();
         updateToggle.Click += (_, _) =>
         {
@@ -46,16 +51,20 @@ internal sealed partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Right,
             SelectedValuePath = nameof(ComboBoxItem.Tag)
         };
+        if (!updateManager.IsUpdateMandatory)
+            sourceSelector.Items.Add(new ComboBoxItem
+            {
+                Content = AppLocalization.Text("settings.update.gitcode", "GitCode（中国大陆优先）"),
+                Tag = UpdateSourceKind.GitCode
+            });
         sourceSelector.Items.Add(new ComboBoxItem
         {
-            Content = AppLocalization.Text("settings.update.gitcode", "GitCode（中国大陆优先）"),
-            Tag = UpdateSourceKind.GitCode
-        });
-        sourceSelector.Items.Add(new ComboBoxItem
-        {
-            Content = "GitHub",
+            Content = updateManager.IsUpdateMandatory
+                ? AppLocalization.Text("settings.update.previewGithub", "GitHub（预览版专用）")
+                : "GitHub",
             Tag = UpdateSourceKind.GitHub
         });
+        sourceSelector.IsEnabled = !updateManager.IsUpdateMandatory;
         sourceSelector.SelectedValue = updateManager.PreferredSource;
         sourceSelector.SelectionChanged += (_, _) =>
         {
@@ -67,16 +76,21 @@ internal sealed partial class MainWindow
         panel.Children.Add(sourceSelector);
 
         var updateStatus = Label(
-            AppLocalization.Format(
-                updateManager.CanInstallAutomatically
-                    ? "settings.update.statusInstall"
-                    : "settings.update.statusDevelopment",
-                updateManager.CanInstallAutomatically
-                    ? "当前版本 {0} · 首选 {1}，失败时自动尝试 {2}。发现新版后由你确认，程序不会强制更新。"
-                    : "当前版本 {0} · 首选 {1}，失败时自动尝试 {2}。开发构建仅检查版本，不覆盖开发目录。",
-                CurrentApplicationVersion(),
-                updateManager.PreferredSourceName,
-                updateManager.FallbackSourceName),
+            updateManager.IsUpdateMandatory
+                ? AppLocalization.Format(
+                    "settings.update.statusPreview",
+                    "当前预览版 {0} · 每次启动强制检查 GitHub 预览通道，发现新版后自动安装。",
+                    CurrentApplicationVersion())
+                : AppLocalization.Format(
+                    updateManager.CanInstallAutomatically
+                        ? "settings.update.statusInstall"
+                        : "settings.update.statusDevelopment",
+                    updateManager.CanInstallAutomatically
+                        ? "当前版本 {0} · 首选 {1}，失败时自动尝试 {2}。发现新版后由你确认，程序不会强制更新。"
+                        : "当前版本 {0} · 首选 {1}，失败时自动尝试 {2}。开发构建仅检查版本，不覆盖开发目录。",
+                    CurrentApplicationVersion(),
+                    updateManager.PreferredSourceName,
+                    updateManager.FallbackSourceName),
             12,
             FontWeights.Normal,
             "MutedBrush");
@@ -101,6 +115,11 @@ internal sealed partial class MainWindow
                 updateManager.FallbackSourceName);
             try
             {
+                if (updateManager.IsUpdateMandatory)
+                {
+                    await EnforcePreviewUpdateAsync(updateStatus);
+                    return;
+                }
                 var release = await updateManager.CheckAsync(lifetimeCancellation.Token);
                 if (release is null)
                 {

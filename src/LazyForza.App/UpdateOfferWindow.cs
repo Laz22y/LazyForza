@@ -47,7 +47,7 @@ internal sealed class UpdateOfferWindow : Window
         var version = new StackPanel { Margin = new Thickness(0, 10, 0, 13) };
         version.Children.Add(new TextBlock
         {
-            Text = $"LazyForza {release.Version.ToString(3)}",
+            Text = $"LazyForza {release.ArtifactVersion}",
             FontSize = 16,
             FontWeight = FontWeights.SemiBold
         });

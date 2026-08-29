@@ -103,6 +103,17 @@ public sealed class StartupProfileTests
             Assert.IsFalse(portable.DefaultUpdateCheckEnabled);
 
             File.WriteAllText(
+                Path.Combine(applicationRoot, ApplicationDistribution.PreviewMarkerFileName),
+                "preview-package");
+            var preview = ApplicationDistribution.Detect(applicationRoot, localRoot);
+            Assert.AreEqual(ApplicationDistributionKind.Preview, preview.Kind);
+            Assert.AreEqual(
+                Path.Combine(applicationRoot, "LazyForza_Preview_Data", "initialization-state.json"),
+                preview.InitializationStatePath);
+            Assert.IsTrue(preview.DefaultUpdateCheckEnabled);
+            File.Delete(Path.Combine(applicationRoot, ApplicationDistribution.PreviewMarkerFileName));
+
+            File.WriteAllText(
                 Path.Combine(applicationRoot, ApplicationDistribution.DevelopmentMarkerFileName),
                 "development-preview");
             var development = ApplicationDistribution.Detect(applicationRoot, localRoot);

@@ -77,6 +77,45 @@ public sealed class UpdatePreferenceTests
         }
     }
 
+    [TestMethod]
+    public void PreviewForcesStartupChecksAndGitHubWithoutChangingStablePreferences()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"lazyforza-preview-update-{Guid.NewGuid():N}");
+        try
+        {
+            var directories = new DataDirectoryService(root);
+            directories.EnsureCreated();
+            using var store = new LazyForzaStore(directories.DatabasePath);
+            using var preview = new ApplicationUpdateManager(
+                store,
+                directories,
+                Distribution(root, ApplicationDistributionKind.Preview),
+                _ => { });
+
+            Assert.IsTrue(preview.IsUpdateMandatory);
+            Assert.IsTrue(preview.CheckOnStartup);
+            Assert.AreEqual(UpdateSourceKind.GitHub, preview.PreferredSource);
+
+            preview.CheckOnStartup = false;
+            preview.PreferredSource = UpdateSourceKind.GitCode;
+
+            Assert.IsTrue(preview.CheckOnStartup);
+            Assert.AreEqual(UpdateSourceKind.GitHub, preview.PreferredSource);
+
+            using var stable = new ApplicationUpdateManager(
+                store,
+                directories,
+                Distribution(root, ApplicationDistributionKind.Installed),
+                _ => { });
+            Assert.IsFalse(stable.IsUpdateMandatory);
+            Assert.AreEqual(UpdateSourceKind.GitCode, stable.PreferredSource);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     private static ApplicationDistribution Distribution(
         string root,
         ApplicationDistributionKind kind) =>

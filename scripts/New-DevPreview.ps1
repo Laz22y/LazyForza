@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidatePattern('^\d+\.\d+\.\d+-[0-9A-Za-z.-]+$')]
+    [ValidatePattern('^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-[0-9A-Za-z-]+([.-][0-9A-Za-z-]+)*$')]
     [string]$Version,
 
     [ValidateSet('win-x64')]
@@ -71,7 +71,7 @@ Get-ChildItem -LiteralPath $publishPath -Filter '*.pdb' -File -ErrorAction Silen
     Remove-Item -Force
 Copy-Item -Path (Join-Path $publishPath '*') -Destination $stagePath -Recurse
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\README.txt') -Destination $stagePath
-Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\LazyForza.Development') -Destination $stagePath
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\LazyForza.Preview') -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') `
     -Destination (Join-Path $stagePath 'THIRD_PARTY_NOTICES.txt')
 

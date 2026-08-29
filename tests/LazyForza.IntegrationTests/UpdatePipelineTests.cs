@@ -12,6 +12,94 @@ namespace LazyForza.IntegrationTests;
 public sealed class UpdatePipelineTests
 {
     [TestMethod]
+    public void SemanticVersionOrdersPreviewIdentifiersAndStableRelease()
+    {
+        var alpha1 = UpdateSemanticVersion.Parse("1.5.1-alpha-1");
+        var alpha2 = UpdateSemanticVersion.Parse("v1.5.1-alpha-2");
+        var alpha10 = UpdateSemanticVersion.Parse("1.5.1-alpha-10+build.5");
+        var beta1 = UpdateSemanticVersion.Parse("1.5.1-beta-1");
+        var stable = UpdateSemanticVersion.Parse("1.5.1");
+
+        Assert.IsTrue(alpha1.CompareTo(alpha2) < 0);
+        Assert.IsTrue(alpha2.CompareTo(alpha10) < 0);
+        Assert.IsTrue(alpha10.CompareTo(beta1) < 0);
+        Assert.IsTrue(beta1.CompareTo(stable) < 0);
+        Assert.AreEqual("1.5.1-alpha-10", alpha10.ToString());
+        Assert.IsFalse(UpdateSemanticVersion.TryParse("1.5.1-alpha.01", out _));
+    }
+
+    [TestMethod]
+    public async Task PreviewChannelSelectsHighestPublishedSemanticPreview()
+    {
+        var json = PreviewReleaseListJson(
+            ("v1.5.1-alpha-2", true, false),
+            ("v1.5.1-alpha-10", true, false),
+            ("v1.5.1-alpha-99", true, true),
+            ("v1.5.0", false, false));
+        using var http = new HttpClient(new FakeHttpHandler(request =>
+            request.RequestUri == GitHubPreviewReleaseClient.ReleasesApi
+                ? JsonResponse(json)
+                : new HttpResponseMessage(HttpStatusCode.NotFound)));
+        using var client = new GitHubPreviewReleaseClient(http);
+
+        var update = await client.CheckForUpdateAsync(
+            UpdateSemanticVersion.Parse("1.5.1-alpha-1"),
+            CancellationToken.None);
+
+        Assert.IsNotNull(update);
+        Assert.AreEqual("1.5.1-alpha-10", update.VersionLabel);
+        Assert.AreEqual("1.5.1-alpha-10", update.ArtifactVersion);
+        Assert.AreEqual(
+            "LazyForza-1.5.1-alpha-10-win-x64.zip",
+            update.Package.Name);
+        Assert.IsNull(update.Installer);
+    }
+
+    [TestMethod]
+    public async Task PreviewChannelMovesToMatchingStableReleaseAndStableChannelStaysSeparate()
+    {
+        var previewJson = PreviewReleaseListJson(
+            ("v1.5.1-alpha-8", true, false),
+            ("v1.5.1", false, false));
+        var stableJson = ReleaseJson(
+            "v1.5.1",
+            packageSize: 7,
+            digest: $"sha256:{new string('a', 64)}");
+        var previewRequests = 0;
+        var stableRequests = 0;
+        using var http = new HttpClient(new FakeHttpHandler(request =>
+        {
+            if (request.RequestUri == GitHubPreviewReleaseClient.ReleasesApi)
+            {
+                previewRequests++;
+                return JsonResponse(previewJson);
+            }
+            if (request.RequestUri == GitHubReleaseClient.LatestReleaseApi)
+            {
+                stableRequests++;
+                return JsonResponse(stableJson);
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }));
+        using var preview = new GitHubPreviewReleaseClient(http);
+        using var stable = new GitHubReleaseClient(http);
+
+        var previewUpdate = await preview.CheckForUpdateAsync(
+            UpdateSemanticVersion.Parse("1.5.1-alpha-7"),
+            CancellationToken.None);
+        var stableUpdate = await stable.CheckForUpdateAsync(
+            new Version(1, 5, 0),
+            CancellationToken.None);
+
+        Assert.IsNotNull(previewUpdate);
+        Assert.AreEqual("1.5.1", previewUpdate.ArtifactVersion);
+        Assert.IsNotNull(stableUpdate);
+        Assert.AreEqual("1.5.1", stableUpdate.ArtifactVersion);
+        Assert.AreEqual(1, previewRequests);
+        Assert.AreEqual(1, stableRequests);
+    }
+
+    [TestMethod]
     public async Task LatestStableReleaseSelectsExactWinX64AssetAndIgnoresCurrentVersion()
     {
         var packageBytes = Encoding.UTF8.GetBytes("package");
@@ -581,6 +669,64 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
+    public async Task PreviewDownloadUsesSemanticArtifactNameAndPreservesVersionLabel()
+    {
+        var root = CreateTempDirectory("lazyforza-preview-download");
+        try
+        {
+            var archive = BuildPackageArchive(new Dictionary<string, byte[]>
+            {
+                ["LazyForza.App.exe"] = Encoding.UTF8.GetBytes("preview-app"),
+                ["BUILDINFO.txt"] = Encoding.UTF8.GetBytes("LazyForza 1.5.1-alpha-2"),
+                ["LazyForza.Preview"] = Encoding.UTF8.GetBytes("preview-package")
+            });
+            var hash = Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant();
+            const string version = "1.5.1-alpha-2";
+            var packageName = $"LazyForza-{version}-win-x64.zip";
+            var packageUri = new Uri(
+                $"https://github.com/Laz22y/LazyForza/releases/download/v{version}/{packageName}");
+            using var http = new HttpClient(new FakeHttpHandler(request =>
+                request.RequestUri == packageUri
+                    ? new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new ByteArrayContent(archive)
+                    }
+                    : new HttpResponseMessage(HttpStatusCode.NotFound)));
+            using var client = new GitHubPreviewReleaseClient(http);
+            var release = new UpdateReleaseInfo(
+                new Version(1, 5, 1),
+                $"v{version}",
+                $"LazyForza {version}",
+                string.Empty,
+                new Uri($"https://github.com/Laz22y/LazyForza/releases/tag/v{version}"),
+                new UpdateReleaseAsset(
+                    packageName,
+                    packageUri,
+                    archive.Length,
+                    $"sha256:{hash}"),
+                null,
+                UpdateSourceKind.GitHub,
+                VersionLabel: version);
+
+            var prepared = await client.DownloadAndPrepareAsync(
+                release,
+                root,
+                new Progress<UpdateProgress>(),
+                CancellationToken.None);
+
+            Assert.AreEqual(version, prepared.ArtifactVersion);
+            Assert.IsTrue(File.Exists(Path.Combine(prepared.PackageRoot, "LazyForza.Preview")));
+            await UpdatePackageVerifier.VerifyManifestAsync(
+                prepared.PackageRoot,
+                CancellationToken.None);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
     public async Task LegacyReleaseCanUseSeparateSha256Asset()
     {
         var root = CreateTempDirectory("lazyforza-update-checksum");
@@ -708,7 +854,8 @@ public sealed class UpdatePipelineTests
             {
                 ["LazyForza.App.exe"] = Encoding.UTF8.GetBytes("old-app"),
                 ["BUILDINFO.txt"] = Encoding.UTF8.GetBytes("old-build"),
-                ["stale-runtime.dll"] = Encoding.UTF8.GetBytes("stale")
+                ["stale-runtime.dll"] = Encoding.UTF8.GetBytes("stale"),
+                ["LazyForza.Preview"] = Encoding.UTF8.GetBytes("preview-package")
             });
             File.WriteAllText(Path.Combine(target, "user-note.txt"), "preserve");
             WritePackage(source, new Dictionary<string, byte[]>
@@ -730,6 +877,7 @@ public sealed class UpdatePipelineTests
                 "satellite",
                 File.ReadAllText(Path.Combine(target, "zh-Hans", "PresentationCore.resources.dll")));
             Assert.IsFalse(File.Exists(Path.Combine(target, "stale-runtime.dll")));
+            Assert.IsFalse(File.Exists(Path.Combine(target, "LazyForza.Preview")));
             Assert.AreEqual("preserve", File.ReadAllText(Path.Combine(target, "user-note.txt")));
             Assert.IsTrue(File.Exists(Path.Combine(work, "install.complete")));
         }
@@ -934,6 +1082,35 @@ public sealed class UpdatePipelineTests
             }
         });
     }
+
+    private static string PreviewReleaseListJson(
+        params (string Tag, bool Prerelease, bool Draft)[] releases) =>
+        JsonSerializer.Serialize(releases.Select(release =>
+        {
+            var version = release.Tag.TrimStart('v');
+            var packageName = $"LazyForza-{version}-win-x64.zip";
+            return new
+            {
+                tag_name = release.Tag,
+                name = $"LazyForza {version}",
+                body = "Preview",
+                html_url = $"https://github.com/Laz22y/LazyForza/releases/tag/{release.Tag}",
+                draft = release.Draft,
+                prerelease = release.Prerelease,
+                assets = new[]
+                {
+                    new
+                    {
+                        name = packageName,
+                        state = "uploaded",
+                        size = 1024,
+                        digest = $"sha256:{new string('a', 64)}",
+                        browser_download_url =
+                            $"https://github.com/Laz22y/LazyForza/releases/download/{release.Tag}/{packageName}"
+                    }
+                }
+            };
+        }));
 
     private static HttpResponseMessage JsonResponse(string json) =>
         new(HttpStatusCode.OK)
