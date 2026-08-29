@@ -34,7 +34,7 @@ LazyForza 是 Windows 10/11 x64 的 .NET 9 WPF 应用。它接收 FH6 官方 324
 | `LazyForza.Modules.Abstractions` | 模块生命周期、遥测订阅和 HUD contribution 契约 | 具体模块行为 |
 | `LazyForza.Modules.Dashboard` | 仪表盘状态与车辆学习编排 | WPF 窗口实现 |
 | `LazyForza.Modules.LapAnalysis` | 普通赛道与圈状态、分析数据编排 | 第二套 UDP 接收器 |
-| `LazyForza.Modules.EstateRace` | 地产几何、计时、维修区、赛事网络客户端和协议副本 | 服务端权威排名/处罚 |
+| `LazyForza.Modules.EstateRace` | 地产几何、计时、维修区、赛事网络客户端和生成的协议模型 | 服务端权威排名/处罚 |
 | `LazyForza.Overlay` | WPF HUD、布局持久化映射、Win32 无焦点/穿透行为 | UDP 解析、赛事计算 |
 | `LazyForza.Update` | 更新检查、下载与包完整性验证 | 主窗口业务 |
 | `LazyForza.App` | WPF 主壳、页面、设置、模块装配和进程生命周期 | 可复用纯算法 |
@@ -65,7 +65,7 @@ LazyForza 是 Windows 10/11 x64 的 .NET 9 WPF 应用。它接收 FH6 官方 324
 | 换挡或车辆识别 | `Analysis`、Dashboard 学习编排、车辆指纹与 Storage、相应 Analysis/Storage/Integration 测试 |
 | 普通赛道、计圈或 Delta | `Analysis`、`Modules.LapAnalysis`、Storage 的路线/圈/分段、Lap HUD、赛道与圈速测试、Replay 回归 |
 | 地产录入、几何、维修区或切弯 | `Modules.EstateRace` 的模型/状态机/几何、`App/MainWindow.EstateRace*`、Storage 迁移/导入导出、Estate 集成测试；改变赛事含义时再同步服务端 |
-| 地产赛事网络协议 | 客户端 `EstateRaceWireProtocol.cs` 与 `EstateRaceModels.cs`，RaceServer 的 .NET Protocol/Core/Web、Cloudflare `protocol.ts`/`race-core.ts`/路由和双端测试 |
+| 地产赛事网络协议 | RaceServer 的 `protocol/race-protocol.schema.json`、三端生成文件、客户端 `EstateRaceWireProtocol.cs` 辅助逻辑、双权威核心/路由和双端测试 |
 | 数据库结构或持久化 | `LazyForzaStore.CurrentSchemaVersion`、顺序迁移、所有读写路径、备份/恢复、交换文件、`StorageTests` 和相关集成测试 |
 | WPF 主界面或设置 | `App` 的 XAML/代码后置/本地化与设置持久化、Windows build、实际窗口尺寸和中英文切换人工检查 |
 | Overlay 布局或动画 | `Overlay` 状态/布局/Win32 互操作、App 布局编辑器、持久化兼容、`ModuleAndOverlayTests`、多 DPI/焦点/穿透人工验证 |
@@ -76,20 +76,23 @@ LazyForza 是 Windows 10/11 x64 的 .NET 9 WPF 应用。它接收 FH6 官方 324
 
 ## 跨仓库契约
 
-地产赛事协议没有共享生成器，存在三份手工维护的模型：
+地产赛事协议由 RaceServer 仓库中的单一 Schema 生成：
 
-- 客户端：`src/LazyForza.Modules.EstateRace/EstateRaceWireProtocol.cs`、`EstateRaceModels.cs`；
-- 原生服务端：`../LazyForza.RaceServer\src\LazyForza.RaceServer.Protocol\RaceProtocolModels.cs`；
-- Cloudflare：`../LazyForza.RaceServer\cloudflare\src\protocol.ts`。
+- 唯一源：`../LazyForza.RaceServer\protocol\race-protocol.schema.json`；
+- 客户端产物：`src/LazyForza.Modules.EstateRace/EstateRaceProtocol.g.cs`；
+- 原生服务端产物：`../LazyForza.RaceServer\src\LazyForza.RaceServer.Protocol\RaceProtocolModels.g.cs`；
+- Cloudflare 产物：`../LazyForza.RaceServer\cloudflare\src\protocol.generated.ts`。
+
+不要手工修改生成文件。协议辅助逻辑仍分别位于客户端 `EstateRaceWireProtocol.cs`、原生 `RaceProtocolJson.cs`/`RaceProtocolValidation.cs` 和 Cloudflare `protocol.ts`。在两个仓库并列存在的开发环境中，从 RaceServer 根目录运行 `node scripts/generate-protocol.mjs`，会同时更新三端产物；客户端独立构建使用已提交的生成文件，不依赖 RaceServer 或 Node.js。
 
 它们使用协议 v2、camelCase JSON 和字符串枚举，单条消息上限为 64 KiB。新增或改变 message type、DTO 字段、枚举、默认值、可空性或错误语义时，必须：
 
 1. 明确旧客户端/旧服务端读取新消息的行为；优先使用可选字段保持兼容；
-2. 同步三份模型；
+2. 修改单一 Schema 并重新生成三端模型；
 3. 同步 `.NET RaceCoordinator` 与 `cloudflare/src/race-core.ts` 的权威行为；
 4. 同步 ASP.NET 路由/WebSocket 与 `cloudflare/src/index.ts`；
 5. 补客户端网络流测试、RaceServer MSTest 和 Cloudflare Vitest；
-6. 若 Web 总控暴露该能力，同步原生 `wwwroot` 与 `cloudflare/public`。
+6. 若 Web 总控暴露该能力，只修改原生 `wwwroot`，由 RaceServer 构建生成 `cloudflare/public`。
 
 遥测位置是客户端报告，圈数、排名、旗语、处罚和阶段结果由服务端权威状态决定。圈完成和维修完成使用独立事件与确认，不能降级为 latest-wins 遥测字段。
 
@@ -157,4 +160,4 @@ Demo、Replay 和 `docs/qa` 的截图只证明确定性数据下的界面，不�
 
 ## 完成检查
 
-交付具体改动前确认：修改位于正确层；所有副本与跨仓库实现已同步；旧数据库/文件/协议兼容已处理；回归测试覆盖根因；执行了与风险匹配的 build/test；人工或实机未验证的部分已明确说明；相关现行文档没有继续描述旧行为。
+交付具体改动前确认：修改位于正确层；协议 Schema、生成产物与跨仓库实现已同步；旧数据库/文件/协议兼容已处理；回归测试覆盖根因；执行了与风险匹配的 build/test；人工或实机未验证的部分已明确说明；相关现行文档没有继续描述旧行为。
