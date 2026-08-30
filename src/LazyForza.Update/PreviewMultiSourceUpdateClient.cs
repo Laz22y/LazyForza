@@ -89,6 +89,10 @@ public sealed class PreviewMultiSourceUpdateClient : IDisposable
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(release);
+        if (!UpdateSemanticVersion.TryParse(release.ArtifactVersion, out var releaseVersion) ||
+            !releaseVersion.IsPrerelease)
+            throw new UpdateException("预览版更新通道拒绝安装正式版本。");
+
         var alternate = release.Source == UpdateSourceKind.GitCode
             ? UpdateSourceKind.GitHub
             : UpdateSourceKind.GitCode;

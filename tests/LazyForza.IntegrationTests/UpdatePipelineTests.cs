@@ -56,7 +56,7 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
-    public async Task GitCodePreviewChannelSelectsHighestPublishedSemanticRelease()
+    public async Task GitCodePreviewChannelSelectsHighestPublishedSemanticPreview()
     {
         var json = GitCodePreviewReleaseListJson(
             ("v1.5.1-alpha-2", true),
@@ -82,7 +82,7 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
-    public async Task GitCodePreviewChannelMovesToMatchingStableRelease()
+    public async Task GitCodePreviewChannelIgnoresMatchingStableRelease()
     {
         var json = GitCodePreviewReleaseListJson(
             ("v1.5.1-alpha-8", true),
@@ -98,7 +98,7 @@ public sealed class UpdatePipelineTests
             CancellationToken.None);
 
         Assert.IsNotNull(update);
-        Assert.AreEqual("1.5.1", update.ArtifactVersion);
+        Assert.AreEqual("1.5.1-alpha-8", update.ArtifactVersion);
         Assert.AreEqual(UpdateSourceKind.GitCode, update.Source);
     }
 
@@ -171,7 +171,7 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
-    public async Task PreviewChannelMovesToMatchingStableReleaseAndStableChannelStaysSeparate()
+    public async Task PreviewChannelIgnoresMatchingStableReleaseAndStableChannelStaysSeparate()
     {
         var previewJson = PreviewReleaseListJson(
             ("v1.5.1-alpha-8", true, false),
@@ -207,11 +207,54 @@ public sealed class UpdatePipelineTests
             CancellationToken.None);
 
         Assert.IsNotNull(previewUpdate);
-        Assert.AreEqual("1.5.1", previewUpdate.ArtifactVersion);
+        Assert.AreEqual("1.5.1-alpha-8", previewUpdate.ArtifactVersion);
         Assert.IsNotNull(stableUpdate);
         Assert.AreEqual("1.5.1", stableUpdate.ArtifactVersion);
         Assert.AreEqual(1, previewRequests);
         Assert.AreEqual(1, stableRequests);
+    }
+
+    [TestMethod]
+    public async Task PreviewDownloadRejectsStableReleaseBeforeAccessingAnySource()
+    {
+        var requests = 0;
+        using var gitCodeHttp = new HttpClient(new FakeHttpHandler(_ =>
+        {
+            requests++;
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }));
+        using var gitHubHttp = new HttpClient(new FakeHttpHandler(_ =>
+        {
+            requests++;
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }));
+        using var client = new PreviewMultiSourceUpdateClient(
+            new GitCodePreviewReleaseClient(gitCodeHttp),
+            new GitHubPreviewReleaseClient(gitHubHttp));
+        var release = new UpdateReleaseInfo(
+            new Version(1, 5, 1),
+            "v1.5.1",
+            "LazyForza 1.5.1",
+            string.Empty,
+            new Uri("https://github.com/Laz22y/LazyForza/releases/tag/v1.5.1"),
+            new UpdateReleaseAsset(
+                "LazyForza-1.5.1-win-x64.zip",
+                new Uri("https://github.com/Laz22y/LazyForza/releases/download/v1.5.1/LazyForza-1.5.1-win-x64.zip"),
+                1024,
+                $"sha256:{new string('a', 64)}"),
+            null,
+            UpdateSourceKind.GitHub,
+            VersionLabel: "1.5.1");
+
+        var exception = await Assert.ThrowsExactlyAsync<UpdateException>(() =>
+            client.DownloadAndPrepareAsync(
+                release,
+                Path.GetTempPath(),
+                new Progress<UpdateProgress>(),
+                CancellationToken.None));
+
+        StringAssert.Contains(exception.Message, "拒绝安装正式版本");
+        Assert.AreEqual(0, requests);
     }
 
     [TestMethod]

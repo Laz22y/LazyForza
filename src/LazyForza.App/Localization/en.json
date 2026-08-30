@@ -1187,7 +1187,7 @@
   ,"update.offer.skipped": "Skipped {0}."
   ,"update.install.failedMessage": "The update was not installed. The current version is unchanged.\n\n{0}"
   ,"settings.update.previewForced": "Startup checks: always on"
-  ,"settings.update.statusPreview": "Current preview {0} · Update checks are required on every startup; {1} is preferred and {2} is used as fallback. Available updates are installed automatically."
+  ,"settings.update.statusPreview": "Current preview {0} · Update checks are required on every startup; {1} is preferred and {2} is used as fallback. Only newer previews are detected and installed; stable releases never enter this channel."
   ,"settings.update.previewCurrent": "Preview {0} is up to date."
   ,"update.preview.required": "Required update {0} found. Preparing download…"
   ,"update.preview.failed": "This preview must complete its update check and installation before it can continue.\n\n{0}"

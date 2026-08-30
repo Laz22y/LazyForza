@@ -69,7 +69,8 @@ public sealed class GitHubPreviewReleaseClient : UpdateReleaseClientBase
                 })
                 .Where(candidate =>
                     candidate.Parsed is not null &&
-                    candidate.Parsed.IsPrerelease == candidate.Release.Prerelease &&
+                    candidate.Release.Prerelease &&
+                    candidate.Parsed.IsPrerelease &&
                     candidate.Parsed.CompareTo(currentVersion) > 0)
                 .OrderByDescending(candidate => candidate.Parsed)
                 .FirstOrDefault();

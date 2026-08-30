@@ -75,7 +75,7 @@ internal sealed partial class MainWindow
             updateManager.IsUpdateMandatory
                 ? AppLocalization.Format(
                     "settings.update.statusPreview",
-                    "当前预览版 {0} · 每次启动强制检查；首选 {1}，失败时自动尝试 {2}。发现新版后自动安装。",
+                    "当前预览版 {0} · 每次启动强制检查；首选 {1}，失败时自动尝试 {2}。只检测并安装更高预览版，正式版不会进入此通道。",
                     CurrentApplicationVersion(),
                     updateManager.PreferredSourceName,
                     updateManager.FallbackSourceName)
