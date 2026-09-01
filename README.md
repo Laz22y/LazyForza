@@ -17,7 +17,7 @@
 
 LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、不注入 DLL、不修改游戏进程。设置、圈速、车辆学习和录制默认保存在本机。
 
-1.5.0 新增完整中英文界面、首次启动指引、玩家代号、安装版与便携版独立生命周期，并改善地产赛事 Delta、维修确认、弱网隔离和高帧率下的 HUD 流畅度。
+1.5.1 新增六种可即时切换的界面强调色、FH5 地图坐标采集工具，以及地产赛事服务器收藏与连接测试；同时统一地产赛事协议模型生成源，并隔离正式版与预览版更新通道。
 
 ## 功能
 
@@ -57,6 +57,8 @@ LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 - 维修区、车队、赛道文件托管与阶段赛果归档；
 - 客户端可收藏常用服务器并在进入房间前测试可达性和协议兼容性；
 - Web 总控支持超管、管理员和裁判多账号分权；
+- 发车前检查仅作警告，总控可确认后强制发车；
+- 可复用赛事规则模板、可迁移赛事项目包和独立令牌保护的公开实时计时页；
 - Windows、Linux、macOS 自托管包和 Cloudflare Durable Objects 版本。
 
 只使用实时 HUD 和圈速分析时不需要部署服务端。部署前阅读[赛事服务端指引](https://laz22y.github.io/LazyForza/docs/#race-server)。
@@ -100,7 +102,7 @@ FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与
 
 LazyForza is a local telemetry, driving-analysis and estate-racing tool for Forza Horizon 6. It uses only official FH6 UDP Data Out: no game-memory access, DLL injection or game-process modification. Settings, laps, vehicle learning and recordings stay on your PC by default.
 
-Version 1.5.0 adds a complete Chinese and English interface, first-run setup, player aliases, separate installer and portable lifecycles, and improvements to race gaps, pit confirmation, weak-network isolation and HUD responsiveness at high game frame rates.
+Version 1.5.1 adds six instantly switchable UI accent colors, an FH5 map-coordinate capture tool, saved RaceServer connections and connection tests. It also moves estate-race protocol models to a single generated source and isolates stable and preview update channels.
 
 ### Features
 
@@ -135,7 +137,7 @@ See the [complete documentation](https://laz22y.github.io/LazyForza/docs/) for s
 
 ### RaceServer
 
-[LazyForza.RaceServer](https://github.com/Laz22y/LazyForza.RaceServer) is the independent estate-racing server. It provides 1–12 driver slots plus observers, practice, multi-session qualifying, races, stable gaps, flags, penalties, collision investigations, optional disconnected-lap recovery, pit lanes, teams, hosted track files and archived session results. The client can save frequently used servers and test reachability and protocol compatibility before joining. Race Control supports separate super-admin, administrator and steward accounts. Native Windows/Linux/macOS packages and a Cloudflare Durable Objects implementation are available.
+[LazyForza.RaceServer](https://github.com/Laz22y/LazyForza.RaceServer) is the independent estate-racing server. It provides 1–12 driver slots plus observers, practice, multi-session qualifying, races, stable gaps, flags, penalties, collision investigations, optional disconnected-lap recovery, pit lanes, teams, hosted track files and archived session results. The client can save frequently used servers and test reachability and protocol compatibility before joining. Race Control supports separate super-admin, administrator and steward accounts, warning-only pre-race checks, reusable rule templates and event packages, and token-protected public live timing. Native Windows/Linux/macOS packages and a Cloudflare Durable Objects implementation are available.
 
 RaceServer is not required for the live HUD or lap analysis. Read the [deployment and connection guide](https://laz22y.github.io/LazyForza/docs/#race-server) before hosting a race.
 

@@ -1,9 +1,9 @@
 const RELEASE_FALLBACK = {
-  tag: "v1.5.0",
-  version: "1.5.0",
-  publishedAt: "2026-08-26T09:39:32Z",
-  installerName: "LazyForza-1.5.0-win-x64-setup.exe",
-  portableName: "LazyForza-1.5.0-win-x64.zip",
+  tag: "v1.5.1",
+  version: "1.5.1",
+  publishedAt: "2026-09-01T15:54:22Z",
+  installerName: "LazyForza-1.5.1-win-x64-setup.exe",
+  portableName: "LazyForza-1.5.1-win-x64.zip",
 };
 
 const RELEASE_SOURCES = {

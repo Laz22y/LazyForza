@@ -3,8 +3,8 @@
 LazyForza 是面向 Forza Horizon 6 的本地遥测、驾驶分析与地产赛事工具。客户端只使用 FH6 官方 UDP Data Out，不读取游戏内存，不注入 DLL，不修改游戏进程。
 
 - 客户端：Windows 10/11 x64
-- 当前客户端：`1.5.0`
-- 当前 RaceServer：`0.4.3`
+- 当前客户端：`1.5.1`
+- 当前 RaceServer：`0.5.0`
 - 官网：<https://laz22y.github.io/LazyForza/>
 - 客户端仓库：<https://github.com/Laz22y/LazyForza>
 - 服务端仓库：<https://github.com/Laz22y/LazyForza.RaceServer>
@@ -185,16 +185,18 @@ LazyForza 只核对车辆是否进入换胎区并满足停留条件，不读取�
 
 ```powershell
 # Windows
+./LazyForza.RaceServer.Web.exe init
 ./LazyForza.RaceServer.Web.exe
 ```
 
 ```bash
 # Linux / macOS
 chmod +x ./LazyForza.RaceServer.Web
+./LazyForza.RaceServer.Web init
 ./LazyForza.RaceServer.Web
 ```
 
-默认监听 `http://0.0.0.0:24876`。首次打开网页时设置房间密码、总控密码和赛事基础规则。总控密码为 8–128 个字符，不能与房间密码相同。
+全新原生服务器必须先在服务器交互终端运行 `init`，设置房间密码、初始超级管理员密码和现有基础规则；密码不会回显。初始化完成后再启动服务，默认监听 `http://0.0.0.0:24876`。未初始化时正常启动会在监听端口前退出，浏览器和远程 API 不能完成原生首次设置。已有有效凭据的服务器升级后直接继续使用原配置。
 
 公网部署应由 Caddy、Nginx 或同类反向代理终止 TLS。车手应连接 `wss://` 地址，不要把明文 `ws://` 暴露到互联网。
 
@@ -221,7 +223,7 @@ OB 使用 OB 身份登录，只接收赛事快照，不上传遥测、不参与�
 
 ### 4.7 兼容性
 
-RaceServer `0.4.3` 推荐搭配 LazyForza `1.5.0`，并兼容 `1.4.2–1.4.9` 的协议 v2 主要赛事流程。断线计圈恢复需要客户端 `1.4.8` 或更高版本，并由服务端总控主动开启。旧版仍可连接，但不会拥有后续新增的全部能力。
+RaceServer `0.5.0` 推荐搭配 LazyForza `1.5.1`，并兼容 `1.4.2–1.5.0` 的协议 v2 主要赛事流程。断线计圈恢复需要客户端 `1.4.8` 或更高版本，并由服务端总控主动开启。旧版仍可连接，但不会拥有后续新增的全部能力。
 
 ## 5. 常见问题
 
