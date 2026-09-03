@@ -31,6 +31,7 @@ public sealed class DashboardHudDynamics
     private double horizontalVelocity;
     private double verticalVelocity;
     private byte? lastGear;
+    private double? lastClutch;
     private double? lastHandBrake;
 
     public DashboardHudVisualState Update(
@@ -50,6 +51,7 @@ public sealed class DashboardHudDynamics
             opacity = 0;
             lastActivitySeconds = nowSeconds;
             lastGear = dashboard?.RawGear;
+            lastClutch = dashboard?.Clutch;
             lastHandBrake = dashboard?.HandBrake;
             wasBaseVisible = false;
             ResetMotion();
@@ -64,11 +66,14 @@ public sealed class DashboardHudDynamics
         }
 
         var gearChanged = lastGear is byte previousGear && previousGear != dashboard.RawGear;
+        var clutchChanged = lastClutch is double previousClutch &&
+                            Math.Abs(previousClutch - dashboard.Clutch) > ActivityInputThreshold;
         var handBrakeChanged = lastHandBrake is double previousHandBrake &&
                                Math.Abs(previousHandBrake - dashboard.HandBrake) > ActivityInputThreshold;
         lastGear = dashboard.RawGear;
+        lastClutch = dashboard.Clutch;
         lastHandBrake = dashboard.HandBrake;
-        if (HasDriverActivity(dashboard) || gearChanged || handBrakeChanged)
+        if (HasDriverActivity(dashboard) || gearChanged || clutchChanged || handBrakeChanged)
             lastActivitySeconds = nowSeconds;
 
         var idleWaitSeconds = Math.Clamp(layout.DashboardIdleWaitSeconds, 0, 60);
@@ -88,7 +93,6 @@ public sealed class DashboardHudDynamics
         Math.Abs(dashboard.SpeedMps) > ActivitySpeedThresholdMps ||
         dashboard.Throttle > ActivityInputThreshold ||
         dashboard.Brake > ActivityInputThreshold ||
-        dashboard.Clutch > ActivityInputThreshold ||
         Math.Abs(dashboard.Steering) > ActivityInputThreshold;
 
     private void UpdateMotion(DashboardHudState dashboard, OverlayLayout layout, double deltaSeconds)

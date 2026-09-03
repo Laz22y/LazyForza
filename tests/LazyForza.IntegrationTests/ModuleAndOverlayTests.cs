@@ -871,6 +871,38 @@ public sealed class ModuleAndOverlayTests
     }
 
     [TestMethod]
+    public void HeldClutchDoesNotKeepDashboardAwakeAndTransitionsWakeItOnce()
+    {
+        var dynamics = new DashboardHudDynamics();
+        var dashboard = DashboardState() with
+        {
+            SpeedMps = 0,
+            Clutch = 1
+        };
+        var layout = new OverlayLayout(
+            DashboardIdleWaitSeconds: 3,
+            DashboardVisibilityFadeSeconds: 1);
+
+        Assert.AreEqual(0, dynamics.Update(dashboard, true, layout, 0).Opacity, 1e-9);
+        Assert.AreEqual(1, dynamics.Update(dashboard, true, layout, 1).Opacity, 1e-9);
+        Assert.IsFalse(dynamics.Update(dashboard, true, layout, 2.99).IsIdleHidden);
+        Assert.IsTrue(dynamics.Update(dashboard, true, layout, 3.25).IsIdleHidden);
+        Assert.AreEqual(0, dynamics.Update(dashboard, true, layout, 4).Opacity, 1e-9);
+
+        var released = dashboard with { Clutch = 0 };
+        Assert.AreEqual(0, dynamics.Update(released, true, layout, 4).Opacity, 1e-9);
+        Assert.AreEqual(0.5, dynamics.Update(released, true, layout, 4.5).Opacity, 1e-9);
+        Assert.AreEqual(1, dynamics.Update(released, true, layout, 5).Opacity, 1e-9);
+
+        Assert.AreEqual(1, dynamics.Update(dashboard, true, layout, 6).Opacity, 1e-9);
+        Assert.IsFalse(dynamics.Update(dashboard, true, layout, 8.99).IsIdleHidden);
+        Assert.IsTrue(dynamics.Update(dashboard, true, layout, 9.25).IsIdleHidden);
+        Assert.IsFalse(
+            DashboardHudDynamics.HasDriverActivity(dashboard),
+            "持续离合是静态状态；只有离合变化才应唤醒仪表盘。");
+    }
+
+    [TestMethod]
     public void DashboardFadesAfterThreeIdleSecondsAndWakesOnAnyInput()
     {
         var dynamics = new DashboardHudDynamics();
@@ -902,7 +934,9 @@ public sealed class ModuleAndOverlayTests
         Assert.AreEqual(0.1, dynamics.Update(input, true, layout, 5.2).Opacity, 1e-9);
 
         Assert.IsTrue(DashboardHudDynamics.HasDriverActivity(dashboard with { Steering = 0.1 }));
-        Assert.IsTrue(DashboardHudDynamics.HasDriverActivity(dashboard with { Clutch = 0.1 }));
+        Assert.IsFalse(
+            DashboardHudDynamics.HasDriverActivity(dashboard with { Clutch = 0.1 }),
+            "A held clutch is static state; the dynamics controller wakes only when it changes.");
         Assert.IsFalse(
             DashboardHudDynamics.HasDriverActivity(dashboard with { HandBrake = 0.1 }),
             "A held handbrake is static state; the dynamics controller wakes only when it changes.");
