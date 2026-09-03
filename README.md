@@ -17,7 +17,7 @@
 
 LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、不注入 DLL、不修改游戏进程。设置、圈速、车辆学习和录制默认保存在本机。
 
-1.5.1 新增六种可即时切换的界面强调色、FH5 地图坐标采集工具，以及地产赛事服务器收藏与连接测试；同时统一地产赛事协议模型生成源，并隔离正式版与预览版更新通道。
+1.5.2 修复了在手动 + 离合设置下，进入车库、嘉年华等场景后仪表盘不会按预期隐藏的问题。
 
 ## 功能
 
@@ -102,7 +102,7 @@ FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与
 
 LazyForza is a local telemetry, driving-analysis and estate-racing tool for Forza Horizon 6. It uses only official FH6 UDP Data Out: no game-memory access, DLL injection or game-process modification. Settings, laps, vehicle learning and recordings stay on your PC by default.
 
-Version 1.5.1 adds six instantly switchable UI accent colors, an FH5 map-coordinate capture tool, saved RaceServer connections and connection tests. It also moves estate-race protocol models to a single generated source and isolates stable and preview update channels.
+Version 1.5.2 fixes the dashboard not hiding as expected after entering the garage, Horizon Festival, or similar scenes while using Manual with Clutch.
 
 ### Features
 
