@@ -7,6 +7,23 @@ namespace LazyForza.IntegrationTests;
 public sealed class LapEventSendQueueTests
 {
     [TestMethod]
+    public void RetryHintsAreOptionalAndDoNotChangeLegacyErrorMeaning()
+    {
+        var options = EstateRaceWireProtocol.JsonOptions;
+        var legacy = JsonSerializer.Deserialize<RaceLoginRejected>(
+            "{\"code\":\"invalidPassword\",\"message\":\"Try again\"}", options)!;
+        Assert.IsNull(legacy.RetryAfterSeconds);
+        var current = new RaceLoginRejected("rateLimited", "Retry in 30 seconds.", 30);
+        var json = JsonSerializer.Serialize(current, options);
+        Assert.AreEqual(30, JsonSerializer.Deserialize<RaceLoginRejected>(json, options)!.RetryAfterSeconds);
+        var oldReader = JsonSerializer.Deserialize<LegacyError>(json, options)!;
+        Assert.AreEqual("rateLimited", oldReader.Code);
+        Assert.AreEqual(current.Message, oldReader.Message);
+        Assert.IsNull(JsonSerializer.Deserialize<RaceErrorPayload>(
+            "{\"code\":\"invalidMessage\",\"message\":\"Invalid\"}", options)!.RetryAfterSeconds);
+    }
+
+    [TestMethod]
     public void OptionalValidationFieldsRemainCompatibleWithLegacyV2Messages()
     {
         var id = Guid.NewGuid();
@@ -191,6 +208,7 @@ public sealed class LapEventSendQueueTests
     }
 
     private sealed record LegacyAcknowledgement(Guid EventId, bool IsAccepted);
+    private sealed record LegacyError(string Code, string Message);
 
     private static RaceLapCompleted Lap() => new(Guid.NewGuid(), 1, 60, [20, 20, 20], true, null, 100);
 
