@@ -28,7 +28,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private static readonly TimeSpan TelemetrySendTimeout = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan CommandSendTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan RecoveredLapRetryInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan RecoveredPitServiceRetryInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan FingerprintRefreshInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan BackgroundFailureLogInterval = TimeSpan.FromSeconds(10);
@@ -41,7 +40,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private readonly Func<string?> defaultDisplayNameProvider;
     private readonly object strategySync = new();
     private readonly object telemetryStateSync = new();
-    private readonly object lapRecoverySync = new();
+    private readonly object lapEventSync = new();
     private readonly object pitServiceRecoverySync = new();
     private readonly EstateCollisionEvidenceDetector collisionEvidenceDetector = new();
     private readonly EstateShortcutDetector shortcutDetector = new();
@@ -73,7 +72,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private bool connectionAuthenticated;
     private EstateRaceSession? session;
     private Guid? sentLapEventId;
-    private readonly List<PendingLapUpload> pendingLapUploads = [];
+    private readonly LapEventSendQueue lapSendQueue = new();
     private readonly List<PendingPitServiceUpload> pendingPitServiceUploads = [];
     private int observedPitServiceCount;
     private long sequence;
@@ -418,6 +417,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 throw new InvalidOperationException(activeProfile.IsObserver
                     ? "该服务端不支持 OB 身份，请更新服务端后重试。"
                     : "服务端返回了与请求不一致的连接身份。");
+            var participantChanged = participantId != accepted.ParticipantId;
             participantId = accepted.ParticipantId;
             resumeToken = accepted.ResumeToken;
             connectionIsObserver = accepted.IsObserver;
@@ -425,7 +425,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             else driverResumeToken = accepted.ResumeToken;
             connectionAuthenticated = true;
             Interlocked.Exchange(ref connectedAtMonotonicMilliseconds, monotonicClock.ElapsedMilliseconds);
-            ApplySessionSnapshot(NormalizeSession(accepted.Snapshot), resetForConnection: !isReconnectAttempt);
+            ApplySessionSnapshot(NormalizeSession(accepted.Snapshot), resetForConnection: !isReconnectAttempt || participantChanged);
+            if (isReconnectAttempt) lapSendQueue.Reconnect();
             MarkServerResponse();
             await RefreshOrganizerLogoAsync(accepted.Snapshot, timeout.Token).ConfigureAwait(false);
             await SaveProfileAsync(activeProfile, accepted.ResumeToken, cancellationToken).ConfigureAwait(false);
@@ -618,23 +619,11 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             socket?.State != WebSocketState.Open || !connectionAuthenticated);
         if (socket?.State != WebSocketState.Open || !connectionAuthenticated)
         {
-            CaptureDisconnectedLap(context);
+            CaptureCompletedLap(disconnected: true);
             return;
         }
+        CaptureCompletedLap(disconnected: false);
         await FlushPendingLapUploadsAsync(cancellationToken).ConfigureAwait(false);
-        if (context.LastCompletedLap is { } completedLap &&
-            completedLap.EventId != sentLapEventId &&
-            !HasPendingLapUpload(completedLap.EventId))
-        {
-            var upload = CreateLapUpload(completedLap, recoveredAfterDisconnect: false);
-            if (session?.DisconnectedLapRecoveryEnabled == true)
-                QueuePendingLapUpload(upload, Math.Max(1, monotonicClock.ElapsedMilliseconds));
-            await SendAsync(
-                "lapCompleted",
-                upload,
-                cancellationToken).ConfigureAwait(false);
-            sentLapEventId = completedLap.EventId;
-        }
         await FlushPendingPitServiceUploadsAsync(cancellationToken).ConfigureAwait(false);
         var collision = collisionEvidenceDetector.Observe(frame, valid);
         if (!processPeriodicState) return;
@@ -722,96 +711,44 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         ObserveTelemetryStrategySafely(context, pausedOrRewinding, pitService);
     }
 
-    private void CaptureDisconnectedLap(EstateRaceTrackContext context)
+    private void CaptureCompletedLap(bool disconnected)
     {
-        if (connectionIsObserver || context.LastCompletedLap is not { } lap || lap.EventId == sentLapEventId)
-            return;
-        if (session?.DisconnectedLapRecoveryEnabled != true)
+        lock (lapEventSync)
         {
+            // Read under the same lock as stage changes, so an old context cannot
+            // enqueue a previous stage's lap after its queue has been cleared.
+            if (connectionIsObserver || trackContext()?.LastCompletedLap is not { } lap || lap.EventId == sentLapEventId)
+                return;
+            QueueLapUpload(CreateLapUpload(lap, recoveredAfterDisconnect: disconnected));
             sentLapEventId = lap.EventId;
-            ClearPendingLapUploads();
-            return;
-        }
-
-        lock (lapRecoverySync)
-        {
-            if (pendingLapUploads.Any(item => item.Lap.EventId == lap.EventId)) return;
-            QueuePendingLapUploadLocked(CreateLapUpload(lap, recoveredAfterDisconnect: true), 0);
         }
     }
 
-    private void QueuePendingLapUpload(RaceLapCompleted lap, long lastAttemptMonotonicMilliseconds)
+    private void QueueLapUpload(RaceLapCompleted lap)
     {
-        lock (lapRecoverySync)
+        if (lapSendQueue.Enqueue(lap) == LapEventEnqueueResult.Full)
         {
-            if (pendingLapUploads.Any(item => item.Lap.EventId == lap.EventId)) return;
-            QueuePendingLapUploadLocked(lap, lastAttemptMonotonicMilliseconds);
+            LogIfInitialized($"Lap event queue full; lap {lap.LapNumber}, event {lap.EventId} was not queued.");
+            PublishSnapshot(State.ConnectionState, "赛事圈成绩上传异常");
         }
-    }
-
-    private void QueuePendingLapUploadLocked(RaceLapCompleted lap, long lastAttemptMonotonicMilliseconds)
-    {
-        if (pendingLapUploads.Count >= 12) pendingLapUploads.RemoveAt(0);
-        pendingLapUploads.Add(new PendingLapUpload(lap, lastAttemptMonotonicMilliseconds));
     }
 
     private async Task FlushPendingLapUploadsAsync(CancellationToken cancellationToken)
     {
-        if (connectionIsObserver || session?.DisconnectedLapRecoveryEnabled != true) return;
-        while (true)
-        {
-            RaceLapCompleted? lap = null;
-            var now = monotonicClock.ElapsedMilliseconds;
-            lock (lapRecoverySync)
-            {
-                var index = pendingLapUploads.FindIndex(item =>
-                    item.LastAttemptMonotonicMilliseconds == 0 ||
-                    now - item.LastAttemptMonotonicMilliseconds >= RecoveredLapRetryInterval.TotalMilliseconds);
-                if (index >= 0)
-                {
-                    var pending = pendingLapUploads[index];
-                    lap = pending.Lap;
-                    pendingLapUploads[index] = pending with { LastAttemptMonotonicMilliseconds = now };
-                }
-            }
-            if (lap is null) return;
+        if (connectionIsObserver || !connectionAuthenticated) return;
+        var now = monotonicClock.ElapsedMilliseconds;
+        while (lapSendQueue.TakeDue(now) is { } lap)
             await SendAsync("lapCompleted", lap, cancellationToken).ConfigureAwait(false);
-        }
     }
 
     private void AcknowledgeLap(RaceLapAcknowledgement acknowledgement)
     {
-        lock (lapRecoverySync)
-            pendingLapUploads.RemoveAll(item => item.Lap.EventId == acknowledgement.EventId);
-        sentLapEventId = acknowledgement.EventId;
+        if (!lapSendQueue.Acknowledge(acknowledgement.EventId)) return;
         if (!acknowledgement.IsAccepted && !string.IsNullOrWhiteSpace(acknowledgement.Message))
             PublishSnapshot(EstateRaceConnectionState.Connected, acknowledgement.Message);
     }
 
-    private bool HasPendingLapUpload(Guid eventId)
-    {
-        lock (lapRecoverySync)
-            return pendingLapUploads.Any(item => item.Lap.EventId == eventId);
-    }
-
-    private void ClearPendingLapUploads()
-    {
-        lock (lapRecoverySync) pendingLapUploads.Clear();
-    }
-
-    private void MarkPendingLapUploadsForRecovery()
-    {
-        lock (lapRecoverySync)
-            for (var index = 0; index < pendingLapUploads.Count; index++)
-            {
-                var pending = pendingLapUploads[index];
-                pendingLapUploads[index] = pending with
-                {
-                    Lap = pending.Lap with { IsRecoveredAfterDisconnect = true },
-                    LastAttemptMonotonicMilliseconds = 0
-                };
-            }
-    }
+    private void ClearPendingLapUploads() => lapSendQueue.Clear();
 
     private RaceLapCompleted CreateLapUpload(
         EstateCompletedLapEvent lap,
@@ -992,6 +929,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         {
             while (!cancellationToken.IsCancellationRequested)
             {
+                await FlushPendingLapUploadsAsync(cancellationToken).ConfigureAwait(false);
                 await SendAsync(
                     "ping",
                     new RaceClockPing(monotonicClock.ElapsedMilliseconds),
@@ -1170,6 +1108,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             await sendLock.WaitAsync(timeout.Token).ConfigureAwait(false);
             try
             {
+                if (payload is RaceLapCompleted lap && !lapSendQueue.Contains(lap.EventId)) return;
                 await activeSocket.SendAsync(bytes, WebSocketMessageType.Text, true, timeout.Token).ConfigureAwait(false);
             }
             finally
@@ -1204,16 +1143,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     {
         if (intentionalDisconnect) return;
         if (Interlocked.CompareExchange(ref connectionInterruptionHandled, 1, 0) != 0) return;
-        if (session?.DisconnectedLapRecoveryEnabled != true)
-        {
-            sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
-            ClearPendingLapUploads();
-        }
-        else
-        {
-            MarkPendingLapUploadsForRecovery();
+        lapSendQueue.Reconnect();
+        if (session?.DisconnectedLapRecoveryEnabled == true)
             MarkPendingPitServiceUploadsForRecovery();
-        }
         SetConnectionState(EstateRaceConnectionState.Reconnecting, "连接中断，正在尝试恢复赛事连接…");
         LogIfInitialized($"Estate race WebSocket disconnected: {exception.Message}");
         ScheduleReconnect();
@@ -1373,7 +1305,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         Volatile.Write(ref snapshot, new EstateRaceHudState(
             DateTimeOffset.UtcNow,
             state,
-            text,
+            lapSendQueue.Overflowed ? $"{text}；圈事件发送队列已满，部分圈成绩未能上传，请联系赛事总控" : text,
             participantId,
             session,
             map.TrackOutline,
@@ -1613,6 +1545,11 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         EstateRaceSession value,
         bool resetForConnection = false)
     {
+        lock (lapEventSync)
+        {
+            if (lapSendQueue.ApplySession(value, resetForConnection))
+                sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
+        }
         var qualifyingSessionBoundary = value.Phase == RaceSessionPhase.Qualifying &&
                                         lastSessionPhase == RaceSessionPhase.Qualifying &&
                                         value.QualifyingSessionNumber > 0 &&
@@ -1645,15 +1582,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 collisionEvidenceDetector.Reset();
                 if (resetForConnection) lastValidProjection = null;
             }
-            sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
-            ClearPendingLapUploads();
             ClearPendingPitServiceUploads();
             observedPitServiceCount = 0;
-        }
-        if (!value.DisconnectedLapRecoveryEnabled)
-        {
-            sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
-            ClearPendingLapUploads();
         }
         lastSessionPhase = value.Phase;
         lastQualifyingSessionNumber = value.Phase == RaceSessionPhase.Qualifying
@@ -1902,10 +1832,6 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     {
         public static EstateRaceTrackMapSnapshot Empty { get; } = new([], [], null, []);
     }
-
-    private sealed record PendingLapUpload(
-        RaceLapCompleted Lap,
-        long LastAttemptMonotonicMilliseconds);
 
     private sealed record PendingPitServiceUpload(
         RacePitServiceCompleted Completed,

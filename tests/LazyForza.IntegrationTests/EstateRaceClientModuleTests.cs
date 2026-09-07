@@ -1244,7 +1244,10 @@ public sealed class EstateRaceClientModuleTests
     }
 
     [TestMethod]
-    public async Task ReconnectRetriesSentLapWhenServerAcknowledgementWasLost()
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, true)]
+    public async Task ReconnectRetriesSentLapWhenServerAcknowledgementWasLost(bool recoveryEnabled, bool disconnect)
     {
         var participantId = Guid.NewGuid();
         var connectionCount = 0;
@@ -1255,7 +1258,7 @@ public sealed class EstateRaceClientModuleTests
         var snapshot = EmptySession() with
         {
             Phase = RaceSessionPhase.Race,
-            DisconnectedLapRecoveryEnabled = true
+            DisconnectedLapRecoveryEnabled = recoveryEnabled
         };
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
@@ -1285,9 +1288,13 @@ public sealed class EstateRaceClientModuleTests
                     var envelope = await ReceiveAsync(socket, context.RequestAborted);
                     if (envelope.Type != "lapCompleted") continue;
                     var lap = envelope.Payload.Deserialize<RaceLapCompleted>(EstateRaceWireProtocol.JsonOptions)!;
-                    if (number == 1)
+                    if (!firstUploadReceived.Task.IsCompleted)
                     {
                         firstUploadReceived.TrySetResult(lap);
+                        // A routine snapshot must not clear the outstanding online command.
+                        await socket.SendAsync(EstateRaceWireProtocol.Serialize("snapshot", 5, snapshot),
+                            WebSocketMessageType.Text, true, context.RequestAborted);
+                        if (!disconnect) continue;
                         await socket.CloseOutputAsync(
                             WebSocketCloseStatus.EndpointUnavailable,
                             "ack lost",
@@ -1336,7 +1343,7 @@ public sealed class EstateRaceClientModuleTests
                 Assert.IsFalse(first.IsRecoveredAfterDisconnect);
                 var recovered = await recoveredUploadReceived.Task.WaitAsync(TimeSpan.FromSeconds(6));
                 Assert.AreEqual(first.EventId, recovered.EventId);
-                Assert.IsTrue(recovered.IsRecoveredAfterDisconnect);
+                Assert.IsFalse(recovered.IsRecoveredAfterDisconnect);
             }
             finally
             {
