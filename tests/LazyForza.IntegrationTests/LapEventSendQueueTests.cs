@@ -1,3 +1,4 @@
+using System.Text.Json;
 using LazyForza.Modules.EstateRace;
 
 namespace LazyForza.IntegrationTests;
@@ -5,6 +6,48 @@ namespace LazyForza.IntegrationTests;
 [TestClass]
 public sealed class LapEventSendQueueTests
 {
+    [TestMethod]
+    public void OptionalValidationFieldsRemainCompatibleWithLegacyV2Messages()
+    {
+        var id = Guid.NewGuid();
+        var json = JsonSerializer.Serialize(new { eventId = id, isAccepted = true }, EstateRaceWireProtocol.JsonOptions);
+        var current = JsonSerializer.Deserialize<RaceLapAcknowledgement>(json, EstateRaceWireProtocol.JsonOptions)!;
+        Assert.IsNull(current.ValidationStatus);
+        var extended = JsonSerializer.Serialize(current with { ValidationStatus = RaceLapValidationStatus.PendingReview },
+            EstateRaceWireProtocol.JsonOptions);
+        var legacy = JsonSerializer.Deserialize<LegacyAcknowledgement>(extended, EstateRaceWireProtocol.JsonOptions)!;
+        Assert.AreEqual(id, legacy.EventId);
+        Assert.IsTrue(legacy.IsAccepted);
+        var lapJson = JsonSerializer.Serialize(new
+        {
+            eventId = id, lapNumber = 1, lapSeconds = 60, sectorSeconds = new[] { 20, 20, 20 },
+            isValid = true, clientMonotonicMilliseconds = 60000
+        }, EstateRaceWireProtocol.JsonOptions);
+        Assert.IsNull(JsonSerializer.Deserialize<RaceLapCompleted>(lapJson, EstateRaceWireProtocol.JsonOptions)!.StageId);
+    }
+
+    [TestMethod]
+    public void StableStageSurvivesRecoveryClockRebaseButNewStageClearsPendingLaps()
+    {
+        var queue = new LapEventSendQueue();
+        var session = Session() with { StageId = Guid.NewGuid() };
+        queue.ApplySession(session);
+        var lap = Lap() with { StageId = queue.StageId };
+        queue.Enqueue(lap);
+        Assert.IsFalse(queue.ApplySession(session with
+        {
+            Phase = RaceSessionPhase.Suspended, SuspendedFromPhase = RaceSessionPhase.Race,
+            StartsAt = session.StartsAt!.Value.AddHours(1)
+        }));
+        queue.Reconnect();
+        Assert.AreEqual(lap, queue.TakeDue(0));
+        Assert.IsFalse(queue.ApplySession(session with { StartsAt = session.StartsAt.Value.AddHours(2) }));
+        Assert.AreEqual(session.StageId, queue.StageId);
+        Assert.IsTrue(queue.ApplySession(session with { StageId = Guid.NewGuid() }));
+        Assert.IsNull(queue.TakeDue(5000));
+        Assert.IsFalse(queue.Acknowledge(lap.EventId));
+    }
+
     [TestMethod]
     public void OnlineLapRetriesWithoutRecoveryAndSurvivesSnapshotsAndReconnect()
     {
@@ -146,6 +189,8 @@ public sealed class LapEventSendQueueTests
         Assert.IsTrue(queue.ApplySession(session, reset: true));
         Assert.IsNull(queue.TakeDue(5000));
     }
+
+    private sealed record LegacyAcknowledgement(Guid EventId, bool IsAccepted);
 
     private static RaceLapCompleted Lap() => new(Guid.NewGuid(), 1, 60, [20, 20, 20], true, null, 100);
 

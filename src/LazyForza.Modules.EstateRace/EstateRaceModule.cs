@@ -761,7 +761,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         lap.InvalidReason,
         monotonicClock.ElapsedMilliseconds,
         lap.IsBestLapEligible,
-        recoveredAfterDisconnect);
+        recoveredAfterDisconnect,
+        lapSendQueue.StageId);
 
     private void CapturePitServiceCompletion(
         EstatePitServiceState pitService,

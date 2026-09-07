@@ -1258,7 +1258,8 @@ public sealed class EstateRaceClientModuleTests
         var snapshot = EmptySession() with
         {
             Phase = RaceSessionPhase.Race,
-            DisconnectedLapRecoveryEnabled = recoveryEnabled
+            DisconnectedLapRecoveryEnabled = recoveryEnabled,
+            StageId = Guid.NewGuid()
         };
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
@@ -1306,7 +1307,8 @@ public sealed class EstateRaceClientModuleTests
                         EstateRaceWireProtocol.Serialize(
                             "lapAcknowledged",
                             number + 10,
-                            new RaceLapAcknowledgement(lap.EventId, true)),
+                            new RaceLapAcknowledgement(lap.EventId, true,
+                                ValidationStatus: RaceLapValidationStatus.InsufficientEvidence)),
                         WebSocketMessageType.Text,
                         true,
                         context.RequestAborted);
@@ -1340,9 +1342,11 @@ public sealed class EstateRaceClientModuleTests
                 feed.Publish(Frame(30, 30_000, 30, 0, 0));
 
                 var first = await firstUploadReceived.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                Assert.AreEqual(snapshot.StageId, first.StageId);
                 Assert.IsFalse(first.IsRecoveredAfterDisconnect);
                 var recovered = await recoveredUploadReceived.Task.WaitAsync(TimeSpan.FromSeconds(6));
                 Assert.AreEqual(first.EventId, recovered.EventId);
+                Assert.AreEqual(first.StageId, recovered.StageId);
                 Assert.IsFalse(recovered.IsRecoveredAfterDisconnect);
             }
             finally

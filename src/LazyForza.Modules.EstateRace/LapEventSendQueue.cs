@@ -13,6 +13,7 @@ internal sealed class LapEventSendQueue(int capacity = 12)
     private bool overflowed;
 
     public bool Overflowed { get { lock (sync) return overflowed; } }
+    public Guid? StageId { get { lock (sync) return stage?.Id; } }
 
     public bool ApplySession(EstateRaceSession session, bool reset = false)
     {
@@ -33,9 +34,10 @@ internal sealed class LapEventSendQueue(int capacity = 12)
             };
             var next = new Stage(phase, session.TrackId, session.TrackRevision,
                 session.TrackPackageHash,
-                timingIdentity,
+                session.StageId is null ? timingIdentity : null,
                 phase == RaceSessionPhase.Practice ? session.PracticeSessionNumber :
-                phase == RaceSessionPhase.Qualifying ? session.QualifyingSessionNumber : 0);
+                phase == RaceSessionPhase.Qualifying ? session.QualifyingSessionNumber : 0,
+                session.StageId);
             var changed = reset || stage != next;
             if (changed) Clear();
             stage = next;
@@ -104,5 +106,5 @@ internal sealed class LapEventSendQueue(int capacity = 12)
 
     private sealed record Pending(RaceLapCompleted Lap, long? LastAttempt);
     private sealed record Stage(RaceSessionPhase Phase, string? TrackId, string? TrackRevision,
-        string? TrackPackageHash, DateTimeOffset? TimingIdentity, int Number);
+        string? TrackPackageHash, DateTimeOffset? TimingIdentity, int Number, Guid? Id);
 }
