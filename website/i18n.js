@@ -3,6 +3,8 @@
 
   const STORAGE_KEY = "lazyforza.website.language";
   const ENGLISH = {
+    "预览版 1.5.3-alpha-1": "Preview 1.5.3-alpha-1",
+    "预览版 1.5.3-alpha-1：统一分析与回放界面，新增手动弯道对比、本地语音工程师并修复连续赛事识别。推荐搭配 RaceServer 0.6.0-alpha-1；协议保持 v2，预览版使用独立更新通道。": "Preview 1.5.3-alpha-1 unifies analysis and replay, adds manual corner comparisons and a local voice engineer, and fixes consecutive-event identification. RaceServer 0.6.0-alpha-1 is recommended. Protocol v2 is retained and previews use a separate update channel.",
     "LazyForza：基于 Forza Horizon 6 官方 UDP 的实时 HUD、圈速分析、遥测回放与自托管赛事工具。": "LazyForza turns official Forza Horizon 6 UDP telemetry into live HUDs, lap analysis, replay and self-hosted racing tools.",
     "LazyForza · 读懂每一圈": "LazyForza · Understand every lap",
     "实时 HUD、圈速与走线分析、遥测回放和自托管地产赛事。只使用 FH6 官方 UDP。": "Live HUDs, lap and racing-line analysis, telemetry replay and self-hosted estate racing, powered only by official FH6 UDP data.",

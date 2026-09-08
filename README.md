@@ -8,6 +8,8 @@
 
 ## 简体中文
 
+预览版：[`1.5.3-alpha-1`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-1)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-1)），推荐搭配 RaceServer `0.6.0-alpha-1`。使用独立预发布更新通道，协议保持 v2；正式版下载入口保持 `1.5.2`。
+
 <p align="center">
   <a href="https://laz22y.github.io/LazyForza/">官网</a> ·
   <a href="https://laz22y.github.io/LazyForza/docs/">完整文档</a> ·
@@ -111,6 +113,8 @@ FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与
 [MIT](LICENSE)。LazyForza 是非官方社区项目，与 Microsoft、Xbox 或 Playground Games 无隶属关系；相关商标属于其各自权利人。
 
 ## English
+
+Preview: [`1.5.3-alpha-1`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-1) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-1)), recommended with RaceServer `0.6.0-alpha-1`. It uses the separate preview update channel and protocol v2; stable downloads remain on `1.5.2`.
 
 LazyForza is a local telemetry, driving-analysis and estate-racing tool for Forza Horizon 6. It uses only official FH6 UDP Data Out: no game-memory access, DLL injection or game-process modification. Settings, laps, vehicle learning and recordings stay on your PC by default.
 
