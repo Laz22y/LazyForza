@@ -1,4 +1,7 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json.Nodes;
 using LazyForza.Analysis;
 using LazyForza.Domain;
 using LazyForza.Storage;
@@ -8,6 +11,63 @@ namespace LazyForza.Storage.Tests;
 [TestClass]
 public sealed class DataBackupTests
 {
+    [TestMethod]
+    public void SchemaTwelvePortableBackupKeepsOldLapsWithoutInventingNewContext()
+    {
+        var sourcePath = TempPath(".db");
+        var destinationPath = TempPath(".db");
+        var backupPath = TempPath(".lfzbackup");
+        try
+        {
+            Guid lapId;
+            using (var source = new LazyForzaStore(sourcePath))
+            {
+                lapId = SaveTrackAndLap(source).LapId;
+                new DataBackupService(source, "test").Create(backupPath, new BackupSelection());
+            }
+            using (var archive = ZipFile.Open(backupPath, ZipArchiveMode.Update))
+            {
+                JsonObject Read(string name)
+                {
+                    using var input = archive.GetEntry(name)!.Open();
+                    return JsonNode.Parse(input)!.AsObject();
+                }
+                void Write(string name, byte[] bytes)
+                {
+                    archive.GetEntry(name)!.Delete();
+                    using var output = archive.CreateEntry(name).Open();
+                    output.Write(bytes);
+                }
+                var data = Read("data.json");
+                var laps = data["tables"]!.AsArray().Single(table => table!["name"]!.GetValue<string>() == "Laps")!;
+                var columns = laps["columns"]!.AsArray();
+                for (var i = 0; i < 2; i++) columns.RemoveAt(columns.Count - 1);
+                foreach (var row in laps["rows"]!.AsArray())
+                {
+                    var values = row!.AsArray();
+                    values.RemoveAt(values.Count - 1); values.RemoveAt(values.Count - 1);
+                }
+                var bytes = Encoding.UTF8.GetBytes(data.ToJsonString());
+                var manifest = Read("manifest.json");
+                manifest["schemaVersion"] = 12;
+                manifest["files"]!["data.json"] = Convert.ToHexString(SHA256.HashData(bytes));
+                Write("data.json", bytes);
+                Write("manifest.json", Encoding.UTF8.GetBytes(manifest.ToJsonString()));
+            }
+            using var destination = new LazyForzaStore(destinationPath);
+            new DataBackupService(destination, "test").Import(backupPath, BackupImportMode.Merge);
+            var lap = destination.LoadLap(lapId)!;
+            Assert.HasCount(24, lap.Samples);
+            Assert.IsNull(lap.TrackRevision);
+            Assert.AreEqual(-1, lap.Vehicle.DrivetrainType);
+        }
+        finally
+        {
+            DeleteDatabase(sourcePath); DeleteDatabase(destinationPath);
+            if (File.Exists(backupPath)) File.Delete(backupPath);
+        }
+    }
+
     [TestMethod]
     public async Task PortableBackupRoundTripsSelectedDataAndPreviewsConflicts()
     {
@@ -66,6 +126,9 @@ public sealed class DataBackupTests
                 Assert.AreEqual("Portable track", destination.LoadTrack(trackId)!.Value.Track.Name);
                 Assert.AreEqual(0, overwritten.PreservedConflicts);
                 var importedLap = destination.LoadLap(lapId)!;
+                Assert.AreEqual(LapTrackRevision.Create(destination.LoadTrack(trackId)!.Value.Track), importedLap.TrackRevision);
+                Assert.AreEqual(2, importedLap.Vehicle.DrivetrainType);
+                Assert.AreEqual("g", importedLap.Vehicle.GearSlopeSignature);
                 Assert.HasCount(24, importedLap.Samples);
                 Assert.IsNotNull(importedLap.Samples[0].Dynamics);
                 Assert.AreEqual(
@@ -289,7 +352,7 @@ public sealed class DataBackupTests
                 sector.Index,
                 72.5 / sectors.Count,
                 true)).ToArray(),
-            samples));
+            samples) { TrackRevision = LapTrackRevision.Create(track) });
         return (track.Id, lapId);
     }
 

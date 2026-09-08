@@ -1567,6 +1567,9 @@ internal sealed partial class MainWindow : Window
             };
             mapPanel.Unloaded += (_, _) => SizeChanged -= resizeMap;
             visuals.Children.Add(Card(mapPanel));
+            visuals.Children.Add(BuildManualCornerAnalysisCard(store, activeTrack,
+                visualLaps.Where(lap => selectedVisualLaps.Any(summary => summary.Id == lap.Id)).ToArray(),
+                (id, progress) => linkedCursor.Set(visuals, id, progress)));
             previewStack.Children.Add(visuals);
             comparisonHost.Children.Add(previewStack);
         }
@@ -1722,7 +1725,14 @@ internal sealed partial class MainWindow : Window
     {
         if (plan.Mode == SingleLapAnalysisMode.CompareWithClassFastest && referenceLap is not null)
         {
-            var comparisons = CornerDrivingAnalyzer.Compare(selectedLap, referenceLap);
+            var comparisonTrack = store.LoadTrack(selectedLap.TrackId)?.Track;
+            if (comparisonTrack is null || ManualCornerAnalyzer.Compatibility(comparisonTrack,
+                    LapSummary.FromRecord(selectedLap), LapSummary.FromRecord(referenceLap)) is not null)
+                return [];
+            var comparisons = CornerDrivingAnalyzer.Compare(selectedLap, referenceLap)
+                .Where(corner => ManualCornerAnalyzer.Compare(comparisonTrack, selectedLap, referenceLap,
+                    new ManualCorner($"T{corner.Window.Number}", corner.Window.StartS, corner.Window.EndS)).Evidence == CornerEvidence.Sufficient)
+                .ToArray();
             var context = AppLocalization.Format(
                 "analysis.corner.comparisonContext",
                 "对比同等级个人最快 · 所选 {0} / 参考 {1}",
@@ -1844,7 +1854,7 @@ internal sealed partial class MainWindow : Window
 
     private static string ComparisonHint(CornerComparisonMetrics corner)
     {
-        if (corner.TimeLossSeconds < -0.05) return AppLocalization.Literal("该区间快于参考圈，可保留当前处理方式。");
+        if (corner.TimeLossSeconds < -0.05) return "本次区间耗时较短，不能据此确定某项操作是提速原因。";
         var hints = new List<string>();
         if (corner.BrakePointDeltaMeters is < -4) hints.Add(AppLocalization.Literal("刹车偏早"));
         if (corner.SelectedMinimumSpeedKph < corner.ReferenceMinimumSpeedKph - 3) hints.Add(AppLocalization.Literal("弯心速度偏低"));
@@ -1856,7 +1866,7 @@ internal sealed partial class MainWindow : Window
         if (corner.SelectedApexGear != corner.ReferenceApexGear)
             hints.Add(AppLocalization.Literal("弯心挡位不同，需结合车辆确认"));
         return hints.Count == 0
-            ? AppLocalization.Literal("单项差异不大，这段更像是整体节奏损失。")
+            ? "未发现明显单项差异，不据此推断耗时差的原因。"
             : AppLocalization.Format("analysis.corner.reviewHints", "建议优先复查：{0}。", string.Join(AppLocalization.Text("analysis.hintSeparator", "、"), hints));
     }
 

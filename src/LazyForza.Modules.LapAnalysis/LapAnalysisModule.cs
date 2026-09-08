@@ -1359,7 +1359,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 lapProjectionValid ? "sector-coverage-incomplete" : $"projection-low-confidence ({projectionRatio:P0})",
             times,
             persistedSamples,
-            PlayerIdentitySettings.Normalize(playerCodeProvider()));
+            PlayerIdentitySettings.Normalize(playerCodeProvider())) { TrackRevision = LapTrackRevision.Create(track) };
         RegisterVisibleLap(lap);
         QueuePersistence(LapPersistenceCommand.Save(lap));
         LogIfInitialized(

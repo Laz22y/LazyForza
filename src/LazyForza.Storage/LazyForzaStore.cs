@@ -31,7 +31,7 @@ public sealed record VehicleProfileSummary(
 
 public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisposable
 {
-    public const int CurrentSchemaVersion = 12;
+    public const int CurrentSchemaVersion = 13;
     public const int MaxLapsPerTrack = 50;
     public const int MaxEstateStrategySamplesPerTrack = 96;
     public const int MaxEstateStrategySamples = 512;
@@ -335,8 +335,8 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
         var playerCode = PlayerIdentitySettings.Normalize(lap.PlayerCode);
         var sql = "BEGIN IMMEDIATE;\n" +
             $"INSERT INTO Sessions(Id,Source,StartedAt,RawRecordingPath) VALUES({Quote(lap.SessionId.ToString())},'Replay',{Quote(lap.StartedAt.ToString("O"))},NULL) ON CONFLICT(Id) DO NOTHING;\n" +
-            $"INSERT INTO Laps(Id,TrackId,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason,PlayerCode) VALUES(" +
-            $"{Quote(lap.Id.ToString())},{Quote(lap.TrackId.ToString())},{lap.Direction},{lap.SectorSchemaVersion},{Quote(lap.SessionId.ToString())},{vehicleKey},{performanceClass},{lap.Vehicle.PerformanceIndex},{Quote(lap.StartedAt.ToString("O"))},{N(lap.TotalSeconds)},{(lap.IsValid ? 1 : 0)},{Quote(lap.InvalidReason)},{Quote(playerCode.Length == 0 ? null : playerCode)});\n";
+            $"INSERT INTO Laps(Id,TrackId,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason,PlayerCode,TrackRevision,VehicleSnapshot) VALUES(" +
+            $"{Quote(lap.Id.ToString())},{Quote(lap.TrackId.ToString())},{lap.Direction},{lap.SectorSchemaVersion},{Quote(lap.SessionId.ToString())},{vehicleKey},{performanceClass},{lap.Vehicle.PerformanceIndex},{Quote(lap.StartedAt.ToString("O"))},{N(lap.TotalSeconds)},{(lap.IsValid ? 1 : 0)},{Quote(lap.InvalidReason)},{Quote(playerCode.Length == 0 ? null : playerCode)},{Quote(lap.TrackRevision)},{Quote(JsonSerializer.Serialize(lap.Vehicle))});\n";
         foreach (var segment in lap.Segments)
         {
             sql += $"INSERT INTO LapSegments(LapId,SectorIndex,TimeSeconds,IsValid) VALUES({Quote(lap.Id.ToString())},{segment.Index},{N(segment.TimeSeconds)},{(segment.IsValid ? 1 : 0)});\n";
@@ -513,7 +513,7 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         var rows = database.QueryRows(
-            $"SELECT Id,TrackId,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason,PlayerCode " +
+            $"SELECT Id,TrackId,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason,PlayerCode,TrackRevision,VehicleSnapshot " +
             $"FROM Laps WHERE TrackId={Quote(trackId.ToString())} ORDER BY StartedAt DESC LIMIT {limit};");
         var summaries = ParseLapSummaries(rows);
         summaries.Reverse();
@@ -526,7 +526,7 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
         var distinctIds = lapIds.Distinct().ToArray();
         var idList = string.Join(',', distinctIds.Select(id => Quote(id.ToString())));
         var rows = database.QueryRows(
-            "SELECT Id,TrackId,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason,PlayerCode " +
+            "SELECT Id,TrackId,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason,PlayerCode,TrackRevision,VehicleSnapshot " +
             $"FROM Laps WHERE Id IN ({idList}) ORDER BY StartedAt;");
         return AttachSamples(ParseLapSummaries(rows));
     }
@@ -564,7 +564,7 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
                 int.Parse(row[2]!, CultureInfo.InvariantCulture),
                 int.Parse(row[3]!, CultureInfo.InvariantCulture),
                 Guid.Parse(row[4]!),
-                ParseStoredVehicle(
+                ParseVehicleSnapshot(row[14]) ?? ParseStoredVehicle(
                     row[5],
                     int.Parse(row[6]!, CultureInfo.InvariantCulture),
                     int.Parse(row[7]!, CultureInfo.InvariantCulture)),
@@ -575,7 +575,7 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
                 segmentsByLap[lapId].ToArray(),
                 PlayerIdentitySettings.Normalize(row[12]) is { Length: > 0 } playerCode
                     ? playerCode
-                    : null);
+                    : null) { TrackRevision = row[13] };
         }).ToList();
     }
 
@@ -875,6 +875,16 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
             version = 12;
         }
 
+        if (version < 13)
+        {
+            var hasRevision = database.QueryText("SELECT COUNT(*) FROM pragma_table_info('Laps') WHERE name='TrackRevision';") == "1";
+            var hasVehicle = database.QueryText("SELECT COUNT(*) FROM pragma_table_info('Laps') WHERE name='VehicleSnapshot';") == "1";
+            database.Execute("BEGIN IMMEDIATE;\n" +
+                (hasRevision ? "" : "ALTER TABLE Laps ADD COLUMN TrackRevision TEXT;\n") +
+                (hasVehicle ? "" : "ALTER TABLE Laps ADD COLUMN VehicleSnapshot TEXT;\n") +
+                "UPDATE SchemaVersion SET Version=13;\nCOMMIT;");
+        }
+
         if (SchemaVersion != CurrentSchemaVersion) throw new InvalidOperationException("Database schema version is newer than this LazyForza build.");
     }
 
@@ -1087,6 +1097,13 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
             $"SELECT CatalogKind FROM TrackTemplates WHERE Id={Quote(trackId.ToString())} LIMIT 1;");
         if (ParseCatalogKind(catalogKind) == TrackCatalogKind.PlaygroundOfficial)
             throw new InvalidOperationException("Playground 官方赛事属于内置必要数据，不能重命名或删除。");
+    }
+
+    private static VehicleProfileFingerprint? ParseVehicleSnapshot(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try { return JsonSerializer.Deserialize<VehicleProfileFingerprint>(json); }
+        catch (JsonException) { return null; }
     }
 
     private static VehicleProfileFingerprint ParseStoredVehicle(string? value, int carClass, int storedPerformanceIndex)

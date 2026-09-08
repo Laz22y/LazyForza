@@ -243,7 +243,8 @@ internal sealed partial class MainWindow
                 {
                     PlayerCode = replay.Lap.PlayerCode ?? replay.Metadata.PlayerCode
                 };
-                currentTrack = null;
+                currentTrack = replay.Metadata.ContentKind == TelemetryRecordingContentKind.SingleLap
+                    ? store.LoadTrack(currentLap.TrackId)?.Track : null;
                 currentSourceName = replay.TrackName ??
                                     Path.GetFileNameWithoutExtension(replay.SourcePath);
                 elapsed = 0;
@@ -430,6 +431,14 @@ internal sealed partial class MainWindow
             Grid.SetRow(inputChart, 1);
             inputChartPanel.Children.Add(inputChart);
             panel.Children.Add(Card(inputChartPanel));
+            panel.Children.Add(BuildManualCornerAnalysisCard(store, currentTrack, [currentLap], (id, progress) =>
+            {
+                playing = false;
+                timer.Stop();
+                if (playPause is not null) playPause.Content = AppLocalization.Text("replay.play", "播放");
+                replayCursor.Set(panel, id, progress);
+                replayCursor.Commit(panel);
+            }));
 
             var mapPanel = new Grid
             {

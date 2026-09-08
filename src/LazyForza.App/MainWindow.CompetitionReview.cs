@@ -82,6 +82,18 @@ internal sealed partial class MainWindow
         content.Children.Add(BuildReviewFindings(review));
         if (review.Sectors.Count > 0)
             content.Children.Add(BuildSectorStabilityTable(review.Sectors, approximateTiming));
+        var cornerHost = new StackPanel();
+        var openCorners = new Button { Content = "加载弯道复盘", Padding = new Thickness(12, 6, 12, 6),
+            HorizontalAlignment = HorizontalAlignment.Left, IsEnabled = laps.Count > 0 };
+        openCorners.Click += (_, _) =>
+        {
+            var details = store.LoadLapsByIds(laps.OrderByDescending(lap => lap.StartedAt).Take(4).Select(lap => lap.Id).ToArray());
+            cornerHost.Children.Clear();
+            cornerHost.Children.Add(BuildManualCornerAnalysisCard(store,
+                laps.FirstOrDefault() is { } first ? store.LoadTrack(first.TrackId)?.Track : null, details));
+        };
+        content.Children.Add(openCorners);
+        content.Children.Add(cornerHost);
         return Card(content);
     }
 

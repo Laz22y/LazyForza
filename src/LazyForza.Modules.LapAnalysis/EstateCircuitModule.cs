@@ -1363,7 +1363,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             invalidReason,
             BuildSegments(total, samples),
             samples,
-            PlayerIdentitySettings.Normalize(playerCodeProvider()));
+            PlayerIdentitySettings.Normalize(playerCodeProvider())) { TrackRevision = LapTrackRevision.Create(activeTrack) };
         store.SaveLap(lap);
         lastCompletedLap = new EstateCircuitCompletedLap(
             lap.Id,

@@ -32,6 +32,10 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 实验性漂移 HUD 默认关闭。它只根据本车 UDP 推导侧滑和控车趋势，不复刻游戏评分，也不代替玩家判断。
 
+圈速对比、赛后复盘和回放工作台支持手动弯道分析：输入区间的起终点距离，或点击曲线标记，再选择另一条已记录的有效参考圈。按赛道距离比较区间耗时、制动起点、最低速度及恢复油门位置；最多显示三条中文差异说明，点击即可定位曲线。区间标记保存在本机，每个赛道版本最多 32 个；跨终点弯请拆成两段。
+
+弯道比较要求路线修订、方向、分段版本及车辆条件兼容。旧圈缺少路线修订或完整车辆信息时仍可查看和回放，但不生成弯道结论。区间采样缺失、间隔过大或输入事件证据不足时会明确提示；差异说明不把相关性当成提速原因，也不代替对调校、天气等条件的核对。
+
 地产赛事页提供默认关闭的「本地语音比赛工程师」，播报旗语变化、新处罚、个人最快圈和关键进站预测。可调整音量或立即静音；静音会停止当前语音及提示音并清空待播消息，恢复后不补播。红旗优先打断普通播报，重复事件与频繁预测会被去重和冷却。进站建议保留「预计」「可能」等不确定性表述。
 
 语音使用 Windows 已安装的对应语言本地 SAPI 语音，无需联网；每次完整播报前后有本地合成的短促无线电双音。缺少语音或音频不可用时只停用播报，比赛照常进行。安装对应语音后，可关闭再启用工程师以重试。
@@ -120,6 +124,10 @@ Version 1.5.2 fixes the dashboard not hiding as expected after entering the gara
 | Data and updates | Local database, backup and diagnostics, plus verified GitCode/GitHub update fallback |
 
 The experimental drift HUD is disabled by default. It estimates slip and control trends from local UDP data; it does not reproduce the game's scoring system.
+
+Lap comparison, post-race review and the replay workbench support manually marked corner intervals. Enter start/end distances or mark them on a curve, then choose another recorded valid reference lap. Compare interval time, brake onset, minimum speed and throttle recovery position on the same distance axis. Up to three Chinese observations link to the curves. Up to 32 intervals are saved locally per track revision; split intervals that cross the finish line.
+
+Corner comparisons require compatible route revisions, directions, sector versions and vehicle conditions. Older laps remain viewable and replayable, but missing revision or vehicle evidence prevents corner conclusions. Sparse or invalid samples and uncertain input transitions are reported explicitly. Observations describe differences, without asserting causes or promised time gains.
 
 The Estate racing page includes an optional local race engineer, disabled by default. It announces flag changes, new penalties, personal bests and important pit predictions, with priority, deduplication and cooldowns. Red flags interrupt routine speech. Volume and immediate mute controls apply to speech and the locally synthesized radio cues before and after each complete transmission. Mute clears pending messages; unmuting does not replay them. Pit advice explicitly remains an estimate.
 

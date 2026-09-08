@@ -201,6 +201,8 @@ public sealed record LapSummary(
     IReadOnlyList<LapSegment> Segments,
     string? PlayerCode = null)
 {
+    public string? TrackRevision { get; init; }
+
     public static LapSummary FromRecord(LapRecord lap) => new(
         lap.Id,
         lap.TrackId,
@@ -213,7 +215,7 @@ public sealed record LapSummary(
         lap.IsValid,
         lap.InvalidReason,
         lap.Segments,
-        lap.PlayerCode);
+        lap.PlayerCode) { TrackRevision = lap.TrackRevision };
 
     public LapRecord WithSamples(IReadOnlyList<LapSample> samples) => new(
         Id,
@@ -228,7 +230,7 @@ public sealed record LapSummary(
         InvalidReason,
         Segments,
         samples,
-        PlayerCode);
+        PlayerCode) { TrackRevision = TrackRevision };
 }
 
 public sealed record LapRecord(
@@ -244,7 +246,10 @@ public sealed record LapRecord(
     string? InvalidReason,
     IReadOnlyList<LapSegment> Segments,
     IReadOnlyList<LapSample> Samples,
-    string? PlayerCode = null);
+    string? PlayerCode = null)
+{
+    public string? TrackRevision { get; init; }
+}
 
 public enum SectorColorState
 {

@@ -10,6 +10,50 @@ namespace LazyForza.Storage.Tests;
 public sealed class StorageTests
 {
     [TestMethod]
+    public void SchemaTwelveUpgradeKeepsLegacyLapsAndNewLapsRetainRevisionAndFullVehicle()
+    {
+        var path = TempDatabasePath();
+        var track = TrackAlgorithms.BuildTemplate("Revision test", Enumerable.Range(0, 40)
+            .Select(i => new TrackPoint(i * 5, 0, 0, 0, 1, 0)).ToArray());
+        var vehicle = new VehicleProfileFingerprint(123, 5, 850, 2, 8, 8000, "g3_200", "p300_t400_r7000");
+        var lap = new LapRecord(Guid.NewGuid(), track.Id, track.Direction, TrackAlgorithms.SectorSchemaVersion,
+            Guid.NewGuid(), vehicle, DateTimeOffset.UtcNow, 20, true, null, [],
+            [new(0, 0, 20, 5000, 3, .8, 0, 0, 0, 0, 0)]) { TrackRevision = LapTrackRevision.Create(track) };
+        try
+        {
+            using (var source = new LazyForzaStore(path))
+            {
+                source.SaveTrack(track, TrackAlgorithms.CreateSectors(track));
+                source.SaveLap(lap);
+                source.SetAppSetting("corner-test", "preserved");
+            }
+            using (var reopened = new LazyForzaStore(path))
+            {
+                Assert.AreEqual(vehicle, reopened.LoadLap(lap.Id)!.Vehicle);
+                Assert.AreEqual(lap.TrackRevision, reopened.LoadLapSummaries(track.Id).Single().TrackRevision);
+                Assert.AreEqual(lap.TrackRevision, reopened.LoadLap(lap.Id)!.TrackRevision);
+            }
+            using (var raw = new WinSqliteDatabase(path))
+                raw.Execute("ALTER TABLE Laps DROP COLUMN TrackRevision; ALTER TABLE Laps DROP COLUMN VehicleSnapshot; UPDATE SchemaVersion SET Version=12;");
+            using (var migrated = new LazyForzaStore(path))
+            {
+                Assert.AreEqual(13, migrated.SchemaVersion);
+                var old = migrated.LoadLap(lap.Id)!;
+                Assert.AreEqual(lap.TotalSeconds, old.TotalSeconds);
+                Assert.HasCount(1, old.Samples);
+                Assert.IsNull(old.TrackRevision);
+                Assert.AreEqual(-1, old.Vehicle.DrivetrainType);
+                Assert.AreEqual("preserved", migrated.GetAppSetting("corner-test"));
+                var next = lap with { Id = Guid.NewGuid() };
+                migrated.SaveLap(next);
+                Assert.AreEqual(vehicle, migrated.LoadLap(next.Id)!.Vehicle);
+                Assert.AreEqual(next.TrackRevision, migrated.LoadLap(next.Id)!.TrackRevision);
+            }
+        }
+        finally { DeleteDatabase(path); }
+    }
+
+    [TestMethod]
     public void EstateStrategySamplesAreCompactRoundTrippedAndAutomaticallyRotated()
     {
         var path = TempDatabasePath();
@@ -75,8 +119,8 @@ public sealed class StorageTests
         {
             using var first = new LazyForzaStore(firstPath);
             using var second = new LazyForzaStore(secondPath);
-            Assert.AreEqual(12, first.SchemaVersion);
-            Assert.AreEqual(12, second.SchemaVersion);
+            Assert.AreEqual(13, first.SchemaVersion);
+            Assert.AreEqual(13, second.SchemaVersion);
             await first.SetAsync("dashboard", "enabled", "True", CancellationToken.None);
             Assert.AreEqual("True", await first.GetAsync("dashboard", "enabled", CancellationToken.None));
             Assert.IsNull(await second.GetAsync("dashboard", "enabled", CancellationToken.None));
@@ -236,7 +280,7 @@ public sealed class StorageTests
         try
         {
             using (var initialized = new LazyForzaStore(path))
-                Assert.AreEqual(12, initialized.SchemaVersion);
+                Assert.AreEqual(13, initialized.SchemaVersion);
 
             using (var raw = new WinSqliteDatabase(path))
             {
@@ -255,7 +299,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(12, migrated.SchemaVersion);
+            Assert.AreEqual(13, migrated.SchemaVersion);
             var profile = migrated.ListVehicleProfiles().Single();
             Assert.AreEqual("2014 Alfa Romeo 4C", profile.CustomName);
             Assert.IsFalse(profile.ShiftRecommendationsEnabled);
@@ -345,7 +389,7 @@ public sealed class StorageTests
 
             using (var store = new LazyForzaStore(path))
             {
-                Assert.AreEqual(12, store.SchemaVersion);
+                Assert.AreEqual(13, store.SchemaVersion);
                 var databaseField = typeof(LazyForzaStore).GetField(
                     "database",
                     System.Reflection.BindingFlags.Instance |
@@ -512,7 +556,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(12, migrated.SchemaVersion);
+            Assert.AreEqual(13, migrated.SchemaVersion);
             var migratedField = typeof(LazyForzaStore).GetField(
                 "database",
                 System.Reflection.BindingFlags.Instance |

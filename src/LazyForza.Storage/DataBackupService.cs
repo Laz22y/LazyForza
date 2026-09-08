@@ -111,7 +111,7 @@ public sealed class DataBackupService
         new("Laps",
             ["Id", "TrackId", "Direction", "SectorSchemaVersion", "SessionId",
                 "VehicleFingerprint", "StartedAt", "TotalSeconds", "IsValid", "InvalidReason",
-                "CarClass", "PerformanceIndex", "PlayerCode"],
+                "CarClass", "PerformanceIndex", "PlayerCode", "TrackRevision", "VehicleSnapshot"],
             ["Id"]),
         new("LapSegments",
             ["LapId", "SectorIndex", "TimeSeconds", "IsValid"],
@@ -701,12 +701,13 @@ public sealed class DataBackupService
         var tables = payload.Tables.Select(table =>
         {
             if (string.Equals(table.Name, "Laps", StringComparison.Ordinal) &&
-                table.Columns.SequenceEqual(legacyLapColumns, StringComparer.Ordinal))
+                (table.Columns.SequenceEqual(legacyLapColumns, StringComparer.Ordinal) ||
+                 table.Columns.SequenceEqual(legacyLapColumns.Append("PlayerCode"), StringComparer.Ordinal)))
                 return new BackupTableData(
                     table.Name,
                     Spec("Laps").Columns,
                     table.Rows
-                        .Select(row => row.Concat([null]).ToArray())
+                        .Select(row => row.Concat(Enumerable.Repeat<string?>(null, Spec("Laps").Columns.Length - table.Columns.Length)).ToArray())
                         .ToList());
             if (!string.Equals(table.Name, "LapSamples", StringComparison.Ordinal) ||
                 !table.Columns.SequenceEqual(legacyLapSampleColumns, StringComparer.Ordinal))

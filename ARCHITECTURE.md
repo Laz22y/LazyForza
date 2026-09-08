@@ -73,7 +73,13 @@ cueRpm = targetRpm - rpmRiseRate * totalLatency
 
 ## 存储
 
-当前 `LazyForzaStore.CurrentSchemaVersion` 为 12。基础表包含 AppSettings、ModuleSettings、Sessions、VehicleProfiles、EngineCurveBins、GearModels、ShiftTargets、TrackTemplates、TrackPoints、SectorDefinitions、Laps、LapSegments 与 LapSamples；后续迁移加入动态遥测、地产赛道定义/检查点/维修区/计时类型、地产策略样本和圈速玩家代号。圈速显式保存官方 CarClass/PI；升级前缺失的 CarClass 会先从旧车辆指纹恢复 PI，再按 D 100–400、C 401–500、B 501–600、A 601–700、S1 701–800、S2 801–900、R 901–998、X 999 的规范区间补齐。
+手动弯道分析使用 `ManualCornerAnalyzer`，入口位于圈速对比、赛后复盘和回放工作台。手动区间按本地路线修订、方向及分段版本保存在 AppSettings；新圈在记录时携带 `LapTrackRevision`，身份包含模板几何、修订时间、方向、计时类型及游戏版本信息。几何按毫米、切向按 1e-6 精度规范化，避免 SQLite 数值往返改变身份。该标识属于 LazyForza，不是 FH6 官方赛事版本。旧圈缺少标识或完整车辆条件时不参与弯道比较，不补猜历史版本。
+
+分析只选择另一条真实有效 `LapRecord`；要求相同路线修订、方向、分段版本，以及兼容的车型、Class/PI、驱动、气缸、最大转速和已有配置签名。尚未观察到的调校、天气等条件不被视为已确认相同。两条圈的区间边界必须被采样覆盖，每侧至少 8 点，相邻不超过 25 m / 0.75 s，距离与时间必须严格递增；拒绝异常、乱序与缺口，不外推。按共同距离轴线性插值耗时和速度，原始输入上以 25% 制动、70% 油门阈值及至少 0.15 s / 3 m 的持续证据定位操作；恢复油门需位于最低速度之后且制动不超过 10%。未捕获阈值跨越时显示缺失而非断言没有操作。最多生成三条中文差异说明，只描述观测关系，不估算潜在提速收益。
+
+当前 `LazyForzaStore.CurrentSchemaVersion` 为 13。基础表包含 AppSettings、ModuleSettings、Sessions、VehicleProfiles、EngineCurveBins、GearModels、ShiftTargets、TrackTemplates、TrackPoints、SectorDefinitions、Laps、LapSegments 与 LapSamples；后续迁移加入动态遥测、地产赛道定义/检查点/维修区/计时类型、地产策略样本和圈速玩家代号。圈速显式保存官方 CarClass/PI；升级前缺失的 CarClass 会先从旧车辆指纹恢复 PI，再按 D 100–400、C 401–500、B 501–600、A 601–700、S1 701–800、S2 801–900、R 901–998、X 999 的规范区间补齐。
+
+Schema 13 以事务追加可空的 `Laps.TrackRevision` 和 `VehicleSnapshot`，新圈同时保存本地路线修订与完整车辆指纹。原有简化指纹继续保留；旧行的新字段保持空，不能从当前配置反填历史条件。便携备份同时保存新增列，并能为旧备份补空列；数据库快照仍按现有迁移备份流程处理。`.lfzlap` 与单圈 `.lfztelemetry` 的圈对象新增可选 `TrackRevision`，容器版本不变，新读取器接受旧文件中的缺失字段，旧读取器忽略新增字段；旧应用会拒绝更高版本的数据库，降级应使用升级前备份。赛事网络协议不变。
 
 圈速列表使用两次批量查询读取圈元数据与所有分段，不再逐圈查询；只有图表确认显示的圈才批量读取 `LapSamples`。兼容用的 `LoadLaps` 也改为固定次数的批量查询。写入使用事务，开启外键与 WAL；高频原始包不写 SQLite，而是顺序写入版本化 `.lfztelemetry`。
 
