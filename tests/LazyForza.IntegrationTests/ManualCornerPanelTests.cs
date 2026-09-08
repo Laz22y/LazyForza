@@ -20,14 +20,8 @@ public sealed class ManualCornerPanelTests
         Exception? failure = null;
         var thread = new Thread(() =>
         {
-            var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-            foreach (var (key, color) in new[] { ("CardBrush", "#171F2A"), ("BorderBrush", "#2A3645"),
-                         ("TextBrush", "#F3F4F5"), ("MutedBrush", "#9AA4B2") })
-            {
-                var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-                brush.Freeze();
-                application.Resources[key] = brush;
-            }
+            var application = new LazyForza.App.App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            application.InitializeComponent();
             try
             {
                 using var store = new LazyForzaStore(path);
@@ -60,7 +54,14 @@ public sealed class ManualCornerPanelTests
                 var jump = Descendants<Button>(card).Single(button => button.Content is TextBlock text && text.Text.Contains("查看曲线"));
                 Click(jump);
                 Assert.IsTrue(navigated);
+                Assert.HasCount(0, Descendants<LapInputChart>(card), "Input charts load only when their tab is opened.");
+                var tabs = Descendants<TabControl>(card).Single();
+                tabs.SelectedIndex = 1;
+                Assert.HasCount(1, Descendants<LapInputChart>(card));
+                tabs.SelectedIndex = 2;
                 Assert.HasCount(2, Descendants<LapInputChart>(card));
+                tabs.SelectedIndex = 0;
+                Assert.IsFalse(Descendants<Expander>(card).Single().IsExpanded, "Saving a marker closes the editor.");
                 card.Measure(new Size(900, double.PositiveInfinity));
                 card.Arrange(new Rect(new Point(), card.DesiredSize));
                 card.UpdateLayout();

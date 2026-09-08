@@ -16,32 +16,38 @@ internal sealed partial class MainWindow
         if (track is null || laps.Count == 0)
             return EmptyCard("手动弯道分析", "需要带有已保存赛道信息的完整圈；无法确认路线版本的原始回放不生成弯道差异。");
         var panel = new StackPanel();
-        panel.Children.Add(Label("手动弯道分析", 17, FontWeights.SemiBold));
-        var guidance = Label("手动输入距起点的米数，或先点标记按钮，再点击下方曲线。区间至少 30 米，跨终点弯请分开标记。选择另一条已记录的有效圈作为参考。", 12, FontWeights.Normal, "MutedBrush");
-        guidance.TextWrapping = TextWrapping.Wrap;
-        panel.Children.Add(guidance);
-        var selectors = new WrapPanel { Margin = new Thickness(0, 8, 0, 8) };
-        var target = new ComboBox { MinWidth = 210, MaxWidth = 320, Margin = new Thickness(0, 0, 12, 0) };
-        var reference = new ComboBox { MinWidth = 210, MaxWidth = 320 };
-        foreach (var lap in laps) target.Items.Add(new ComboBoxItem { Content = $"所选圈 · {LapCaption(LapSummary.FromRecord(lap))}", Tag = lap });
-        selectors.Children.Add(target);
-        selectors.Children.Add(reference);
+        var selectors = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+        selectors.ColumnDefinitions.Add(new ColumnDefinition());
+        selectors.ColumnDefinitions.Add(new ColumnDefinition());
+        var target = new ComboBox { HorizontalContentAlignment = HorizontalAlignment.Left };
+        var reference = new ComboBox { HorizontalContentAlignment = HorizontalAlignment.Left };
+        foreach (var lap in laps) target.Items.Add(new ComboBoxItem { Content = LapCaption(LapSummary.FromRecord(lap)), Tag = lap });
+        selectors.Children.Add(AnalysisField("分析圈", target));
+        var referenceField = AnalysisField("参考圈", reference);
+        Grid.SetColumn(referenceField, 1);
+        selectors.Children.Add(referenceField);
         panel.Children.Add(selectors);
-        var markers = new ComboBox { MinWidth = 220, Margin = new Thickness(0, 0, 0, 8) };
-        panel.Children.Add(markers);
-        var editor = new WrapPanel();
-        var name = new TextBox { Text = "T1", Width = 90, MaxLength = 40 };
-        var start = new TextBox { Text = "0", Width = 75 };
-        var end = new TextBox { Text = "100", Width = 75 };
-        var save = Button("保存区间");
-        var remove = Button("删除区间");
-        var markStart = Button("曲线标记起点");
-        var markEnd = Button("曲线标记终点");
-        editor.Children.Add(Label("弯名", 12)); editor.Children.Add(name);
-        editor.Children.Add(Label(" 起点 m ", 12)); editor.Children.Add(start);
-        editor.Children.Add(Label(" 终点 m ", 12)); editor.Children.Add(end);
-        editor.Children.Add(save); editor.Children.Add(remove); editor.Children.Add(markStart); editor.Children.Add(markEnd);
-        panel.Children.Add(editor);
+        var markers = new ComboBox { MinWidth = 220 };
+        panel.Children.Add(AnalysisField("弯道区间", markers));
+        var editor = new StackPanel { Margin = new Thickness(16, 4, 16, 16) };
+        var fields = new WrapPanel();
+        var name = new TextBox { Text = "T1", MaxLength = 40 };
+        var start = new TextBox { Text = "0" };
+        var end = new TextBox { Text = "100" };
+        fields.Children.Add(AnalysisField("弯名", name, 140));
+        fields.Children.Add(AnalysisField("起点 · m", start, 110));
+        fields.Children.Add(AnalysisField("终点 · m", end, 110));
+        editor.Children.Add(fields);
+        var actions = new WrapPanel();
+        var save = AnalysisButton("保存区间", primary: true);
+        var remove = AnalysisButton("删除区间");
+        var markStart = AnalysisButton("曲线标记起点");
+        var markEnd = AnalysisButton("曲线标记终点");
+        foreach (var button in new[] { save, markStart, markEnd, remove }) actions.Children.Add(button);
+        editor.Children.Add(actions);
+        editor.Children.Add(Label("区间至少 30 米；跨终点弯请分开标记。", 12, FontWeights.Normal, "MutedBrush"));
+        var editSection = AnalysisDisclosure("编辑弯道区间", editor);
+        panel.Children.Add(editSection);
         var status = Label("", 12, FontWeights.Normal, "MutedBrush");
         status.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(status);
@@ -57,11 +63,11 @@ internal sealed partial class MainWindow
             {
                 marking.Text = position.ProgressMeters.ToString("0.0", CultureInfo.InvariantCulture);
                 marking = null;
-                status.Text = "位置已填写，点击“保存区间”保留标记。";
+                status.Text = AppLocalization.Literal("位置已填写，点击“保存区间”保留标记。");
             }
         };
-        markStart.Click += (_, _) => { marking = start; status.Text = "请在下方曲线上点击弯道起点。"; };
-        markEnd.Click += (_, _) => { marking = end; status.Text = "请在下方曲线上点击弯道终点。"; };
+        markStart.Click += (_, _) => { marking = start; status.Text = AppLocalization.Literal("请在下方曲线上点击弯道起点。"); };
+        markEnd.Click += (_, _) => { marking = end; status.Text = AppLocalization.Literal("请在下方曲线上点击弯道终点。"); };
         var candidates = store.LoadLapSummaries(track.Id);
         var corners = new List<ManualCorner>();
         string key = "";
@@ -74,9 +80,9 @@ internal sealed partial class MainWindow
             if (selected is null) return;
             referenceLap = null;
             reference.Items.Clear();
-            reference.Items.Add(new ComboBoxItem { Content = "选择真实参考圈…" });
+            reference.Items.Add(new ComboBoxItem { Content = AppLocalization.Literal("选择真实参考圈…") });
             foreach (var lap in candidates.Where(lap => ManualCornerAnalyzer.Compatibility(track, LapSummary.FromRecord(selected), lap) is null))
-                reference.Items.Add(new ComboBoxItem { Content = $"参考圈 · {LapCaption(lap)}", Tag = lap.Id });
+                reference.Items.Add(new ComboBoxItem { Content = LapCaption(lap), Tag = lap.Id });
             corners.Clear();
             key = $"cornerAnalysis.v1.{track.Id:N}.{track.Direction}.{selected.SectorSchemaVersion}.{LapTrackRevision.Create(track)}";
             try
@@ -84,11 +90,13 @@ internal sealed partial class MainWindow
                 if (store.GetAppSetting(key) is { } json && JsonSerializer.Deserialize<ManualCorner[]>(json) is { } saved)
                     corners.AddRange(saved.Where(corner => corner is not null && ManualCornerAnalyzer.IsValid(corner, track.LengthMeters)).Take(32));
                 status.Text = reference.Items.Count == 1
-                    ? "暂无兼容参考圈：要求同路线修订、方向、分段版本和车辆条件；旧圈缺少修订或车辆信息时不作比较。"
-                    : "车辆条件按型号、Class/PI、驱动及已有可观察配置限定；未记录的调校、天气等差异仍可能影响结果。";
+                    ? AppLocalization.Literal("暂无兼容参考圈。需要同路线版本、方向和车辆条件的有效圈。")
+                    : string.Empty;
+                reference.ToolTip = AppLocalization.Literal("仅列出路线修订、方向、分段版本和车辆条件兼容的真实圈；未记录的调校与天气仍可能影响结果。");
             }
             catch (JsonException) { status.Text = "保存的弯道标记无法读取，请重新标记；保存后将替换这些标记。"; }
             RefreshMarkers();
+            editSection.IsExpanded = corners.Count == 0;
             reference.SelectedIndex = 0;
         };
         reference.SelectionChanged += (_, _) =>
@@ -103,6 +111,7 @@ internal sealed partial class MainWindow
             name.Text = corner.Name;
             start.Text = corner.StartS.ToString("0.0", CultureInfo.InvariantCulture);
             end.Text = corner.EndS.ToString("0.0", CultureInfo.InvariantCulture);
+            Analyze();
         };
         save.Click += (_, _) =>
         {
@@ -123,35 +132,39 @@ internal sealed partial class MainWindow
             Persist();
         };
         target.SelectedIndex = 0;
-        return Card(panel);
+        var card = AnalysisCard(panel);
+        ApplyAnalysisTheme(card);
+        return card;
 
         void Persist()
         {
             store.SetAppSetting(key, JsonSerializer.Serialize(corners));
-            status.Text = "区间已保存到本机，按赛道修订、方向和分段版本隔离。";
+            status.Text = AppLocalization.Literal("区间已保存。");
             RefreshMarkers();
+            editSection.IsExpanded = false;
             Analyze();
         }
         void RefreshMarkers()
         {
+            var selectedName = (markers.SelectedItem as ComboBoxItem)?.Tag is ManualCorner current ? current.Name : name.Text;
             markers.Items.Clear();
             foreach (var corner in corners.OrderBy(corner => corner.StartS))
                 markers.Items.Add(new ComboBoxItem { Content = $"{corner.Name} · {corner.StartS:0.0}–{corner.EndS:0.0} m", Tag = corner });
+            markers.SelectedItem = markers.Items.OfType<ComboBoxItem>().FirstOrDefault(item => item.Tag is ManualCorner corner && corner.Name == selectedName)
+                                   ?? markers.Items.OfType<ComboBoxItem>().FirstOrDefault();
+            remove.IsEnabled = corners.Count > 0;
         }
         void RenderCurves()
         {
             curves.Children.Clear();
             if (selected is null) return;
             var series = referenceLap is null ? new[] { selected } : new[] { selected, referenceLap };
-            curves.Children.Add(Label("弯道对比曲线 · 同一距离轴 · 点击定位", 13, FontWeights.SemiBold));
             speedChart = new LapTelemetryChart(series, track.LengthMeters,
-                series.Select((lap, index) => new LapSeriesLegendEntry(index == 0 ? "所选圈" : "参考圈", LapCaption(LapSummary.FromRecord(lap)))).ToArray(), cursor) { Height = 240 };
-            curves.Children.Add(speedChart);
-            for (var i = 0; i < series.Length; i++)
-            {
-                curves.Children.Add(Label(i == 0 ? "所选圈 · 油门 / 制动 / 方向" : "参考圈 · 油门 / 制动 / 方向", 12));
-                curves.Children.Add(new LapInputChart(series[i], track.LengthMeters, cursor) { Height = 170 });
-            }
+                series.Select((lap, index) => new LapSeriesLegendEntry(AppLocalization.Literal(index == 0 ? "分析圈" : "参考圈"), LapCaption(LapSummary.FromRecord(lap)))).ToArray(), cursor) { Height = 300 };
+            var pages = new List<(string, Func<UIElement>)> { ("速度", () => speedChart) };
+            pages.Add(("分析圈输入", () => new LapInputChart(series[0], track.LengthMeters, cursor) { Height = 220 }));
+            if (series.Length > 1) pages.Add(("参考圈输入", () => new LapInputChart(series[1], track.LengthMeters, cursor) { Height = 220 }));
+            curves.Children.Add(AnalysisTabs(pages.ToArray()));
         }
         void Analyze()
         {
@@ -159,21 +172,32 @@ internal sealed partial class MainWindow
             if (selected is null || referenceLap is null) { results.Children.Add(Label("选择参考圈后生成弯道差异。", 12)); return; }
             if (corners.Count == 0) { results.Children.Add(Label("请先标记至少一个弯道区间。", 12)); return; }
             var comparisons = corners.OrderBy(corner => corner.StartS).Select(corner => ManualCornerAnalyzer.Compare(track, selected, referenceLap, corner)).ToArray();
-            foreach (var comparison in comparisons)
+            var comparison = comparisons.FirstOrDefault(item => (markers.SelectedItem as ComboBoxItem)?.Tag is ManualCorner corner && item.Corner.Name == corner.Name);
+            if (comparison is not null)
             {
-                var text = $"{comparison.Corner.Name} · {comparison.Corner.StartS:0.0}–{comparison.Corner.EndS:0.0} m\n";
                 if (comparison.Selected is { } a && comparison.Reference is { } b)
-                    text += $"所选 / 参考：耗时 {a.Seconds:0.000} / {b.Seconds:0.000} s；最低速度 {a.MinimumSpeedKph:0.0} / {b.MinimumSpeedKph:0.0} km/h\n" +
-                        $"制动起点 {Meters(a.BrakeStartS)} / {Meters(b.BrakeStartS)}；恢复油门 {Meters(a.ThrottleRecoveryS)} / {Meters(b.ThrottleRecoveryS)}\n";
-                var row = Label(text + comparison.Message, 12);
-                row.TextWrapping = TextWrapping.Wrap;
-                row.Margin = new Thickness(0, 4, 0, 6);
-                results.Children.Add(row);
+                {
+                    var metrics = new WrapPanel();
+                    Metric("区间耗时", $"{a.Seconds - b.Seconds:+0.000;-0.000;0.000} s", $"{a.Seconds:0.000} / {b.Seconds:0.000} s");
+                    Metric("最低速度", $"{a.MinimumSpeedKph:0.0} km/h", $"{AppLocalization.Literal("参考")} {b.MinimumSpeedKph:0.0} km/h");
+                    Metric("制动起点", Meters(a.BrakeStartS), $"{AppLocalization.Literal("参考")} {Meters(b.BrakeStartS)}");
+                    Metric("恢复油门", Meters(a.ThrottleRecoveryS), $"{AppLocalization.Literal("参考")} {Meters(b.ThrottleRecoveryS)}");
+                    results.Children.Add(metrics);
+                    void Metric(string title, string value, string detail)
+                    {
+                        var metric = new StackPanel { Width = 170, Margin = new Thickness(0, 0, 14, 12) };
+                        metric.Children.Add(Label(title, 12, FontWeights.Normal, "MutedBrush"));
+                        metric.Children.Add(Label(value, 21, FontWeights.SemiBold));
+                        metric.Children.Add(Label(detail, 12, FontWeights.Normal, "MutedBrush"));
+                        metrics.Children.Add(metric);
+                    }
+                }
+                else results.Children.Add(Label(comparison.Message, 13, FontWeights.Normal, "MutedBrush"));
             }
             foreach (var difference in ManualCornerAnalyzer.Describe(comparisons))
             {
-                var jump = Button("");
-                jump.Content = new TextBlock { Text = difference.Text + "  查看曲线 →", TextWrapping = TextWrapping.Wrap };
+                var jump = AnalysisButton("");
+                jump.Content = new TextBlock { Text = difference.Text + "  " + AppLocalization.Literal("查看曲线 →"), TextWrapping = TextWrapping.Wrap };
                 jump.HorizontalContentAlignment = HorizontalAlignment.Left;
                 jump.Click += (_, _) =>
                 {
@@ -184,7 +208,6 @@ internal sealed partial class MainWindow
                 results.Children.Add(jump);
             }
         }
-        static Button Button(string text) => new() { Content = text, Padding = new Thickness(9, 5, 9, 5), Margin = new Thickness(5, 0, 0, 5) };
         static string Meters(double? value) => value is double s ? $"{s:0.0} m" : "—";
         static string LapCaption(LapSummary lap) => $"{lap.TotalSeconds:0.000} s · {lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss} · {PlayerCodeText(lap.PlayerCode)}";
     }
