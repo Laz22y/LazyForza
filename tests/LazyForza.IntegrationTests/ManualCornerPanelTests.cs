@@ -60,7 +60,8 @@ public sealed class ManualCornerPanelTests
                 Assert.HasCount(1, Descendants<LapInputChart>(card));
                 tabs.SelectedIndex = 2;
                 Assert.HasCount(2, Descendants<LapInputChart>(card));
-                tabs.SelectedIndex = 0;
+                Click(jump);
+                Assert.AreEqual(0, tabs.SelectedIndex, "Difference navigation reveals its chart even when an input tab is selected.");
                 Assert.IsFalse(Descendants<Expander>(card).Single().IsExpanded, "Saving a marker closes the editor.");
                 card.Measure(new Size(900, double.PositiveInfinity));
                 card.Arrange(new Rect(new Point(), card.DesiredSize));
@@ -73,6 +74,45 @@ public sealed class ManualCornerPanelTests
                 var revised = MainWindow.BuildManualCornerAnalysisCard(store, track with { UpdatedAt = time.AddSeconds(1) }, [selected]);
                 Assert.AreEqual(0, Descendants<ComboBox>(revised).ElementAt(2).Items.Count);
                 Assert.AreEqual(1, Descendants<ComboBox>(revised).ElementAt(1).Items.Count);
+
+                // Tabs unload their old visuals. Returning must reconnect the shared cursor,
+                // catch up to the current position and avoid accumulating subscriptions.
+                var cursor = new LapAnalysisCursor();
+                FrameworkElement[] visuals =
+                [
+                    new LapTelemetryChart([selected], 500, linkedCursor: cursor),
+                    new LapInputChart(selected, 500, cursor),
+                    new TrackMapView([selected], track, linkedCursor: cursor)
+                ];
+                foreach (var visual in visuals)
+                {
+                    visual.Measure(new Size(800, 300));
+                    visual.Arrange(new Rect(0, 0, 800, 300));
+                    var hover = visual.GetType().GetField("hover", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                    for (var cycle = 0; cycle < 3; cycle++)
+                    {
+                        visual.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
+                        cursor.Set(this, selected.Id, 100 + cycle * 10);
+                        Assert.IsNotNull(hover.GetValue(visual));
+                        visual.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
+                        var previous = hover.GetValue(visual);
+                        cursor.Set(this, selected.Id, 300 + cycle * 10);
+                        Assert.AreSame(previous, hover.GetValue(visual), "Hidden charts detach from cursor updates.");
+                        visual.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
+                        Assert.AreNotSame(previous, hover.GetValue(visual), "A returning chart catches up to the current cursor.");
+                    }
+                    visual.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
+                }
+
+                var builds = 0;
+                var lazyTabs = MainWindow.AnalysisTabs(("曲线", () => new TextBlock()), ("弯道", () => { builds++; return new TextBox { Text = "draft" }; }));
+                Assert.AreEqual(0, builds);
+                lazyTabs.SelectedIndex = 1;
+                var draft = ((TabItem)lazyTabs.Items[1]).Content;
+                lazyTabs.SelectedIndex = 0;
+                lazyTabs.SelectedIndex = 1;
+                Assert.AreSame(draft, ((TabItem)lazyTabs.Items[1]).Content, "Tab switches preserve local edits.");
+                Assert.AreEqual(1, builds);
             }
             catch (Exception exception) { failure = exception; }
             finally { application.Shutdown(); }

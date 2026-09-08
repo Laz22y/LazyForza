@@ -255,7 +255,8 @@ public partial class App : Application
                     captureEstateQa,
                     captureEstateRaceQa,
                     captureEstateRaceFinishedQa,
-                    captureEstateRaceChequeredQa);
+                    captureEstateRaceChequeredQa,
+                    e.Args.Contains("--capture-analysis-qa", StringComparer.OrdinalIgnoreCase) && explicitDataRoot is not null);
             }
             else if (recordSeconds is not null) _ = AutoRecordAndExitAsync(recordSeconds.Value);
         }
@@ -583,11 +584,17 @@ public partial class App : Application
         bool captureEstateQa,
         bool captureEstateRaceQa,
         bool captureEstateRaceFinishedQa,
-        bool captureEstateRaceChequeredQa)
+        bool captureEstateRaceChequeredQa,
+        bool captureAnalysisQa = false)
     {
         try
         {
             await Task.Delay(1800);
+            if (captureAnalysisQa)
+            {
+                await ((MainWindow)MainWindow).CaptureAnalysisQaAsync(directory);
+                return;
+            }
             if (captureEstateQa)
             {
                 await ((MainWindow)MainWindow).CaptureEstateQaAsync(directory);

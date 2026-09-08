@@ -79,6 +79,10 @@ internal static class AppLocalization
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly DynamicLiteralTemplate[] DynamicLiteralTemplates =
     [
+        Template("^(?<name>.+)：区间比参考圈(?<direction>慢|快) (?<time>.+) 秒，最低速度(?<speed>.+) km/h。两项差异不代表因果关系。$", "corner.diff.time", "{0}：区间比参考圈{1} {2} 秒，最低速度{3} km/h。两项差异不代表因果关系。", "name", "direction", "time", "speed"),
+        Template("^(?<name>.+)：制动达到 25% 的起点比参考圈(?<direction>晚|早) (?<distance>.+) 米；可结合曲线复查，不能据此断定更快。$", "corner.diff.brake", "{0}：制动达到 25% 的起点比参考圈{1} {2} 米；可结合曲线复查，不能据此断定更快。", "name", "direction", "distance"),
+        Template("^(?<name>.+)：最低速度后油门恢复至 70% 的位置比参考圈(?<direction>晚|早) (?<distance>.+) 米；这只是本次输入差异。$", "corner.diff.throttle", "{0}：最低速度后油门恢复至 70% 的位置比参考圈{1} {2} 米；这只是本次输入差异。", "name", "direction", "distance"),
+        Template("^(?<name>.+)：最低速度比参考圈(?<speed>.+) km/h，区间耗时差小于 0.03 秒，不据此评价跑法优劣。$", "corner.diff.minimum", "{0}：最低速度比参考圈{1} km/h，区间耗时差小于 0.03 秒，不据此评价跑法优劣。", "name", "speed"),
         Template("^(?<reason>.+)，本圈已取消。$", "template.estateLapCancelled", "{0}，本圈已取消。", "reason"),
         Template("^本圈无效：(?<reason>.+)。$", "template.invalidEstateLap", "本圈无效：{0}。", "reason"),
         Template("^参考圈已录入：(?<seconds>.+) s。$", "template.referenceLapRecorded", "参考圈已录入：{0} s。", "seconds"),

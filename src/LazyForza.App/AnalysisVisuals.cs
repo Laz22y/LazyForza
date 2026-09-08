@@ -70,6 +70,26 @@ internal static class AnalysisOverlayDrawing
 {
     private static readonly FontFamily Font = new("Microsoft YaHei UI");
 
+    public static void DrawChartAxes(DrawingContext context, Rect bounds, double maximum, double distance, double pixelsPerDip, bool percent = false)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(145, 160, 176));
+        for (var index = 0; index <= 4; index++)
+        {
+            var value = maximum * index / 4;
+            var label = Text($"{value:0}{(percent ? "%" : string.Empty)}");
+            context.DrawText(label, new Point(bounds.Left - label.Width - 8, bounds.Bottom - bounds.Height * index / 4 - label.Height / 2));
+        }
+        var steps = bounds.Width < 500 ? 2 : 5;
+        for (var index = 0; index <= steps; index++)
+        {
+            var label = Text($"{distance * index / steps / 1000:0.0} km");
+            context.DrawText(label, new Point(Math.Clamp(bounds.Left + bounds.Width * index / steps - label.Width / 2,
+                bounds.Left, bounds.Right - label.Width), bounds.Bottom + 5));
+        }
+        FormattedText Text(string value) => new(value, System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+            new Typeface(Font, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal), 11, brush, pixelsPerDip);
+    }
+
     public static Rect SelectSeriesLegendBounds(
         Rect renderBounds,
         int entryCount,
@@ -153,14 +173,14 @@ internal static class AnalysisOverlayDrawing
             var textWidth = Math.Max(40, chrome.Width - 46);
             var primary = OneLineText(
                 entry.PrimaryText,
-                9.5,
+                12,
                 FontWeights.SemiBold,
                 Color.FromRgb(244, 247, 250),
                 textWidth,
                 pixelsPerDip);
             var secondary = OneLineText(
                 entry.SecondaryText,
-                8,
+                10,
                 FontWeights.Normal,
                 Color.FromRgb(160, 174, 188),
                 textWidth,
@@ -290,6 +310,13 @@ internal sealed class LapTelemetryChart : FrameworkElement
             trackLengthMeters);
         this.linkedCursor = linkedCursor;
         if (linkedCursor is not null) linkedCursor.Changed += OnLinkedCursorChanged;
+        Loaded += (_, _) =>
+        {
+            if (this.linkedCursor is null) return;
+            this.linkedCursor.Changed -= OnLinkedCursorChanged;
+            this.linkedCursor.Changed += OnLinkedCursorChanged;
+            OnLinkedCursorChanged(this.linkedCursor, this.linkedCursor.Position);
+        };
         hoverToolTip = CreateToolTip(this);
         ClipToBounds = true;
         SnapsToDevicePixels = true;
@@ -392,6 +419,8 @@ internal sealed class LapTelemetryChart : FrameworkElement
                 new Pen(new SolidColorBrush(Color.FromRgb(48, 58, 72)), 1),
                 metrics.Bounds);
             DrawChartGrid(drawingContext, metrics.Bounds);
+            AnalysisOverlayDrawing.DrawChartAxes(drawingContext, metrics.Bounds, metrics.MaxSpeed * 3.6, metrics.MaxProgress,
+                VisualTreeHelper.GetDpi(this).PixelsPerDip);
             for (var index = 0; index < laps.Length; index++)
                 DrawSeries(drawingContext, laps[index].Samples, index, metrics);
             var legendBounds = AnalysisOverlayDrawing.SelectSeriesLegendBounds(
@@ -662,6 +691,12 @@ internal sealed class LapInputChart : FrameworkElement
             trackLengthMeters);
         hoverToolTip = LapTelemetryChart.CreateToolTip(this);
         linkedCursor.Changed += OnLinkedCursorChanged;
+        Loaded += (_, _) =>
+        {
+            linkedCursor.Changed -= OnLinkedCursorChanged;
+            linkedCursor.Changed += OnLinkedCursorChanged;
+            OnLinkedCursorChanged(linkedCursor, linkedCursor.Position);
+        };
         ClipToBounds = true;
         SnapsToDevicePixels = true;
         MouseMove += (_, eventArgs) => UpdateHover(eventArgs.GetPosition(this));
@@ -738,6 +773,7 @@ internal sealed class LapInputChart : FrameworkElement
                     SteeringColor,
                     1.7);
             DrawLegend(context, bounds);
+            AnalysisOverlayDrawing.DrawChartAxes(context, bounds, 100, progressExtent, VisualTreeHelper.GetDpi(this).PixelsPerDip, percent: true);
         }
         if (drawing.CanFreeze) drawing.Freeze();
         baseDrawing = drawing;
@@ -978,6 +1014,13 @@ internal sealed class TrackMapView : FrameworkElement
                              Guid.Empty;
         this.linkedCursor = linkedCursor;
         if (linkedCursor is not null) linkedCursor.Changed += OnLinkedCursorChanged;
+        Loaded += (_, _) =>
+        {
+            if (this.linkedCursor is null) return;
+            this.linkedCursor.Changed -= OnLinkedCursorChanged;
+            this.linkedCursor.Changed += OnLinkedCursorChanged;
+            OnLinkedCursorChanged(this.linkedCursor, this.linkedCursor.Position);
+        };
         trackPoints = track?.Points.ToArray() ?? [];
         layoutKind = track?.LayoutKind ?? TrackLayoutKind.Circuit;
         endpoints = ChartInteractionAlgorithms.SummarizeTrackEndpoints(trackPoints) ??

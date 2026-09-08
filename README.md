@@ -36,6 +36,8 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 圈速对比、赛后复盘和回放工作台支持手动弯道分析：输入区间的起终点距离，或点击曲线标记，再选择另一条已记录的有效参考圈。按赛道距离比较区间耗时、制动起点、最低速度及恢复油门位置；最多显示三条中文差异说明，点击即可定位曲线。区间标记保存在本机，每个赛道版本最多 32 个；跨终点弯请拆成两段。
 
+圈速分析默认打开最近有效圈，通过「选择对比圈」切换最多四圈。「曲线」「走线」「弯道」使用统一页签；实时分段、记录管理和导入导出按需展开。回放的播放、时间轴与读数集中显示；弯道编辑收起后保留草稿，切换视图仍保持距离游标联动。
+
 弯道比较要求路线修订、方向、分段版本及车辆条件兼容。旧圈缺少路线修订或完整车辆信息时仍可查看和回放，但不生成弯道结论。区间采样缺失、间隔过大或输入事件证据不足时会明确提示；差异说明不把相关性当成提速原因，也不代替对调校、天气等条件的核对。
 
 地产赛事页提供默认关闭的「本地语音比赛工程师」，播报旗语变化、新处罚、个人最快圈和关键进站预测。可调整音量或立即静音；静音会停止当前语音及提示音并清空待播消息，恢复后不补播。红旗优先打断普通播报，重复事件与频繁预测会被去重和冷却。进站建议保留「预计」「可能」等不确定性表述。
@@ -129,7 +131,9 @@ The experimental drift HUD is disabled by default. It estimates slip and control
 
 Track identification accommodates rear grid positions and waits for route divergence when events such as Goliath and Legend Island share an opening corridor. A newly reset race clock and a low vehicle speed at a different known grid far from the previous event can open a new competition session even without a saved result. Ordinary menu pauses and rewinds preserve the current session.
 
-Lap comparison, post-race review and the replay workbench support manually marked corner intervals. Enter start/end distances or mark them on a curve, then choose another recorded valid reference lap. Compare interval time, brake onset, minimum speed and throttle recovery position on the same distance axis. Up to three Chinese observations link to the curves. Up to 32 intervals are saved locally per track revision; split intervals that cross the finish line.
+Lap comparison, post-race review and the replay workbench support manually marked corner intervals. Enter start/end distances or mark them on a curve, then choose another recorded valid reference lap. Compare interval time, brake onset, minimum speed and throttle recovery position on the same distance axis. Up to three localized observations link to the curves. Up to 32 intervals are saved locally per track revision; split intervals that cross the finish line.
+
+Lap analysis opens the latest valid lap by default; expand “Choose laps to compare” to compare up to four. Charts, racing lines and corners share a consistent tab layout, with live sectors, record management and file exchange available on demand. Replay groups playback controls, the timeline and readouts together. Collapsing the corner editor preserves its draft, and switching views keeps the distance cursor linked.
 
 Corner comparisons require compatible route revisions, directions, sector versions and vehicle conditions. Older laps remain viewable and replayable, but missing revision or vehicle evidence prevents corner conclusions. Sparse or invalid samples and uncertain input transitions are reported explicitly. Observations describe differences, without asserting causes or promised time gains.
 

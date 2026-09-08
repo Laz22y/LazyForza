@@ -81,20 +81,20 @@ internal sealed partial class MainWindow
         content.Children.Add(BuildReviewMetrics(review, approximateTiming, compact: true));
         content.Children.Add(BuildReviewFindings(review));
         if (review.Sectors.Count > 0)
-            content.Children.Add(BuildSectorStabilityTable(review.Sectors, approximateTiming));
-        var cornerHost = new StackPanel();
-        var openCorners = new Button { Content = "加载弯道复盘", Padding = new Thickness(12, 6, 12, 6),
-            HorizontalAlignment = HorizontalAlignment.Left, IsEnabled = laps.Count > 0 };
-        openCorners.Click += (_, _) =>
+            content.Children.Add(AnalysisDisclosure("分段稳定性", BuildSectorStabilityTable(review.Sectors, approximateTiming)));
+        var cornerHost = new StackPanel { Margin = new Thickness(16, 8, 16, 16) };
+        var cornerSection = AnalysisDisclosure("弯道复盘", cornerHost);
+        cornerSection.IsEnabled = laps.Count > 0;
+        cornerSection.Expanded += (_, _) =>
         {
+            if (cornerHost.Children.Count > 0) return;
             var details = store.LoadLapsByIds(laps.OrderByDescending(lap => lap.StartedAt).Take(4).Select(lap => lap.Id).ToArray());
             cornerHost.Children.Clear();
-            cornerHost.Children.Add(BuildManualCornerAnalysisCard(store,
-                laps.FirstOrDefault() is { } first ? store.LoadTrack(first.TrackId)?.Track : null, details));
+            cornerHost.Children.Add(AnalysisBody(BuildManualCornerAnalysisCard(store,
+                laps.FirstOrDefault() is { } first ? store.LoadTrack(first.TrackId)?.Track : null, details)));
         };
-        content.Children.Add(openCorners);
-        content.Children.Add(cornerHost);
-        return Card(content);
+        content.Children.Add(cornerSection);
+        return AnalysisCard(content);
     }
 
     private FrameworkElement BuildCompetitionReviewReport(

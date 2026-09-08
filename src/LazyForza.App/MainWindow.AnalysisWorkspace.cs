@@ -25,15 +25,21 @@ internal sealed partial class MainWindow
         tabs.SelectionChanged += (_, args) =>
         {
             if (!ReferenceEquals(args.Source, tabs) || tabs.SelectedItem is not TabItem selected) return;
-            if (selected.Content is null && selected.Tag is Func<UIElement> build) selected.Content = build();
+            if (selected.Content is null && selected.Tag is Func<UIElement> build) selected.Content = Build(build);
         };
         if (tabs.Items.Count > 0)
         {
             tabs.SelectedIndex = 0;
             var first = (TabItem)tabs.Items[0];
-            first.Content ??= ((Func<UIElement>)first.Tag)();
+            first.Content ??= Build((Func<UIElement>)first.Tag);
         }
         return tabs;
+        static UIElement Build(Func<UIElement> factory)
+        {
+            var content = factory();
+            AppLocalization.ApplyTo(content);
+            return content;
+        }
     }
 
     private static Border AnalysisCard(UIElement child) => new()
@@ -41,6 +47,14 @@ internal sealed partial class MainWindow
         Background = Brush("PanelBrush"), BorderBrush = Brush("BorderBrush"), BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(12), Padding = new Thickness(20), Margin = new Thickness(0, 0, 0, 16), Child = child
     };
+
+    private static Border AnalysisBody(Border card)
+    {
+        card.BorderThickness = new Thickness(0);
+        card.Padding = new Thickness(0);
+        card.Margin = new Thickness(0);
+        return card;
+    }
 
     private static Expander AnalysisDisclosure(string title, UIElement content, bool expanded = false) => new()
     {
@@ -70,5 +84,15 @@ internal sealed partial class MainWindow
         };
         if (primary) { button.Background = Brush("AccentSoftBrush"); button.BorderBrush = Brush("AccentBrush"); }
         return button;
+    }
+
+    private static StackPanel PlaybackMetric(string title, TextBlock value, TextBlock detail)
+    {
+        var metric = new StackPanel { Margin = new Thickness(0, 4, 16, 0) };
+        metric.Children.Add(Label(title, 12, FontWeights.Normal, "MutedBrush"));
+        value.Margin = new Thickness(0, 5, 0, 0);
+        value.ToolTip = detail.Text;
+        metric.Children.Add(value);
+        return metric;
     }
 }

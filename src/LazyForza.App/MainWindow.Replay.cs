@@ -16,7 +16,8 @@ internal sealed partial class MainWindow
     {
         var stack = PageStack(
             "回放工作台",
-            "打开 .lfztelemetry 录制文件或回看已保存单圈；工作台只读取本地数据，不影响实时监听和 HUD。");
+            "选择单圈或打开录制，沿时间轴查看驾驶过程。");
+        ApplyAnalysisTheme(stack);
         var tracks = store.ListTracks(CurrentTrackSource)
             .Where(track => track.Laps > 0)
             .OrderByDescending(track => track.Laps)
@@ -25,6 +26,9 @@ internal sealed partial class MainWindow
         var fileControls = new Grid();
         fileControls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         fileControls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        fileControls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        fileControls.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        fileControls.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var openRecording = new Button
         {
             Content = "打开 .lfztelemetry",
@@ -33,21 +37,23 @@ internal sealed partial class MainWindow
         };
         fileControls.Children.Add(openRecording);
         var fileStatus = Label(
-            "支持自动/手动原始录制，以及由工作台导出的单圈 .lfztelemetry。",
+            "",
             11,
             FontWeights.Normal,
             "MutedBrush");
         fileStatus.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(fileStatus, 1);
+        fileStatus.Visibility = Visibility.Collapsed;
+        fileStatus.Margin = new Thickness(0, 8, 0, 0);
+        openRecording.ToolTip = AppLocalization.Literal("支持自动/手动原始录制，以及由工作台导出的单圈 .lfztelemetry。");
+        Grid.SetRow(fileStatus, 1);
+        Grid.SetColumnSpan(fileStatus, 3);
         fileControls.Children.Add(fileStatus);
-        stack.Children.Add(Card(fileControls));
 
         var selectorGrid = new Grid();
         selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var trackSelector = new ComboBox { MinWidth = 280, Margin = new Thickness(0, 0, 10, 0) };
-        var lapSelector = new ComboBox { MinWidth = 330, Margin = new Thickness(0, 0, 10, 0) };
+        var trackSelector = new ComboBox { Margin = new Thickness(0, 0, 10, 0) };
+        var lapSelector = new ComboBox { Margin = new Thickness(0, 0, 10, 0) };
         var exportRecording = new Button
         {
             Content = "导出单圈 .lfztelemetry",
@@ -67,16 +73,21 @@ internal sealed partial class MainWindow
                 Tag = track.Id
             });
         }
-        selectorGrid.Children.Add(trackSelector);
-        Grid.SetColumn(lapSelector, 1);
-        selectorGrid.Children.Add(lapSelector);
+        selectorGrid.Children.Add(AnalysisField("赛道", trackSelector));
+        var lapField = AnalysisField("已保存单圈", lapSelector);
+        Grid.SetColumn(lapField, 1);
+        selectorGrid.Children.Add(lapField);
         Grid.SetColumn(exportRecording, 2);
-        selectorGrid.Children.Add(exportRecording);
-        stack.Children.Add(Card(selectorGrid));
+        fileControls.Children.Add(exportRecording);
+        exportRecording.VerticalAlignment = VerticalAlignment.Center;
+        var sources = new StackPanel();
+        sources.Children.Add(selectorGrid);
+        sources.Children.Add(fileControls);
+        stack.Children.Add(AnalysisCard(sources));
         if (tracks.Length == 0)
             stack.Children.Add(EmptyCard("暂无已保存圈速", "仍可从上方打开 .lfztelemetry 录制文件。"));
 
-        var host = new Grid { Margin = new Thickness(0, 12, 0, 0) };
+        var host = new Grid();
         stack.Children.Add(host);
         var playbackSpeed = 1d;
         var playing = false;
@@ -116,7 +127,13 @@ internal sealed partial class MainWindow
             {
                 lapSelector.Items.Add(new ComboBoxItem
                 {
-                    Content = AppLocalization.Format(
+                    Content = new TextBlock
+                    {
+                        Text = $"{AnalysisTime(lap.TotalSeconds, currentTrack?.LayoutKind == TrackLayoutKind.PointToPoint)} · {PerformanceClassName(lap.Vehicle.CarClass)} {lap.Vehicle.PerformanceIndex} · {lap.StartedAt.ToLocalTime():MM-dd HH:mm}",
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        TextWrapping = TextWrapping.NoWrap
+                    },
+                    ToolTip = AppLocalization.Format(
                         "replay.savedLapItem",
                         "{0} · {1} {2} · {3:MM-dd HH:mm:ss} · 玩家 {4}",
                         AnalysisTime(lap.TotalSeconds, currentTrack?.LayoutKind == TrackLayoutKind.PointToPoint),
@@ -228,6 +245,7 @@ internal sealed partial class MainWindow
             timer.Stop();
             playing = false;
             openRecording.IsEnabled = false;
+            fileStatus.Visibility = Visibility.Visible;
             fileStatus.Text = AppLocalization.Format(
                 "replay.reading",
                 "正在读取 {0}…",
@@ -354,30 +372,33 @@ internal sealed partial class MainWindow
             speedSelector.SelectedIndex = 1;
             Grid.SetColumn(speedSelector, 2);
             controlCard.Children.Add(speedSelector);
-            panel.Children.Add(Card(controlCard));
+            var playbackPanel = new StackPanel();
+            playbackPanel.Children.Add(controlCard);
 
-            var metrics = new UniformGrid { Columns = 4, Margin = new Thickness(0, 12, 0, 12) };
-            timeValue = Label("0:00.000", 20, FontWeights.SemiBold);
-            speedValue = Label("0 km/h", 20, FontWeights.SemiBold);
+            var metrics = new UniformGrid { Columns = 4, Margin = new Thickness(0, 4, 0, 0) };
+            metrics.SizeChanged += (_, _) => metrics.Columns = metrics.ActualWidth < 760 ? 2 : 4;
+            timeValue = Label("0:00.000", 18, FontWeights.SemiBold);
+            speedValue = Label("0 km/h", 18, FontWeights.SemiBold);
             inputValue = Label("油门 0% · 制动 0%", 15, FontWeights.SemiBold);
             dynamicsValue = Label("动态遥测待载入", 13, FontWeights.SemiBold);
-            metrics.Children.Add(MetricCard(
+            metrics.Children.Add(PlaybackMetric(
                 "回放时间",
                 timeValue,
                 Label(AppLocalization.Format(
                     "replay.totalTime",
                     "总计 {0}",
                     AnalysisTime(currentLap.TotalSeconds, false)), 11, FontWeights.Normal, "MutedBrush")));
-            metrics.Children.Add(MetricCard("速度 / 挡位", speedValue, Label("逐样本回放", 11, FontWeights.Normal, "MutedBrush")));
-            metrics.Children.Add(MetricCard("驾驶输入", inputValue, Label("保存圈速中的输入", 11, FontWeights.Normal, "MutedBrush")));
-            metrics.Children.Add(MetricCard("轮胎动态", dynamicsValue, Label(
+            metrics.Children.Add(PlaybackMetric("速度 / 挡位", speedValue, Label("逐样本回放", 11, FontWeights.Normal, "MutedBrush")));
+            metrics.Children.Add(PlaybackMetric("驾驶输入", inputValue, Label("保存圈速中的输入", 11, FontWeights.Normal, "MutedBrush")));
+            metrics.Children.Add(PlaybackMetric("轮胎动态", dynamicsValue, Label(
                 currentLap.Samples.Any(sample => sample.Dynamics is not null)
                     ? "方向与滑移已记录"
                     : "旧圈：动态字段不可用",
                 11,
                 FontWeights.Normal,
                 "MutedBrush")));
-            panel.Children.Add(metrics);
+            playbackPanel.Children.Add(metrics);
+            panel.Children.Add(AnalysisCard(playbackPanel));
 
             replayCursor = new LapAnalysisCursor();
             replayCursor.CommitRequested += (_, position) =>
@@ -401,7 +422,7 @@ internal sealed partial class MainWindow
             speedChartPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             speedChartPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             var speedChartTitle = Label(
-                "速度曲线 · 悬停联动查看，按下左键定位时间",
+                "速度 · 点击曲线定位时间",
                 13,
                 FontWeights.SemiBold);
             speedChartTitle.Margin = new Thickness(0, 0, 0, 8);
@@ -413,13 +434,12 @@ internal sealed partial class MainWindow
                 replayCursor);
             Grid.SetRow(speedChart, 1);
             speedChartPanel.Children.Add(speedChart);
-            panel.Children.Add(Card(speedChartPanel));
 
             var inputChartPanel = new Grid { Height = 230, Margin = new Thickness(0, 12, 0, 0) };
             inputChartPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             inputChartPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             var inputChartTitle = Label(
-                "驾驶输入曲线 · 油门 / 制动 / 方向 · 按下左键定位时间",
+                "油门 / 制动 / 方向",
                 13,
                 FontWeights.SemiBold);
             inputChartTitle.Margin = new Thickness(0, 0, 0, 8);
@@ -430,8 +450,11 @@ internal sealed partial class MainWindow
                 replayCursor);
             Grid.SetRow(inputChart, 1);
             inputChartPanel.Children.Add(inputChart);
-            panel.Children.Add(Card(inputChartPanel));
-            panel.Children.Add(BuildManualCornerAnalysisCard(store, currentTrack, [currentLap], (id, progress) =>
+            var curves = new StackPanel();
+            curves.Children.Add(speedChartPanel);
+            inputChartPanel.Height = 190;
+            curves.Children.Add(inputChartPanel);
+            UIElement Corners() => AnalysisBody(BuildManualCornerAnalysisCard(store, currentTrack, [currentLap], (id, progress) =>
             {
                 playing = false;
                 timer.Stop();
@@ -473,7 +496,7 @@ internal sealed partial class MainWindow
             mapSurface.Children.Add(MapDisplayControls(mapView));
             Grid.SetRow(mapSurface, 1);
             mapPanel.Children.Add(mapSurface);
-            panel.Children.Add(Card(mapPanel));
+            panel.Children.Add(AnalysisCard(AnalysisTabs(("曲线", () => curves), ("走线", () => mapPanel), ("弯道", Corners))));
             host.Children.Add(panel);
             UpdateFrame();
         }

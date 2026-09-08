@@ -835,11 +835,12 @@ internal sealed partial class MainWindow : Window
     {
         var stack = PageStack("圈速分析", "选择赛道，对比已保存的圈速、分段和走线。");
         var module = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
-        stack.Children.Add(BuildLapAnalysisExchangeCard(module, out var exportSelectedLaps));
+        var exchange = BuildLapAnalysisExchangeCard(module, out var exportSelectedLaps);
         var hud = module.Snapshot as LapHudState;
         if (hud is null)
         {
             stack.Children.Add(EmptyCard("圈速分析未启用", "请先在“模块”中启用。"));
+            stack.Children.Add(AnalysisDisclosure("导入与导出", exchange));
             refreshVisiblePage = () =>
             {
                 if (module.Snapshot is LapHudState) RenderSelectedPage(true);
@@ -865,18 +866,21 @@ internal sealed partial class MainWindow : Window
             .ToArray();
         Button? deleteSelectedLapsButton = null;
         Button? displaySelectedLapsButton = null;
+        Expander? recordManagement = null;
         if (compatibleTracks.Length > 0)
         {
             var selectorGrid = new Grid();
             selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(360) });
+            selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             var selectorText = new StackPanel();
-            selectorText.Children.Add(Label("分析赛道", 16, FontWeights.SemiBold));
-            selectorText.Children.Add(Label(module.HasCurrentCompetitionSession
+            selectorText.Children.Add(Label("性能等级", 12, FontWeights.Normal, "MutedBrush"));
+            selectorText.ToolTip = AppLocalization.Literal(module.HasCurrentCompetitionSession
                 ? "比赛中会自动识别赛道；手动切换将结束当前分析。"
-                : "普通赛事会自动识别；地产环道需要在这里手动选择后查看圈速。", 11, FontWeights.Normal, "MutedBrush"));
+                : "普通赛事会自动识别；地产环道需要在这里手动选择后查看圈速。");
             selectorGrid.Children.Add(selectorText);
-            var selector = new ComboBox { MinWidth = 320, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(selectorText, 1);
+            selectorText.Margin = new Thickness(18, 0, 0, 0);
+            var selector = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center };
             var emptySelection = new ComboBoxItem
             {
                 Content = "未选择赛道",
@@ -892,7 +896,7 @@ internal sealed partial class MainWindow : Window
                         "lap.trackSelector.item",
                         "{0} · {1} · {2} 圈",
                         candidate.Summary.Name,
-                        TrackAnalysisKind(candidate.Summary),
+                        AppLocalization.Literal(TrackAnalysisKind(candidate.Summary)),
                         candidate.RecordedLaps),
                     Tag = candidate.Summary.Id
                 };
@@ -960,7 +964,7 @@ internal sealed partial class MainWindow : Window
             if (selectedTrackIdForActions != Guid.Empty)
             {
                 var classFilter = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
-                foreach (var performanceClass in Enumerable.Range(0, 8))
+                foreach (var performanceClass in selectedTrackLaps.Select(lap => lap.Vehicle.CarClass).Distinct().Order())
                 {
                     var selected = selectedClasses.Contains(performanceClass);
                     var classColor = PerformanceClassColor(performanceClass);
@@ -994,7 +998,6 @@ internal sealed partial class MainWindow : Window
                     };
                     classFilter.Children.Add(chip);
                 }
-                selectorText.Children.Add(Label("性能等级", 11, FontWeights.Normal, "MutedBrush"));
                 selectorText.Children.Add(classFilter);
             }
 
@@ -1096,22 +1099,26 @@ internal sealed partial class MainWindow : Window
             };
 
             var selectorControls = new StackPanel();
+            var trackCaption = Label("赛道", 12, FontWeights.Normal, "MutedBrush");
+            trackCaption.Margin = new Thickness(0, 0, 0, 6);
+            selectorControls.Children.Add(trackCaption);
             selectorControls.Children.Add(selector);
             if (selectedTrackIdForActions != Guid.Empty)
             {
                 var deleteActions = new WrapPanel { Margin = new Thickness(0, 7, 0, 0) };
                 deleteActions.Children.Add(deleteTrackLaps);
                 deleteActions.Children.Add(deleteSelectedLaps);
-                selectorControls.Children.Add(deleteActions);
+                recordManagement = AnalysisDisclosure("管理圈速记录", deleteActions);
             }
-            Grid.SetColumn(selectorControls, 1);
+            Grid.SetColumn(selectorControls, 0);
             selectorGrid.Children.Add(selectorControls);
-            stack.Children.Add(Card(selectorGrid));
+            stack.Children.Add(AnalysisCard(selectorGrid));
         }
 
         if (pointToPointTimingApproximate) stack.Children.Add(PointToPointTimingNotice());
         var statusLabel = Label(string.Empty, 15);
-        stack.Children.Add(Card(statusLabel));
+        var liveDetails = new StackPanel { Margin = new Thickness(16, 0, 16, 16) };
+        liveDetails.Children.Add(statusLabel);
         var table = new Grid { Margin = new Thickness(4) };
         var sectorRows = new List<TextBlock[]>();
         foreach (var width in new[] { 0.6, 1.1, 1.1, 1.1, 1.1, 1.0 }) table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width, GridUnitType.Star) });
@@ -1124,7 +1131,7 @@ internal sealed partial class MainWindow : Window
                 sector.DeltaSeconds is double delta ? $"{delta:+0.000;-0.000;0.000}" : "—", SectorStateText(sector.State)
             ], index + 1, false));
         }
-        stack.Children.Add(Card(table));
+        liveDetails.Children.Add(table);
         var activeTrack = module.CurrentTrack;
         var activePerformanceClasses = activeTrack is not null &&
                                        selectedLapPerformanceClasses.TryGetValue(activeTrack.Id, out var savedClassFilter)
@@ -1140,6 +1147,13 @@ internal sealed partial class MainWindow : Window
                 .ToArray();
         selectedLapIds.RemoveWhere(id => comparableLaps.All(lap => lap.Id != id));
         displayedLapIds.RemoveWhere(id => comparableLaps.All(lap => lap.Id != id));
+        if (displayedLapIds.Count == 0 && selectedLapIds.Count == 0 && comparableLaps.Length > 0)
+        {
+            var latest = comparableLaps.FirstOrDefault(lap => lap.IsValid) ?? comparableLaps[0];
+            selectedLapIds.Add(latest.Id);
+            displayedLapIds.Add(latest.Id);
+        }
+        exportSelectedLaps.IsEnabled = selectedLapIds.Count > 0;
         if (deleteSelectedLapsButton is not null) deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
         var comparisonHost = new StackPanel();
         if (comparableLaps.Length > 0)
@@ -1160,8 +1174,9 @@ internal sealed partial class MainWindow : Window
                 ? AppLocalization.Literal("当前比赛")
                 : AppLocalization.Literal("最近一次比赛");
             var savedTable = new Grid { Margin = new Thickness(4) };
-            foreach (var width in new[] { 0.45, 0.75, 1.05, 1.15, 0.8, 0.75, 2.05, 0.6 })
-                savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width, GridUnitType.Star) });
+            foreach (var width in new[] { 40d, 110d, 100d, 125d })
+                savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
+            savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 140 });
             AddSavedRow(0, null, "比赛范围", false, true);
             for (var index = 0; index < comparableLaps.Length; index++)
             {
@@ -1172,6 +1187,7 @@ internal sealed partial class MainWindow : Window
                     isHistoricalBest, false);
             }
             var savedStack = new StackPanel();
+            var lapLibrary = AnalysisDisclosure("选择对比圈", savedStack);
             var savedHeader = new Grid();
             savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1184,41 +1200,44 @@ internal sealed partial class MainWindow : Window
             savedHeader.Children.Add(savedHeaderText);
             var displaySelectedLaps = new Button
             {
-                Content = "显示勾选圈数据",
+                Content = "查看对比",
                 Padding = new Thickness(14, 7, 14, 7),
                 Margin = new Thickness(16, 0, 0, 0),
                 VerticalAlignment = VerticalAlignment.Center,
-                IsEnabled = !displayedLapIds.SetEquals(selectedLapIds),
+                IsEnabled = selectedLapIds.Count > 0,
                 ToolTip = "一次性加载当前勾选圈的速度与走线数据"
             };
             displaySelectedLaps.Click += (_, _) =>
             {
                 displayedLapIds.Clear();
                 displayedLapIds.UnionWith(selectedLapIds);
-                displaySelectedLaps.IsEnabled = false;
+                lapLibrary.IsExpanded = false;
                 RenderComparisonVisuals();
+                comparisonHost.BringIntoView();
             };
             displaySelectedLapsButton = displaySelectedLaps;
             Grid.SetColumn(displaySelectedLaps, 1);
             savedHeader.Children.Add(displaySelectedLaps);
             savedStack.Children.Add(savedHeader);
-            savedStack.Children.Add(savedTable);
-            stack.Children.Add(Card(savedStack));
+            savedStack.Children.Add(new ScrollViewer
+            {
+                Content = savedTable, MaxHeight = 270, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 12, 0, 0)
+            });
+            savedStack.Margin = new Thickness(16, 0, 16, 16);
+            stack.Children.Add(lapLibrary);
 
             void AddSavedRow(int row, LapSummary? selectableLap, string group, bool historicalBest, bool header)
             {
                 var cells = header
-                    ? new[] { "选择", "等级 / PI", "来源 / 玩家", "保存时间", "圈速", "有效性", "分段", "操作" }
+                    ? new[] { "", "圈速", "等级 / PI", "保存时间", "详情" }
                     : new[]
                     {
                         string.Empty,
-                        $"{PerformanceClassName(selectableLap!.Vehicle.CarClass)} {selectableLap.Vehicle.PerformanceIndex}",
-                        $"{group}\n{PlayerCodeText(selectableLap.PlayerCode)}",
-                        selectableLap.StartedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"),
-                        AnalysisTime(selectableLap.TotalSeconds, pointToPointTimingApproximate),
-                        selectableLap.IsValid ? "有效" : "无效",
-                        string.Join("  ", selectableLap.Segments.Select(segment => $"S{segment.Index + 1} {AnalysisTime(segment.TimeSeconds, pointToPointTimingApproximate)}")),
-                        "删除"
+                        AnalysisTime(selectableLap!.TotalSeconds, pointToPointTimingApproximate) + "\n" + AppLocalization.Literal(selectableLap.IsValid ? "有效" : "无效"),
+                        $"{PerformanceClassName(selectableLap.Vehicle.CarClass)} {selectableLap.Vehicle.PerformanceIndex}",
+                        selectableLap.StartedAt.ToLocalTime().ToString("MM-dd HH:mm"),
+                        PlayerCodeText(selectableLap.PlayerCode) + "\n" + string.Join("  ", selectableLap.Segments.Select(segment => $"S{segment.Index + 1} {AnalysisTime(segment.TimeSeconds, pointToPointTimingApproximate)}"))
                     };
                 savedTable.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto, MinHeight = header ? 32 : 48 });
                 for (var column = 0; column < cells.Length; column++)
@@ -1253,61 +1272,29 @@ internal sealed partial class MainWindow : Window
                                 deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
                             exportSelectedLaps.IsEnabled = selectedLapIds.Count > 0;
                             if (displaySelectedLapsButton is not null)
-                                displaySelectedLapsButton.IsEnabled = !displayedLapIds.SetEquals(selectedLapIds);
+                                displaySelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
                         };
                         cell = check;
-                    }
-                    else if (column == 7 && selectableLap is not null)
-                    {
-                        var delete = new Button
-                        {
-                            Content = "删除",
-                            MinWidth = 54,
-                            Padding = new Thickness(9, 4, 9, 4),
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                            VerticalAlignment = VerticalAlignment.Center,
-                            ToolTip = "删除这条圈速"
-                        };
-                        delete.Click += (_, _) =>
-                        {
-                            var fastestWarning = historicalBest
-                                ? AppLocalization.Literal("\n\n这是程序当前保留的历史最快圈。手动删除后，下一条最快有效圈会成为新的历史最快。")
-                                : string.Empty;
-                            if (AppDialog.Show(
-                                    AppLocalization.Format(
-                                        "lap.deleteOne.confirmation",
-                                        "确认删除 {0:MM-dd HH:mm:ss} 的圈速 {1}？此操作不可撤销。{2}",
-                                        selectableLap.StartedAt.ToLocalTime(),
-                                        AnalysisTime(selectableLap.TotalSeconds, pointToPointTimingApproximate),
-                                        fastestWarning),
-                                    AppLocalization.Literal("删除已保存圈速"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-                            module.DeleteLap(selectableLap.Id);
-                            selectedLapIds.Remove(selectableLap.Id);
-                            displayedLapIds.Remove(selectableLap.Id);
-                            RenderSelectedPage(true);
-                        };
-                        cell = delete;
                     }
                     else
                     {
                         string? brush = null;
-                        if (!header && column == 2) brush = group == AppLocalization.Literal("历史比赛") ? "MutedBrush" : "SuccessBrush";
-                        if (!header && historicalBest && column == 4) brush = "PurpleBrush";
+                        if (!header && column == 4) brush = "MutedBrush";
+                        if (!header && column == 1) brush = !selectableLap!.IsValid ? "DangerBrush" : historicalBest ? "PurpleBrush" : null;
                         var textCell = Label(cells[column], header ? 12 : 11, header ? FontWeights.SemiBold : FontWeights.Normal, brush);
-                        if (column == 6)
+                        if (column > 0)
                         {
                             textCell.TextWrapping = TextWrapping.NoWrap;
                             textCell.TextTrimming = TextTrimming.CharacterEllipsis;
                             if (!header) textCell.ToolTip = cells[column];
                         }
-                        if (!header && column == 2)
+                        if (!header && column == 4)
                         {
-                            textCell.TextWrapping = TextWrapping.Wrap;
                             textCell.ToolTip = AppLocalization.Format(
                                 "lap.playerCodeTooltip",
                                 "{0} · 玩家代号：{1}",
                                 AppLocalization.Literal(group),
-                                PlayerCodeText(selectableLap!.PlayerCode));
+                                PlayerCodeText(selectableLap!.PlayerCode)) + "\n" + cells[column];
                         }
                         cell = textCell;
                     }
@@ -1321,7 +1308,10 @@ internal sealed partial class MainWindow : Window
         }
         stack.Children.Add(comparisonHost);
         RenderComparisonVisuals();
-        stack.Children.Add(Card(Label(SectorColorClassifier.DatasetBestExplanation, 12, FontWeights.Normal, "MutedBrush")));
+        stack.Children.Add(AnalysisDisclosure("实时分段", liveDetails));
+        if (recordManagement is not null) stack.Children.Add(recordManagement);
+        stack.Children.Add(AnalysisDisclosure("导入与导出", exchange));
+        stack.Children.Add(AnalysisDisclosure("如何阅读对比", Label(SectorColorClassifier.DatasetBestExplanation, 12, FontWeights.Normal, "MutedBrush")));
         var initialTrackId = module.CurrentTrack?.Id;
         var initialTrackTimingKind = module.CurrentTrack?.TimingKind;
         var initialCompletedLaps = hud.CompletedLaps;
@@ -1415,7 +1405,7 @@ internal sealed partial class MainWindow : Window
                 return;
             }
 
-            var previewStack = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var previewStack = new StackPanel();
             var legendEntries = new List<LapSeriesLegendEntry>(visualLaps.Length);
             for (var index = 0; index < visualLaps.Length; index++)
             {
@@ -1451,7 +1441,7 @@ internal sealed partial class MainWindow : Window
                         pointToPointTimingApproximate);
             }
 
-            var visuals = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var visuals = new StackPanel();
             var selectedDynamicsLayer = DrivingDynamicsLayer.Default;
             var dynamicsLapId = singleLapPlan?.SelectedLap.Id ?? visualLaps[0].Id;
             var linkedCursor = new LapAnalysisCursor();
@@ -1459,10 +1449,9 @@ internal sealed partial class MainWindow : Window
             exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var exportHint = Label(
-                visualLaps.Length == 1 ? "导出单圈分析、速度曲线和走线。" : "导出当前多圈对比、速度曲线和走线。",
-                11,
-                FontWeights.Normal,
-                "MutedBrush");
+                "遥测对比",
+                17,
+                FontWeights.SemiBold);
             exportHint.VerticalAlignment = VerticalAlignment.Center;
             exportRow.Children.Add(exportHint);
             var exportPng = new Button
@@ -1487,7 +1476,7 @@ internal sealed partial class MainWindow : Window
             var chartPanel = new Grid { Height = 320 };
             chartPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             chartPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            var chartTitle = Label("速度曲线 · 与驾驶输入和走线联动", 13, FontWeights.SemiBold);
+            var chartTitle = Label("速度 · km/h", 13, FontWeights.SemiBold);
             chartTitle.Margin = new Thickness(0, 0, 0, 8);
             chartPanel.Children.Add(chartTitle);
             var chart = new LapTelemetryChart(
@@ -1497,14 +1486,13 @@ internal sealed partial class MainWindow : Window
                 linkedCursor);
             Grid.SetRow(chart, 1);
             chartPanel.Children.Add(chart);
-            visuals.Children.Add(Card(chartPanel));
 
             var inputLap = visualLaps.First(lap => lap.Id == dynamicsLapId);
             var inputPanel = new Grid { Height = 250 };
             inputPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             inputPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             var inputTitle = Label(
-                "驾驶输入曲线 · 油门 / 制动 / 方向 · 与速度和走线联动",
+                "油门 / 制动 / 方向",
                 13,
                 FontWeights.SemiBold);
             inputTitle.Margin = new Thickness(0, 0, 0, 8);
@@ -1515,7 +1503,11 @@ internal sealed partial class MainWindow : Window
                 linkedCursor);
             Grid.SetRow(inputChart, 1);
             inputPanel.Children.Add(inputChart);
-            visuals.Children.Add(Card(inputPanel));
+            var telemetryPanel = new StackPanel();
+            telemetryPanel.Children.Add(chartPanel);
+            inputPanel.Margin = new Thickness(0, 16, 0, 0);
+            inputPanel.Height = 190;
+            telemetryPanel.Children.Add(inputPanel);
 
             var mapPanel = new Grid
             {
@@ -1527,7 +1519,7 @@ internal sealed partial class MainWindow : Window
             var mapHeader = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
             var mapTitle = Label(
                 cornerAnnotations.Count == 0
-                    ? "走线预览 · 滚轮缩放，拖动平移"
+                    ? "滚轮缩放 · 拖动平移"
                     : AppLocalization.Format(
                         "analysis.map.cornerCount",
                         "走线预览 · {0} 个弯角标记 · 悬停查看分析",
@@ -1566,11 +1558,13 @@ internal sealed partial class MainWindow : Window
                 ResizeMap();
             };
             mapPanel.Unloaded += (_, _) => SizeChanged -= resizeMap;
-            visuals.Children.Add(Card(mapPanel));
-            visuals.Children.Add(BuildManualCornerAnalysisCard(store, activeTrack,
-                visualLaps.Where(lap => selectedVisualLaps.Any(summary => summary.Id == lap.Id)).ToArray(),
-                (id, progress) => linkedCursor.Set(visuals, id, progress)));
-            previewStack.Children.Add(visuals);
+            visuals.Children.Add(AnalysisTabs(
+                ("曲线", () => telemetryPanel),
+                ("走线", () => mapPanel),
+                ("弯道", () => AnalysisBody(BuildManualCornerAnalysisCard(store, activeTrack,
+                    visualLaps.Where(lap => selectedVisualLaps.Any(summary => summary.Id == lap.Id)).ToArray(),
+                    (id, progress) => linkedCursor.Set(visuals, id, progress))))));
+            previewStack.Children.Add(AnalysisCard(visuals));
             comparisonHost.Children.Add(previewStack);
         }
 

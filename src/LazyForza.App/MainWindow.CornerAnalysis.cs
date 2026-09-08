@@ -56,6 +56,7 @@ internal sealed partial class MainWindow
         panel.Children.Add(results);
         panel.Children.Add(curves);
         var cursor = new LapAnalysisCursor();
+        TabControl? curveTabs = null;
         TextBox? marking = null;
         cursor.CommitRequested += (_, position) =>
         {
@@ -66,8 +67,8 @@ internal sealed partial class MainWindow
                 status.Text = AppLocalization.Literal("位置已填写，点击“保存区间”保留标记。");
             }
         };
-        markStart.Click += (_, _) => { marking = start; status.Text = AppLocalization.Literal("请在下方曲线上点击弯道起点。"); };
-        markEnd.Click += (_, _) => { marking = end; status.Text = AppLocalization.Literal("请在下方曲线上点击弯道终点。"); };
+        markStart.Click += (_, _) => { marking = start; if (curveTabs is not null) curveTabs.SelectedIndex = 0; status.Text = AppLocalization.Literal("请在下方曲线上点击弯道起点。"); };
+        markEnd.Click += (_, _) => { marking = end; if (curveTabs is not null) curveTabs.SelectedIndex = 0; status.Text = AppLocalization.Literal("请在下方曲线上点击弯道终点。"); };
         var candidates = store.LoadLapSummaries(track.Id);
         var corners = new List<ManualCorner>();
         string key = "";
@@ -94,7 +95,7 @@ internal sealed partial class MainWindow
                     : string.Empty;
                 reference.ToolTip = AppLocalization.Literal("仅列出路线修订、方向、分段版本和车辆条件兼容的真实圈；未记录的调校与天气仍可能影响结果。");
             }
-            catch (JsonException) { status.Text = "保存的弯道标记无法读取，请重新标记；保存后将替换这些标记。"; }
+            catch (JsonException) { status.Text = AppLocalization.Literal("保存的弯道标记无法读取，请重新标记；保存后将替换这些标记。"); }
             RefreshMarkers();
             editSection.IsExpanded = corners.Count == 0;
             reference.SelectedIndex = 0;
@@ -118,9 +119,9 @@ internal sealed partial class MainWindow
             if (!double.TryParse(start.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var from) ||
                 !double.TryParse(end.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var to) ||
                 !ManualCornerAnalyzer.IsValid(new(name.Text.Trim(), from, to), track.LengthMeters))
-            { status.Text = "请输入名称和赛道范围内的有效距离；终点至少比起点大 30 米。"; return; }
+            { status.Text = AppLocalization.Literal("请输入名称和赛道范围内的有效距离；终点至少比起点大 30 米。"); return; }
             var index = corners.FindIndex(corner => string.Equals(corner.Name, name.Text.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (index < 0 && corners.Count >= 32) { status.Text = "每个赛道版本最多保存 32 个弯道区间。"; return; }
+            if (index < 0 && corners.Count >= 32) { status.Text = AppLocalization.Literal("每个赛道版本最多保存 32 个弯道区间。"); return; }
             var next = new ManualCorner(name.Text.Trim(), from, to);
             if (index >= 0) corners[index] = next; else corners.Add(next);
             Persist();
@@ -164,7 +165,8 @@ internal sealed partial class MainWindow
             var pages = new List<(string, Func<UIElement>)> { ("速度", () => speedChart) };
             pages.Add(("分析圈输入", () => new LapInputChart(series[0], track.LengthMeters, cursor) { Height = 220 }));
             if (series.Length > 1) pages.Add(("参考圈输入", () => new LapInputChart(series[1], track.LengthMeters, cursor) { Height = 220 }));
-            curves.Children.Add(AnalysisTabs(pages.ToArray()));
+            curveTabs = AnalysisTabs(pages.ToArray());
+            curves.Children.Add(curveTabs);
         }
         void Analyze()
         {
@@ -193,15 +195,18 @@ internal sealed partial class MainWindow
                     }
                 }
                 else results.Children.Add(Label(comparison.Message, 13, FontWeights.Normal, "MutedBrush"));
+                if (comparison.Evidence == CornerEvidence.Partial)
+                    results.Children.Add(Label("部分输入证据不足，无法确认的位置显示为 —。", 12, FontWeights.Normal, "MutedBrush"));
             }
             foreach (var difference in ManualCornerAnalyzer.Describe(comparisons))
             {
                 var jump = AnalysisButton("");
-                jump.Content = new TextBlock { Text = difference.Text + "  " + AppLocalization.Literal("查看曲线 →"), TextWrapping = TextWrapping.Wrap };
+                jump.Content = new TextBlock { Text = AppLocalization.Literal(difference.Text) + "  " + AppLocalization.Literal("查看曲线 →"), TextWrapping = TextWrapping.Wrap };
                 jump.HorizontalContentAlignment = HorizontalAlignment.Left;
                 jump.Click += (_, _) =>
                 {
                     cursor.Set(jump, selected.Id, difference.ProgressMeters);
+                    if (curveTabs is not null) curveTabs.SelectedIndex = 0;
                     speedChart?.BringIntoView();
                     navigate?.Invoke(selected.Id, difference.ProgressMeters);
                 };
@@ -209,6 +214,6 @@ internal sealed partial class MainWindow
             }
         }
         static string Meters(double? value) => value is double s ? $"{s:0.0} m" : "—";
-        static string LapCaption(LapSummary lap) => $"{lap.TotalSeconds:0.000} s · {lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss} · {PlayerCodeText(lap.PlayerCode)}";
+        static string LapCaption(LapSummary lap) => $"{AnalysisTime(lap.TotalSeconds, false)} · {lap.StartedAt.ToLocalTime():MM-dd HH:mm}";
     }
 }
