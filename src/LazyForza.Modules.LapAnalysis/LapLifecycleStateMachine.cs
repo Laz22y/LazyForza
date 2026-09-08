@@ -21,6 +21,7 @@ internal sealed class LapLifecycleStateMachine
     public float LastLapValueAtLapStart { get; set; }
     public float? LastRewindLapTime { get; set; }
     public TelemetryFrame? LastCompetitionFrame { get; set; }
+    public Vector3F? OpeningPosition { get; private set; }
     public DateTimeOffset LastCrossingAt { get; set; } = DateTimeOffset.MinValue;
     public DateTimeOffset? NonCompetitionDrivingSince { get; set; }
     public int ProjectionIndex { get; set; }
@@ -39,6 +40,7 @@ internal sealed class LapLifecycleStateMachine
         ResetSession();
         CompetitionActive = true;
         SessionId = Guid.NewGuid();
+        OpeningPosition = raw.CurrentRaceTime <= 5 && raw.CurrentLap <= 5 ? raw.Position : null;
         PreviousLapNumber = raw.LapNumber;
         PreviousCurrentLap = raw.CurrentLap;
         PreviousCurrentRaceTime = raw.CurrentRaceTime;
@@ -92,6 +94,7 @@ internal sealed class LapLifecycleStateMachine
         LastLapValueAtLapStart = 0;
         LastRewindLapTime = null;
         LastCompetitionFrame = null;
+        OpeningPosition = null;
         LastCrossingAt = DateTimeOffset.MinValue;
         WaitingForInitialStartLine = false;
         Samples.Clear();

@@ -16,6 +16,7 @@ internal sealed class AutomaticTrackMatchStateMachine
     public bool StartedMidLap { get; set; }
     public bool StartedAtConfirmedLine { get; set; }
     public bool RouteAcquired { get; set; }
+    public bool HasSharedStart { get; set; }
     public double TravelMeters { get; set; }
     public int CoarseEligibleCount { get; set; }
     public Vector3F? PreviousPosition { get; set; }
@@ -31,6 +32,7 @@ internal sealed class AutomaticTrackMatchStateMachine
         StartedMidLap = allowMidRouteStart;
         StartedAtConfirmedLine = startedAtConfirmedLine;
         RouteAcquired = false;
+        HasSharedStart = false;
         TravelMeters = 0;
         PreviousPosition = null;
         StartedAt = frame.ArrivalTime;
@@ -45,6 +47,7 @@ internal sealed class AutomaticTrackMatchStateMachine
         StartedMidLap = false;
         StartedAtConfirmedLine = false;
         RouteAcquired = false;
+        HasSharedStart = false;
         TravelMeters = 0;
         CoarseEligibleCount = 0;
         PreviousPosition = null;

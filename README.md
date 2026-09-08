@@ -32,6 +32,8 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 实验性漂移 HUD 默认关闭。它只根据本车 UDP 推导侧滑和控车趋势，不复刻游戏评分，也不代替玩家判断。
 
+赛道识别支持后排发车位置；歌利亚与传奇岛径道赛等共用路段会等待分流证据再确认。比赛计时刚重置，且车辆低速出现在远离上一场的另一个已知起跑区时，即使上一场没有圈速记录，也可建立新的比赛会话。普通菜单暂停和倒带仍保留当前会话。
+
 圈速对比、赛后复盘和回放工作台支持手动弯道分析：输入区间的起终点距离，或点击曲线标记，再选择另一条已记录的有效参考圈。按赛道距离比较区间耗时、制动起点、最低速度及恢复油门位置；最多显示三条中文差异说明，点击即可定位曲线。区间标记保存在本机，每个赛道版本最多 32 个；跨终点弯请拆成两段。
 
 弯道比较要求路线修订、方向、分段版本及车辆条件兼容。旧圈缺少路线修订或完整车辆信息时仍可查看和回放，但不生成弯道结论。区间采样缺失、间隔过大或输入事件证据不足时会明确提示；差异说明不把相关性当成提速原因，也不代替对调校、天气等条件的核对。
@@ -124,6 +126,8 @@ Version 1.5.2 fixes the dashboard not hiding as expected after entering the gara
 | Data and updates | Local database, backup and diagnostics, plus verified GitCode/GitHub update fallback |
 
 The experimental drift HUD is disabled by default. It estimates slip and control trends from local UDP data; it does not reproduce the game's scoring system.
+
+Track identification accommodates rear grid positions and waits for route divergence when events such as Goliath and Legend Island share an opening corridor. A newly reset race clock and a low vehicle speed at a different known grid far from the previous event can open a new competition session even without a saved result. Ordinary menu pauses and rewinds preserve the current session.
 
 Lap comparison, post-race review and the replay workbench support manually marked corner intervals. Enter start/end distances or mark them on a curve, then choose another recorded valid reference lap. Compare interval time, brake onset, minimum speed and throttle recovery position on the same distance axis. Up to three Chinese observations link to the curves. Up to 32 intervals are saved locally per track revision; split intervals that cross the finish line.
 

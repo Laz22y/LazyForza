@@ -11,12 +11,13 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private const double AutomaticMatchMaximumTravelMeters = 1_200;
     private const double AutomaticMatchMinimumProgressMeters = 100;
     private const double AutomaticMatchMaximumProgressMeters = 220;
-    private const double SharedStartDecisionMeters = 300;
+    private const double SharedStartMaximumTravelMeters = 1_800;
     private const int MaximumFineMatchCandidates = 12;
     private const string AutomaticMatchRejectedStatus = "没有找到匹配赛道，本场不会记录圈速。";
     private const string AutomaticMatchRejectedInstruction = "圈速 HUD 即将隐藏。可在赛道页添加自定义赛道。";
     private const string AutomaticMatchRejectedTrackName = "未识别赛事";
     private static readonly TimeSpan AutomaticMatchMaximumDuration = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan SharedStartMaximumDuration = TimeSpan.FromSeconds(60);
     private readonly LazyForzaStore store;
     private readonly Func<OverlayLayout> getOverlayLayout;
     private readonly Func<string?> playerCodeProvider;
@@ -97,6 +98,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private bool automaticMatchStartedMidLap { get => automaticMatch.StartedMidLap; set => automaticMatch.StartedMidLap = value; }
     private bool automaticMatchStartedAtConfirmedLine { get => automaticMatch.StartedAtConfirmedLine; set => automaticMatch.StartedAtConfirmedLine = value; }
     private bool automaticMatchRouteAcquired { get => automaticMatch.RouteAcquired; set => automaticMatch.RouteAcquired = value; }
+    private bool automaticMatchHasSharedStart { get => automaticMatch.HasSharedStart; set => automaticMatch.HasSharedStart = value; }
     private double automaticMatchTravelMeters { get => automaticMatch.TravelMeters; set => automaticMatch.TravelMeters = value; }
     private int automaticMatchCoarseEligibleCount { get => automaticMatch.CoarseEligibleCount; set => automaticMatch.CoarseEligibleCount = value; }
     private Vector3F? automaticMatchPreviousPosition { get => automaticMatch.PreviousPosition; set => automaticMatch.PreviousPosition = value; }
@@ -387,18 +389,18 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
         nonCompetitionDrivingSince = null;
 
-        if (competitionActive && competitionSignalSuspended)
+        if (competitionActive)
         {
             if (ShouldBeginNewCompetitionSession(raw))
             {
                 var recoveredFinalLap = TryCompletePendingLapAtCompetitionEnd();
                 LogIfInitialized(recoveredFinalLap is null
-                    ? $"Detected a reset race clock and cleared results; closing session {sessionId}."
-                    : $"Detected a reset race clock and cleared results; recovered final lap {recoveredFinalLap.Id} before closing session {sessionId}.");
+                    ? $"Detected a new competition from the reset clock and finish/new-grid evidence; closing session {sessionId}."
+                    : $"Detected a new competition from the reset clock and finish/new-grid evidence; recovered final lap {recoveredFinalLap.Id} before closing session {sessionId}.");
                 ResetCompetitionSession();
                 competitionActive = false;
             }
-            else
+            else if (competitionSignalSuspended)
             {
                 competitionSignalSuspended = false;
                 LogIfInitialized($"Competition signal resumed; continuing session {sessionId}.");
@@ -756,6 +758,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         var second = best is null
             ? null
             : ranked.FirstOrDefault(candidate => candidate.Saved.Track.Id != best.Saved.Track.Id);
+        if (best is not null && second is not null && best.SharesStartWith(second))
+            automaticMatchHasSharedStart = true;
 
         if (best is not null && IsAutomaticMatchConfident(best, second))
         {
@@ -778,7 +782,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         var elapsed = frame.ArrivalTime - automaticMatchStartedAt;
         var travelLimit = AutomaticMatchTravelLimitMeters();
         if (automaticMatchTravelMeters >= travelLimit ||
-            elapsed >= AutomaticMatchMaximumDuration)
+            elapsed >= (automaticMatchHasSharedStart ? SharedStartMaximumDuration : AutomaticMatchMaximumDuration))
         {
             automaticMatchRejected = true;
             automaticMatchStarted = false;
@@ -808,7 +812,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             .DefaultIfEmpty(AutomaticMatchMaximumTravelMeters)
             .Min();
         return Math.Min(
-            AutomaticMatchMaximumTravelMeters,
+            automaticMatchHasSharedStart ? SharedStartMaximumTravelMeters : AutomaticMatchMaximumTravelMeters,
             Math.Max(300, shortestEligibleRoute * 0.97));
     }
 
@@ -886,9 +890,9 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         if (second is null || second.ValidObservations < 4) return true;
         var qualityMargin = second.Quality - best.Quality;
         var progressLead = best.ProgressMeters - second.ProgressMeters;
-        if (best.SharesStartWith(second) &&
-            best.ProgressMeters < SharedStartDecisionMeters &&
-            qualityMargin < 10)
+        // Grid offsets bias cumulative distance and progress before both routes are acquired.
+        // While both projections still share the same corridor, neither is identity evidence.
+        if (best.SharesStartWith(second))
         {
             return false;
         }
@@ -2010,6 +2014,20 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                                  raw.CurrentRaceTime + 5 < previousCurrentRaceTime.Value;
         var returnedToOpeningLap = raw.LapNumber <= 1 && raw.CurrentLap <= 5 && raw.CurrentRaceTime <= 15;
         var previousResultsCleared = raw.LastLap <= 0 && raw.BestLap <= 0;
+        if (!raceClockRestarted || !returnedToOpeningLap || !previousResultsCleared) return false;
+
+        // A wrong or unidentified route cannot supply finish evidence. A low-speed opening
+        // at another known grid can: require relocation from both the last active position
+        // and this session's opening, so rewinding to our own grid does not reset the session.
+        var movedToDifferentGrid = raw.CurrentRaceTime is >= 0 and <= 1 &&
+                                   raw.CurrentLap is >= 0 and <= 1 && raw.Speed is >= 0 and <= 5 &&
+                                   lifecycle.OpeningPosition is { } opening &&
+                                   lastCompetitionFrame is { } previous &&
+                                   DistanceMeters(opening, raw.Position) > 250 &&
+                                   DistanceMeters(previous.Raw.Position, raw.Position) > 250 &&
+                                   compatibleTracks.Any(candidate => candidate.IsOnStartingGrid(raw.Position));
+        if (movedToDifferentGrid) return true;
+        if (!competitionSignalSuspended) return false;
         bool currentSessionHasSavedLap;
         lock (lapGate) currentSessionHasSavedLap = visibleLaps.Any(lap => lap.SessionId == sessionId);
         var hasCompletePendingLap = lastCompetitionFrame is { } pendingFrame &&
@@ -2022,10 +2040,15 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         // treating a menu frame or an ordinary rewind as a new competition. A geometrically
         // complete pending lap is also session evidence: point-to-point events may reset
         // directly into a restart without ever publishing LastLap.
-        return (currentSessionHasSavedLap || hasCompletePendingLap) &&
-               raceClockRestarted &&
-               returnedToOpeningLap &&
-               previousResultsCleared;
+        return currentSessionHasSavedLap || hasCompletePendingLap;
+    }
+
+    private static double DistanceMeters(Vector3F first, Vector3F second)
+    {
+        var dx = (double)first.X - second.X;
+        var dy = (double)first.Y - second.Y;
+        var dz = (double)first.Z - second.Z;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     private IReadOnlyList<SectorComparison> BuildCompletedComparisons(LapRecord lap)
@@ -2416,12 +2439,28 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         {
             var projection = InitialProjection(position, allowMidRouteStart);
             return projection.IsValid &&
-                   projection.DistanceMeters <= AutomaticMatchCandidate.InitialGateMeters(Track);
+                   (projection.DistanceMeters <= AutomaticMatchCandidate.InitialGateMeters(Track) ||
+                    !allowMidRouteStart && IsOnStartingGrid(position));
+        }
+
+        public bool IsOnStartingGrid(Vector3F position)
+        {
+            if (Track.Points.Count < 2) return false;
+            var start = Track.Points[0];
+            var dx = position.X - start.X;
+            var dz = position.Z - start.Z;
+            var along = dx * start.TangentX + dz * start.TangentZ;
+            var across = dx * start.TangentZ - dz * start.TangentX;
+            // Rear rows can precede a point-to-point recording by over 100 m.
+            // Extend only the grid along its heading; fine route/elevation checks stay unchanged.
+            return along is >= -200 and <= 80 &&
+                   Math.Abs(across) <= 80 && Math.Abs(position.Y - start.Y) <= 15;
         }
 
         public ProjectionResult InitialProjection(Vector3F position, bool allowMidRouteStart)
         {
             var radius = AutomaticMatchCandidate.InitialGateMeters(Track);
+            if (!allowMidRouteStart && IsOnStartingGrid(position)) radius = Math.Max(radius, 220);
             var index = allowMidRouteStart ? RouteSpatialIndex : startSpatialIndex;
             return index.ProjectNearest(position.X, position.Y, position.Z, radius);
         }
@@ -2495,7 +2534,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 ? initialProjection.DistanceMeters
                 : double.PositiveInfinity;
             StartEligible = initialProjection.IsValid &&
-                            initialProjection.DistanceMeters <= InitialGateMeters(saved.Track);
+                            (initialProjection.DistanceMeters <= InitialGateMeters(saved.Track) ||
+                             !allowMidRouteStart && saved.IsOnStartingGrid(initialFrame.Position));
             if (!StartEligible)
             {
                 EliminationReason = initialProjection.IsValid

@@ -7,7 +7,7 @@ using LazyForza.Storage;
 namespace LazyForza.IntegrationTests;
 
 [TestClass]
-public sealed class LapAnalysisBehaviorTests
+public sealed partial class LapAnalysisBehaviorTests
 {
     private const int MaximumExpectedCoarseCandidates = 12;
 
@@ -657,7 +657,8 @@ public sealed class LapAnalysisBehaviorTests
                 var arrivalTime = DateTimeOffset.UnixEpoch;
                 foreach (var point in expected.Points)
                 {
-                    if (point.S > 1_200) break;
+                    // Shared starts may need the bounded 1,800 m window to reach a fork.
+                    if (point.S > 1_800) break;
                     SendLiveTrackFrame(module, point, ref sequence, ref arrivalTime);
                     if (module.CurrentTrack is not null) break;
                 }
