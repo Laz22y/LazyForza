@@ -123,11 +123,13 @@ internal sealed partial class MainWindow : Window
         UseLayoutRounding = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         SourceInitialized += (_, _) => ApplyDarkTitleBar();
+        InitializeRaceEngineer();
         Content = BuildShell();
         navigation.SelectionChanged += (_, _) => RenderSelectedPage();
         navigation.SelectedIndex = 0;
         refreshTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) =>
         {
+            UpdateRaceEngineer();
             var lapModule = moduleManager.Modules.OfType<LapAnalysisModule>().FirstOrDefault();
             if (lapModule is not null) diagnosticCapture.UpdateTrackMatch(lapModule.MatchDiagnostics);
             if (!IsVisible || WindowState == WindowState.Minimized) return;
@@ -136,6 +138,7 @@ internal sealed partial class MainWindow : Window
         refreshTimer.Start();
         Closed += (_, _) =>
         {
+            raceEngineer?.Dispose();
             refreshTimer.Stop();
             lifetimeCancellation.Cancel();
             lifetimeCancellation.Dispose();

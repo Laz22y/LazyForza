@@ -32,6 +32,10 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 实验性漂移 HUD 默认关闭。它只根据本车 UDP 推导侧滑和控车趋势，不复刻游戏评分，也不代替玩家判断。
 
+地产赛事页提供默认关闭的「本地语音比赛工程师」，播报旗语变化、新处罚、个人最快圈和关键进站预测。可调整音量或立即静音；静音会停止当前语音及提示音并清空待播消息，恢复后不补播。红旗优先打断普通播报，重复事件与频繁预测会被去重和冷却。进站建议保留「预计」「可能」等不确定性表述。
+
+语音使用 Windows 已安装的对应语言本地 SAPI 语音，无需联网；每次完整播报前后有本地合成的短促无线电双音。缺少语音或音频不可用时只停用播报，比赛照常进行。安装对应语音后，可关闭再启用工程师以重试。
+
 ## 快速开始
 
 1. 从 [Releases](https://github.com/Laz22y/LazyForza/releases/latest) 下载 Windows 安装包，或下载 `win-x64.zip` 便携版并完整解压；
@@ -116,6 +120,10 @@ Version 1.5.2 fixes the dashboard not hiding as expected after entering the gara
 | Data and updates | Local database, backup and diagnostics, plus verified GitCode/GitHub update fallback |
 
 The experimental drift HUD is disabled by default. It estimates slip and control trends from local UDP data; it does not reproduce the game's scoring system.
+
+The Estate racing page includes an optional local race engineer, disabled by default. It announces flag changes, new penalties, personal bests and important pit predictions, with priority, deduplication and cooldowns. Red flags interrupt routine speech. Volume and immediate mute controls apply to speech and the locally synthesized radio cues before and after each complete transmission. Mute clears pending messages; unmuting does not replay them. Pit advice explicitly remains an estimate.
+
+Speech uses an installed Windows SAPI voice for the selected language, without a network service. Missing voices or audio failures disable speech without affecting the race. After installing a compatible voice, disable and enable the engineer to retry.
 
 ### Quick start
 

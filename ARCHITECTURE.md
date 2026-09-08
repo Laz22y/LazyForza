@@ -81,6 +81,8 @@ cueRpm = targetRpm - rpmRiseRate * totalLatency
 
 ## 地产赛事跨仓库边界
 
+本地语音工程师只消费现有 `EstateRaceHudState` 权威快照及进站预测，不重新计算成绩或处罚。`RaceEngineerObserver` 提取重要变化，`RaceEngineer` 负责有界队列（16 条）、阶段隔离、最近 4096 个事件去重、优先级、过期和分类冷却；`ILocalRaceSpeech` 是可替换的异步语音接口。App 的 `LocalRaceSpeech` 在独立 STA 线程调用 Windows SAPI，并合成本地无线电起止双音。静音、关闭、退出和赛事切换取消当前输出并清空队列；语音故障仅停用输出。开关、静音与音量沿用 AppSettings 保存，无数据库迁移或网络协议变化。
+
 协议 v2 的三端模型由 RaceServer 仓库的 `protocol/race-protocol.schema.json` 统一生成。客户端使用已提交的 `EstateRaceProtocol.g.cs`，独立构建无需服务端仓库或 Node.js；生成文件不手工修改。
 
 客户端上传本机轨迹和可靠圈/维修事件；服务端权威管理圈数、排名、阶段、旗语、处罚、调查和结果。连续遥测可以 latest-wins，圈完成与维修完成事件必须通过事件 ID、确认和去重可靠传递。完整同步文件和验证命令见客户端与 RaceServer 两边的 `AGENTS.md`。

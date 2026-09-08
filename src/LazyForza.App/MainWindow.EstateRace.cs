@@ -41,6 +41,7 @@ internal sealed partial class MainWindow
             FontWeight = FontWeights.SemiBold
         };
         stack.Children.Add(header);
+        stack.Children.Add(BuildRaceEngineerControls());
 
         var statusCard = new Grid();
         statusCard.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
