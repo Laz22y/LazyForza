@@ -346,6 +346,8 @@
             <Setter Property="FontSize" Value="14" />
         </Style>
         <Style TargetType="ComboBox">
+            <EventSetter Event="PreviewKeyDown" Handler="ComboBox_PreviewKeyboardInput" />
+            <EventSetter Event="PreviewTextInput" Handler="ComboBox_PreviewKeyboardInput" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="Background" Value="#111923" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
@@ -437,6 +439,7 @@
             </Setter>
         </Style>
         <Style TargetType="ComboBoxItem">
+            <EventSetter Event="RequestBringIntoView" Handler="ComboBoxItem_RequestBringIntoView" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Padding" Value="12,9" />
