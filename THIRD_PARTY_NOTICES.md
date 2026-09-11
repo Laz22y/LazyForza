@@ -1,6 +1,19 @@
 # Third-party notices
 
-LazyForza 生产代码没有引入第三方 NuGet 运行时包。SQLite 使用 Windows 自带 `winsqlite3.dll`。
+SQLite 使用 Windows 自带 `winsqlite3.dll`。自定义无线电音频的本地解码与重采样使用
+`NAudio.Wasapi` 3.1.0 及其依赖 `NAudio.Core` 3.1.0，通过 Windows Media Foundation
+处理用户选择的音频文件。两者采用 MIT License；未修改其源码。
+
+项目来源：https://github.com/naudio/NAudio
+许可证来源：https://github.com/naudio/NAudio/blob/0aaef29d04bec9567bdf2f669036fabecc33a2e2/LICENSE
+
+Copyright 2008-2026 Mark Heath
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 自包含发行包会再分发 Microsoft .NET 和 Windows Desktop Runtime。发行包同时包含
 `DOTNET_LICENSE.txt` 与 `DOTNET_THIRD_PARTY_NOTICES.txt`，内容直接取自用于发布的本机

@@ -3,6 +3,7 @@
     <TargetFramework>net9.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\LazyForza.Speech\LazyForza.Speech.csproj" />
     <ProjectReference Include="..\LazyForza.Domain\LazyForza.Domain.csproj" />
     <ProjectReference Include="..\LazyForza.Modules.Abstractions\LazyForza.Modules.Abstractions.csproj" />
   </ItemGroup>

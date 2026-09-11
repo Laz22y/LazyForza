@@ -6,6 +6,6 @@
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="MSTest.TestAdapter" Version="3.9.3" />
     <PackageVersion Include="MSTest.TestFramework" Version="3.9.3" />
+    <PackageVersion Include="NAudio.Wasapi" Version="3.1.0" />
   </ItemGroup>
 </Project>
-

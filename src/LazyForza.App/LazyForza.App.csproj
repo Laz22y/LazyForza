@@ -19,6 +19,10 @@
     <EmbeddedResource Include="Localization\*.json" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="NAudio.Wasapi" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LazyForza.Speech\LazyForza.Speech.csproj" />
     <ProjectReference Include="..\LazyForza.Domain\LazyForza.Domain.csproj" />
     <ProjectReference Include="..\LazyForza.Telemetry\LazyForza.Telemetry.csproj" />
     <ProjectReference Include="..\LazyForza.Analysis\LazyForza.Analysis.csproj" />

@@ -32,6 +32,7 @@ EstateRaceModule <-> LazyForza.RaceServer protocol v2
 - `LazyForza.Modules.EstateRace`：地产环道几何、计时、维修区、赛事网络客户端与赛事 HUD 状态；
 - `LazyForza.Overlay`：WPF 矢量 HUD 和 Win32 窗口样式；不解析 UDP、不计算业务算法；
 - `LazyForza.Update`：更新查询、下载和更新包完整性验证；
+- `LazyForza.Speech`：可替换的合成／播放契约、有界 PCM、原创无线电音和可取消输出；不依赖 WPF、网络 SDK 或赛事状态；
 - `LazyForza.App`：WPF Fluent 风格主壳、编译期可信模块目录、导航、设置与诊断；
 - `tools/*`：官方赛道目录生成、性能门禁和地产诊断工具，不参与产品运行时依赖。
 
@@ -87,7 +88,11 @@ Schema 13 以事务追加可空的 `Laps.TrackRevision` 和 `VehicleSnapshot`，
 
 ## 地产赛事跨仓库边界
 
-本地语音工程师只消费现有 `EstateRaceHudState` 权威快照及进站预测，不重新计算成绩或处罚。`RaceEngineerObserver` 提取重要变化，`RaceEngineer` 负责有界队列（16 条）、阶段隔离、最近 4096 个事件去重、优先级、过期和分类冷却；`ILocalRaceSpeech` 是可替换的异步语音接口。App 的 `LocalRaceSpeech` 在独立 STA 线程调用 Windows SAPI，并合成本地无线电起止双音。静音、关闭、退出和赛事切换取消当前输出并清空队列；语音故障仅停用输出。开关、静音与音量沿用 AppSettings 保存，无数据库迁移或网络协议变化。
+语音工程师只消费现有 `EstateRaceHudState` 权威快照及进站预测，不重新计算成绩或处罚。`RaceEngineerObserver` 提取重要变化，`RaceEngineer` 负责有界队列（16 条）、阶段隔离、最近 4096 个事件去重、优先级、过期和分类冷却，仅依赖 `ISpeechOutput`。消息到期也会取消已开始的合成／播放。静音、关闭、退出和赛事切换取消当前输出并清空队列；语音故障仅停用输出。开关、静音与音量沿用 AppSettings 保存，无数据库迁移或网络协议变化。
+
+`LazyForza.Speech` 的 `RadioSpeechOutput` 通过 `ISpeechSynthesisProvider` 获得 PCM，由 `ISpeechAudioPlayer` 按接通音、语音、断开音顺序播放。合成默认超时 10 秒，内存缓存上限为 32 条／4 MiB，最多允许两次合成重叠以容纳取消中的请求；迟到结果不能播放。App 的 `LocalRaceSpeech` 装配 Windows SAPI 内存合成（独立 STA、24 kHz 单声道）与播放器独占并复用的 waveOut 句柄；取消只停止本次音频，退出时关闭设备。原创起止音由 `RadioCues` 合成。当前没有内置在线服务或联网回退；接口、资源所有权与适配要求见 [语音输出说明](docs/RACE_ENGINEER_SPEECH.md)。
+
+起止音与语音之间分别保留 180／220 ms 可取消停顿。自定义音频在 App 中通过 NAudio／Windows Media Foundation 解码为受限 PCM 副本，作为版本 1 的独立 AppSettings 值原子保存；不存在外部文件路径依赖。每次输出固定 `RadioTransmission` 快照，设置变化只作用于后续播报。手动试听通过 `RaceEngineer.PreviewAsync` 使用同一输出并服从静音，支持离线及自动播报关闭场景；试听不进入赛事去重或冷却，真实赛事消息优先取消试听。
 
 协议 v2 的三端模型由 RaceServer 仓库的 `protocol/race-protocol.schema.json` 统一生成。客户端使用已提交的 `EstateRaceProtocol.g.cs`，独立构建无需服务端仓库或 Node.js；生成文件不手工修改。
 

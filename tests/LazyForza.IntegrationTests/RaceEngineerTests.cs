@@ -1,7 +1,7 @@
 using System.Text;
 using System.Threading.Channels;
-using LazyForza.App;
 using LazyForza.Modules.EstateRace;
+using LazyForza.Speech;
 
 namespace LazyForza.IntegrationTests;
 
@@ -124,6 +124,36 @@ public sealed class RaceEngineerTests
     }
 
     [TestMethod]
+    public async Task ExpiredInFlightSpeechIsCancelledAndNextMessageStillPlays()
+    {
+        var output = new ControlledSpeech();
+        using var engineer = Enabled(output);
+        Assert.IsTrue(engineer.Enqueue(Message("expiring") with { ExpiresAt = DateTimeOffset.UtcNow.AddMilliseconds(300) }));
+        var expiring = await output.Next();
+        engineer.Enqueue(Message("fresh"));
+        Assert.AreEqual("fresh", (await output.Next()).Text);
+        Assert.IsTrue(expiring.Token.IsCancellationRequested);
+        Assert.IsNull(engineer.Error);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ShutdownDisposesOutputOnceAndContainsCleanupFailure(bool failCleanup)
+    {
+        var output = new ControlledSpeech { FailCleanup = failCleanup };
+        using var engineer = Enabled(output);
+        engineer.Enqueue(Message("speaking"));
+        var speaking = await output.Next();
+        engineer.Dispose();
+        engineer.Dispose();
+        await engineer.Completion.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.IsTrue(speaking.Token.IsCancellationRequested);
+        Assert.AreEqual(1, output.DisposeCount);
+        Assert.IsFalse(engineer.Enqueue(Message("after")));
+    }
+
+    [TestMethod]
     public async Task QueueIsBoundedAndPreservesUrgentMessages()
     {
         var output = new ControlledSpeech();
@@ -223,14 +253,14 @@ public sealed class RaceEngineerTests
     [TestMethod]
     public void RadioCuesAreDistinctLocalPcmWithVolumeAndSilence()
     {
-        var start = LocalRaceSpeech.CreateRadioCue(70, false);
-        var end = LocalRaceSpeech.CreateRadioCue(70, true);
+        var start = RadioCues.Connect.ToWave(70);
+        var end = RadioCues.Disconnect.ToWave(70);
         Assert.AreEqual("RIFF", Encoding.ASCII.GetString(start, 0, 4));
         Assert.AreEqual("WAVE", Encoding.ASCII.GetString(start, 8, 4));
-        Assert.AreEqual(22050, BitConverter.ToInt32(start, 24));
+        Assert.AreEqual(24000, BitConverter.ToInt32(start, 24));
         Assert.AreEqual(start.Length - 44, BitConverter.ToInt32(start, 40));
         Assert.IsFalse(start.SequenceEqual(end));
-        Assert.IsTrue(LocalRaceSpeech.CreateRadioCue(0, false).Skip(44).All(value => value == 0));
+        Assert.IsTrue(RadioCues.Connect.ToWave(0).Skip(44).All(value => value == 0));
         Assert.IsTrue(start.Skip(44).Any(value => value != 0));
     }
 
@@ -240,6 +270,109 @@ public sealed class RaceEngineerTests
         engineer.Configure(true, false, 70);
         engineer.SetStage("race");
         return engineer;
+    }
+
+    [TestMethod]
+    public async Task PreviewWorksOfflineWithAutomaticSpeechDisabledAndUsesCurrentVolume()
+    {
+        var output = new ControlledSpeech();
+        using var engineer = new RaceEngineer(output);
+        engineer.Configure(false, false, 35);
+        var preview = engineer.PreviewAsync("黄旗，注意减速。");
+        var spoken = await output.Next();
+        Assert.AreEqual(35, spoken.Volume);
+        Assert.IsTrue(engineer.IsPreviewing);
+        Assert.IsFalse(await engineer.PreviewAsync("must not queue"));
+        spoken.Finish.TrySetResult();
+        Assert.IsTrue(await preview.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.IsFalse(engineer.IsPreviewing);
+        Assert.IsFalse(engineer.Enqueue(Message("still disabled")));
+    }
+
+    [TestMethod]
+    public async Task PreviewHonorsMuteAndZeroVolumeAndDoesNotConsumeRealEventIds()
+    {
+        var output = new ControlledSpeech();
+        using var engineer = Enabled(output);
+        engineer.Configure(true, true, 70);
+        Assert.IsFalse(await engineer.PreviewAsync("sample"));
+        engineer.Configure(true, false, 0);
+        Assert.IsFalse(await engineer.PreviewAsync("sample"));
+        engineer.Configure(true, false, 65);
+        var preview = engineer.PreviewAsync("preview");
+        (await output.Next()).Finish.TrySetResult();
+        Assert.IsTrue(await preview);
+        Assert.IsTrue(engineer.Enqueue(Message("preview")));
+        Assert.AreEqual("preview", (await output.Next()).Text);
+    }
+
+    [TestMethod]
+    [DataRow("race")]
+    [DataRow("stage")]
+    [DataRow("mute")]
+    [DataRow("stop")]
+    [DataRow("dispose")]
+    public async Task PreviewCanBeInterruptedWithoutBlockingTheRace(string cause)
+    {
+        var output = new ControlledSpeech();
+        using var engineer = Enabled(output);
+        var preview = engineer.PreviewAsync("sample");
+        var spoken = await output.Next();
+        switch (cause)
+        {
+            case "race": engineer.Enqueue(Message("real", EngineerPriority.Emergency)); break;
+            case "stage": engineer.SetStage("next"); break;
+            case "mute": engineer.Configure(true, true, 70); break;
+            case "stop": engineer.StopPreview(); break;
+            case "dispose": engineer.Dispose(); break;
+        }
+        Assert.IsFalse(await preview.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.IsTrue(spoken.Token.IsCancellationRequested);
+        if (cause == "race") Assert.AreEqual("real", (await output.Next()).Text);
+        Assert.IsNull(engineer.Error);
+    }
+
+    [TestMethod]
+    public async Task PreviewDoesNotInterruptOngoingRaceMessageAndFailuresAreContained()
+    {
+        var output = new ControlledSpeech();
+        using var engineer = Enabled(output);
+        engineer.Enqueue(Message("race"));
+        var race = await output.Next();
+        Assert.IsFalse(await engineer.PreviewAsync("sample"));
+        Assert.IsFalse(race.Token.IsCancellationRequested);
+        engineer.SetStage("next");
+        // Wait for the cancelled transmission to release the shared output.
+        engineer.Dispose();
+        await engineer.Completion;
+        var failing = new ControlledSpeech();
+        using var next = new RaceEngineer(failing);
+        var preview = next.PreviewAsync("failure");
+        (await failing.Next()).Finish.TrySetException(new InvalidOperationException("Missing voice"));
+        Assert.IsFalse(await preview);
+        Assert.IsNotNull(next.Error);
+        Assert.IsFalse(next.Completion.IsCompleted);
+    }
+
+    [TestMethod]
+    public void PreviewPhrasesUseBothLanguagesAndAvoidConsecutiveRepeats()
+    {
+        foreach (var english in new[] { false, true })
+        {
+            var phrases = new RaceEngineerPreviewPhrases();
+            var random = new Random(734);
+            var seen = new HashSet<string>();
+            string? previous = null;
+            for (var i = 0; i < 60; i++)
+            {
+                var text = phrases.Next(english, random);
+                Assert.AreNotEqual(previous, text);
+                Assert.AreEqual(english, text.All(character => character < 128));
+                seen.Add(text); previous = text;
+            }
+            Assert.AreEqual(6, seen.Count);
+            Assert.IsTrue(seen.Any(text => text.Contains(english ? "prediction" : "不确定性", StringComparison.Ordinal)));
+        }
     }
 
     private static EstateRaceHudState State()
@@ -256,8 +389,15 @@ public sealed class RaceEngineerTests
     }
 
     private sealed record Utterance(string Text, int Volume, CancellationToken Token, TaskCompletionSource Finish);
-    private sealed class ControlledSpeech : ILocalRaceSpeech
+    private sealed class ControlledSpeech : ISpeechOutput
     {
+        public int DisposeCount { get; private set; }
+        public bool FailCleanup { get; init; }
+        public ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            return FailCleanup ? ValueTask.FromException(new InvalidOperationException("Cleanup failed")) : ValueTask.CompletedTask;
+        }
         private readonly Channel<Utterance> started = Channel.CreateUnbounded<Utterance>();
         public async Task SpeakAsync(string text, int volume, CancellationToken cancellationToken)
         {
