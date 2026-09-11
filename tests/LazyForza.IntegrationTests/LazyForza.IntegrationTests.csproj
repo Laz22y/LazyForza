@@ -10,6 +10,9 @@
     <PackageReference Include="MSTest.TestFramework" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="..\..\src\LazyForza.App\App.xaml" LogicalName="LazyForzaTheme.xaml" />
+  </ItemGroup>
+  <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\LazyForza.Domain\LazyForza.Domain.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Telemetry\LazyForza.Telemetry.csproj" />

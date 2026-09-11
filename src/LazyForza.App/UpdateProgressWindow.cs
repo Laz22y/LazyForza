@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 using LazyForza.Update;
 
 namespace LazyForza.App;
@@ -24,6 +26,13 @@ internal sealed class UpdateProgressWindow : Window
         Background = (Brush)Application.Current.FindResource("PanelBrush");
         Foreground = (Brush)Application.Current.FindResource("TextBrush");
         FontFamily = new FontFamily("Microsoft YaHei UI");
+        SourceInitialized += (_, _) =>
+        {
+            var dark = 1;
+            var handle = new WindowInteropHelper(this).Handle;
+            if (DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int)) != 0)
+                _ = DwmSetWindowAttribute(handle, 19, ref dark, sizeof(int));
+        };
 
         var stack = new StackPanel { Margin = new Thickness(24, 20, 24, 18) };
         stack.Children.Add(new TextBlock
@@ -43,6 +52,9 @@ internal sealed class UpdateProgressWindow : Window
         progressBar = new ProgressBar
         {
             Height = 7,
+            Background = (Brush)Application.Current.FindResource("BorderBrush"),
+            Foreground = (Brush)Application.Current.FindResource("AccentBrush"),
+            BorderThickness = new Thickness(0),
             IsIndeterminate = true,
             Minimum = 0,
             Maximum = 1
@@ -96,4 +108,7 @@ internal sealed class UpdateProgressWindow : Window
         Close();
         cancellation.Dispose();
     }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int valueSize);
 }
