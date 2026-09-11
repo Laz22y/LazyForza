@@ -8,7 +8,7 @@
 
 ## 简体中文
 
-预览版：[`1.5.3-alpha-1`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-1)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-1)），推荐搭配 RaceServer `0.6.0-alpha-1`。使用独立预发布更新通道，协议保持 v2；正式版下载入口保持 `1.5.2`。
+预览版：[`1.5.3-alpha-2`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-2)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-2)），推荐搭配 RaceServer `0.6.0-alpha-1`。使用独立预发布更新通道，协议保持 v2；正式版下载入口保持 `1.5.2`。
 
 <p align="center">
   <a href="https://laz22y.github.io/LazyForza/">官网</a> ·
@@ -44,7 +44,9 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 地产赛事页提供默认关闭的「本地语音比赛工程师」，播报旗语变化、新处罚、个人最快圈和关键进站预测。可调整音量或立即静音；静音会停止当前语音及提示音并清空待播消息，恢复后不补播。红旗优先打断普通播报，重复事件与频繁预测会被去重和冷却。进站建议保留「预计」「可能」等不确定性表述。
 
-语音使用 Windows 已安装的对应语言本地 SAPI 语音，无需联网；每次完整播报前后有本地合成的短促无线电双音。缺少语音或音频不可用时只停用播报，比赛照常进行。安装对应语音后，可关闭再启用工程师以重试。
+语音使用 Windows 已安装的对应语言本地 SAPI 语音，无需联网；每次完整播报前后有原创的无线电接通／断开音，包含短双脉冲、轻微扫频和电台噪声尾音。语音准备好后才播放接通音，静音或中断会立即停止本次输出。缺少语音或音频不可用时只停用播报，比赛照常进行。安装对应语音后，可关闭再启用工程师以重试。合成与播放已通过独立接口分离，当前内置实现仍为 Windows 本地语音；开发接口见 [语音输出说明](docs/RACE_ENGINEER_SPEECH.md)。
+
+接通音后留出 180 毫秒，语音结束后留出 220 毫秒再播放断开音。展开「自定义接通/断开音」可分别导入 WAV、MP3、M4A 或 FLAC（每段最多 5 秒、10 MB，需系统支持解码），也可分别恢复默认；导入后保存音频副本，不依赖原文件路径。「试听」随机选择一句比赛示例，使用当前音量和提示音，无需连接赛事或开启自动播报；静音和零音量时不可试听，真实赛事消息优先。再次点击可停止试听。
 
 ## 快速开始
 
@@ -114,7 +116,7 @@ FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与
 
 ## English
 
-Preview: [`1.5.3-alpha-1`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-1) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-1)), recommended with RaceServer `0.6.0-alpha-1`. It uses the separate preview update channel and protocol v2; stable downloads remain on `1.5.2`.
+Preview: [`1.5.3-alpha-2`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-2) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-2)), recommended with RaceServer `0.6.0-alpha-1`. It uses the separate preview update channel and protocol v2; stable downloads remain on `1.5.2`.
 
 LazyForza is a local telemetry, driving-analysis and estate-racing tool for Forza Horizon 6. It uses only official FH6 UDP Data Out: no game-memory access, DLL injection or game-process modification. Settings, laps, vehicle learning and recordings stay on your PC by default.
 
@@ -143,7 +145,9 @@ Corner comparisons require compatible route revisions, directions, sector versio
 
 The Estate racing page includes an optional local race engineer, disabled by default. It announces flag changes, new penalties, personal bests and important pit predictions, with priority, deduplication and cooldowns. Red flags interrupt routine speech. Volume and immediate mute controls apply to speech and the locally synthesized radio cues before and after each complete transmission. Mute clears pending messages; unmuting does not replay them. Pit advice explicitly remains an estimate.
 
-Speech uses an installed Windows SAPI voice for the selected language, without a network service. Missing voices or audio failures disable speech without affecting the race. After installing a compatible voice, disable and enable the engineer to retry.
+Speech uses an installed Windows SAPI voice for the selected language, without a network service. Original radio connect/disconnect cues combine short pulses, subtle frequency sweeps and brief squelch tails. The radio opens only once speech is ready; muting or interrupting stops the transmission. Missing voices or audio failures disable speech without affecting the race. After installing a compatible voice, disable and enable the engineer to retry. Synthesis and playback have separate interfaces; Windows local speech remains the built-in provider. See the [speech integration guide](docs/RACE_ENGINEER_SPEECH.md).
+
+Speech starts 180 ms after the connect cue; the disconnect cue follows speech after 220 ms. Expand “Custom connect/disconnect sounds” to import WAV, MP3, M4A or FLAC clips (up to 5 seconds and 10 MB each, subject to installed Windows codecs), or reset either cue. An audio copy is saved independently of the source file. “Preview” plays a random race sample with the current volume and cues, even offline with automatic speech disabled. Mute and zero volume block previews; live race messages take priority. Click again to stop.
 
 ### Quick start
 
