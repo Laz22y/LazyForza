@@ -208,6 +208,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private DateTimeOffset liveCumulativeHistoricalDeltaUntil;
     private int liveCumulativeHistoricalDeltaSector = -1;
     private bool pitTransitActive;
+    private bool pitFinishConsumed;
     private PitRouteProjection? previousPitRouteProjection;
     private double? activePitEntryProgressMeters;
     private double? activePitExitProgressMeters;
@@ -1493,12 +1494,16 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             current,
             out var mainCrossing);
         EstateGateCrossing pitCrossing = default;
-        var crossedPit = pitWasActiveAtFinish && pit?.StartFinishGate is EstateTimingGate pitGate &&
+        var crossedPit = pitWasActiveAtFinish && !pitFinishConsumed && pit?.StartFinishGate is EstateTimingGate pitGate &&
                          EstateTrackAlgorithms.TryDetectForwardCrossing(
                              pitGate,
                              previous,
                              current,
-                             out pitCrossing);
+                             out pitCrossing,
+                             minimumSpeedMetersPerSecond: 0);
+        // A service box can straddle the timing line. Creeping through it is a
+        // legal passage; only one pit finish is allowed for the entire visit.
+        if (crossedPit) pitFinishConsumed = true;
 
         if (!crossedMain && !crossedPit)
         {
@@ -1547,6 +1552,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
              enteredByProgress || recoveredInsidePit))
         {
             pitTransitActive = true;
+            pitFinishConsumed = false;
             LogIfInitialized("Estate pit transit entered.");
         }
 

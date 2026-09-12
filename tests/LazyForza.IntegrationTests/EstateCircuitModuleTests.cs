@@ -430,7 +430,9 @@ public sealed class EstateCircuitModuleTests
     }
 
     [TestMethod]
-    public async Task LegalPitLaneFinishCrossingCompletesOneValidLapWithoutMainGateHit()
+    [DataRow(15d)]
+    [DataRow(0.3d)]
+    public async Task LegalPitLaneFinishCrossingCompletesOneValidLapWithoutMainGateHit(double crossingSpeed)
     {
         var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-pit-lap-{Guid.NewGuid():N}.db");
         try
@@ -496,8 +498,8 @@ public sealed class EstateCircuitModuleTests
                 }
                 PublishPosition(feed, 89_000, 118, 2, -22, 15);
                 PublishPosition(feed, 89_250, 118, 2, -18, 15);
-                PublishPosition(feed, 90_000, 118, 2, -1, 15);
-                PublishPosition(feed, 90_100, 118, 2, 1, 15);
+                PublishPosition(feed, 90_000, 118, 2, -0.01, crossingSpeed);
+                PublishPosition(feed, 90_100, 118, 2, 0.01, crossingSpeed);
 
                 await WaitUntilAsync(
                     () => module.State.CompletedLaps == 1,
@@ -509,19 +511,26 @@ public sealed class EstateCircuitModuleTests
                 Assert.IsTrue(lap.IsValid, lap.InvalidReason);
                 Assert.AreEqual(1, module.LastCompletedLap?.LapNumber);
 
+                // Reversing then creeping across the same pit gate again after
+                // 15 seconds must not count another lap within the same visit.
+                PublishPosition(feed, 108_000, 118, 2, -0.01, 0.3);
+                PublishPosition(feed, 108_100, 118, 2, 0.01, 0.3);
+                await WaitUntilAsync(() => module.State.CurrentLapSeconds >= 18, TimeSpan.FromSeconds(5), () => module.State.ToString());
+                Assert.AreEqual(1, module.State.CompletedLaps);
+
                 // Crossing the alternate pit finish gate starts the next lap
                 // while the car is still inside the lane. The pit-transit state
                 // must survive that lap reset until the deterministic exit line.
-                PublishPosition(feed, 90_200, 118, 2, 18, 15);
-                PublishPosition(feed, 90_300, 118, 2, 22, 15);
+                PublishPosition(feed, 108_200, 118, 2, 18, 15);
+                PublishPosition(feed, 108_300, 118, 2, 22, 15);
                 for (var index = 14; index <= 350; index += 2)
                 {
                     var angle = index * Math.PI * 2 / 360;
-                    PublishPosition(feed, (uint)(90_300 + index * 180),
+                    PublishPosition(feed, (uint)(108_300 + index * 180),
                         100 * Math.Cos(angle), 2, 100 * Math.Sin(angle), 20);
                 }
-                PublishPosition(feed, 154_000, 100, 2, -2, 20);
-                PublishPosition(feed, 154_100, 100, 2, 2, 20);
+                PublishPosition(feed, 172_000, 100, 2, -2, 20);
+                PublishPosition(feed, 172_100, 100, 2, 2, 20);
 
                 await WaitUntilAsync(
                     () => module.State.CompletedLaps == 2,
