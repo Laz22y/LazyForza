@@ -97,17 +97,18 @@ internal sealed partial class HudSurface
         var widgets = layout.EstateRaceWidgets ?? EstateRaceHudLayoutSettings.Default;
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.Leaderboard,
             widgets.Get(EstateRaceHudWidgetKind.Leaderboard),
-            widgetDc => DrawRaceLeaderboard(widgetDc, state, session, estimatedServerNow, networkQuality));
+            widgetDc => DrawRaceLeaderboard(widgetDc, state, session, estimatedServerNow, networkQuality),
+            content: new LeaderboardContent(state, session, estimatedServerNow, networkQuality));
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.TrackMap,
             widgets.Get(EstateRaceHudWidgetKind.TrackMap),
-            widgetDc => DrawRaceTrackMap(widgetDc, state, session));
+            widgetDc => DrawRaceTrackMap(widgetDc, state, session), content: new MapContent(state, session));
         var localParticipant = session.Participants.FirstOrDefault(item => item.Id == state.LocalParticipantId);
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.GripStatus,
             widgets.Get(EstateRaceHudWidgetKind.GripStatus),
             widgetDc => DrawRaceGripStatus(widgetDc, state),
             state.LocalGripCondition != RaceGripCondition.Unknown &&
             localParticipant is not { IsInPitLane: true } and not { IsInServiceZone: true },
-            state.LocalGripCondition.ToString());
+            state.LocalGripCondition.ToString(), new GripContent(state));
         var banner = ShouldSuppressRaceStartBanner(session, session.Banner)
             ? null
             : session.Banner;
@@ -126,7 +127,7 @@ internal sealed partial class HudSurface
             DrawRaceWidget(dc, EstateRaceHudWidgetKind.Banner,
                 widgets.Get(EstateRaceHudWidgetKind.Banner),
                 widgetDc => DrawRaceBanner(widgetDc, banner!),
-                contentKey: RaceBannerAnimationKey(session, banner!, estimatedServerNow));
+                contentKey: RaceBannerAnimationKey(session, banner!, estimatedServerNow), content: new BannerContent(banner!));
         }
         else
             DrawRaceWidget(dc, EstateRaceHudWidgetKind.Banner,
@@ -145,18 +146,19 @@ internal sealed partial class HudSurface
         }
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.StartLights,
             widgets.Get(EstateRaceHudWidgetKind.StartLights),
-            widgetDc => DrawRaceStartLights(widgetDc, startLightSession), showStartLights);
+            widgetDc => DrawRaceStartLights(widgetDc, startLightSession), showStartLights,
+            content: new StartLightsContent(startLightSession));
         var pitHud = UpdatePitHud(session, state.LocalParticipantId, state.PitService, now, estimatedServerNow);
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.PitStopInfo,
             widgets.Get(EstateRaceHudWidgetKind.PitStopInfo),
             widgetDc => DrawRacePitStopInfo(widgetDc, pitHud),
             session.Phase == RaceSessionPhase.Race && pitHud.Entries.Count > 0,
-            PitHudAnimationKey(pitHud));
+            PitHudAnimationKey(pitHud), new PitStopContent(pitHud));
         var limiterVisible = EstateRaceHudVisibilityPolicy.ShouldShowPitLimiter(state.PitService);
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.PitLimiter,
             widgets.Get(EstateRaceHudWidgetKind.PitLimiter),
             widgetDc => DrawRacePitLimiter(widgetDc, state.PitService), limiterVisible,
-            state.PitService.IsSpeeding ? "speeding" : "within-limit");
+            state.PitService.IsSpeeding ? "speeding" : "within-limit", new LimiterContent(state.PitService));
         var penaltyVisible = EstateRaceHudVisibilityPolicy.ShouldShowPenaltyStatus(
             session,
             localParticipant,
@@ -164,7 +166,8 @@ internal sealed partial class HudSurface
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.PenaltyStatus,
             widgets.Get(EstateRaceHudWidgetKind.PenaltyStatus),
             widgetDc => DrawRacePenaltyStatus(widgetDc, localParticipant!), penaltyVisible,
-            penaltyVisible ? PenaltyAnimationKey(localParticipant!) : null);
+            penaltyVisible ? PenaltyAnimationKey(localParticipant!) : null,
+            penaltyVisible ? new PenaltyContent(localParticipant!) : null);
         var activePractice = state.PracticeTests?.Items.FirstOrDefault(item => item.IsVisibleOnHud(now));
         DrawRaceWidget(dc, EstateRaceHudWidgetKind.PracticeProgram,
             widgets.Get(EstateRaceHudWidgetKind.PracticeProgram),
@@ -173,7 +176,8 @@ internal sealed partial class HudSurface
             (layoutPreview || EstateRaceHudVisibilityPolicy.ShouldShowPracticeProgram(state, now)),
             activePractice is null
                 ? null
-                : $"{activePractice.Kind}:{activePractice.Status}");
+                : $"{activePractice.Kind}:{activePractice.Status}",
+            activePractice is null ? null : new PracticeContent(activePractice));
         var pitWindow = pitWindowHudRuntime.Update(
             session,
             state.LocalParticipantId,
@@ -186,7 +190,7 @@ internal sealed partial class HudSurface
             pitWindow.IsVisible,
             pitWindow.IsVisible
                 ? $"{pitWindow.StartLap}:{pitWindow.EndLap}:{pitWindow.LapsUntilWindow}:{pitWindow.WindowOpen}"
-                : null);
+                : null, new PitWindowContent(pitWindow));
         var fullRaceStrategy = fullRaceStrategyHudRuntime.Update(
             session,
             state.LocalParticipantId,
@@ -198,7 +202,7 @@ internal sealed partial class HudSurface
             widgets.Get(EstateRaceHudWidgetKind.FullRaceStrategy),
             widgetDc => DrawRaceFullStrategy(widgetDc, fullRaceStrategy),
             fullRaceStrategy.IsVisible,
-            FullRaceStrategyAnimationKey(fullRaceStrategy));
+            FullRaceStrategyAnimationKey(fullRaceStrategy), new StrategyContent(fullRaceStrategy));
         var transientAnimation = estateRaceWidgetAnimations.AnyAnimating ||
                                  raceWidgetContentAnimation ||
                                  startLightAnimation ||
@@ -229,7 +233,8 @@ internal sealed partial class HudSurface
         EstateRaceHudWidgetPlacement placement,
         Action<DrawingContext> draw,
         bool contentVisible = true,
-        string? contentKey = null)
+        string? contentKey = null,
+        RaceWidgetContent? content = null)
     {
         var requestedVisible = placement.IsVisible && contentVisible && placement.Opacity > 0.001;
         var visual = estateRaceWidgetAnimations.Update(
@@ -247,9 +252,16 @@ internal sealed partial class HudSurface
             raceWidgetDrawings[kind] = runtime;
         }
 
+        var theme = ResolveRaceTheme(placement.ThemeId);
+        if (runtime.ThemeId != theme.Definition.Id)
+        {
+            runtime.Current = runtime.Outgoing = null;
+            runtime.ContentTransitionStartedSeconds = double.NegativeInfinity;
+            runtime.ThemeId = theme.Definition.Id;
+        }
         if (requestedVisible)
         {
-            var group = EstateRaceDrawingLayers.Record(draw);
+            var group = EstateRaceDrawingLayers.Record(widgetDc => theme.Renderer.Draw(this, widgetDc, content, draw));
             if (runtime.Current is not null && contentKey is not null &&
                 !string.Equals(runtime.ContentKey, contentKey, StringComparison.Ordinal))
             {
@@ -387,10 +399,17 @@ internal sealed partial class HudSurface
     private void DrawRaceTrackMap(
         DrawingContext dc,
         EstateRaceHudState state,
-        EstateRaceSession session)
+        EstateRaceSession session,
+        bool broadcast = false)
     {
         var size = Math.Min(ActualWidth * 0.19, ActualHeight * 0.28);
-        EstateRaceDrawingLayers.Panel(dc, 
+        if (broadcast)
+        {
+            BroadcastPanel(dc, size, size);
+            BroadcastText(dc, "TRACK MAP", new Rect(size * 0.08, 0, size * 0.84, size * 0.12),
+                size * 0.045, BroadcastMuted);
+        }
+        else EstateRaceDrawingLayers.Panel(dc,
             BrushOf(0x08, 0x0B, 0x11, 0.91),
             new Pen(BrushOf(0x8B, 0x9A, 0xAA, 0.32), 1),
             new Rect(0, 0, size, size),
@@ -1137,17 +1156,10 @@ internal sealed partial class HudSurface
     {
         var width = ActualWidth * 0.27;
         var height = ActualHeight * 0.105;
-        var completed = participant.PenaltyServiceCompleted;
-        var driveThrough = participant.HasPendingDriveThrough;
-        var servingDriveThrough = participant.IsServingDriveThrough;
-        var active = participant.IsServingTimePenalty;
-        var postRaceAdjustment = participant.Penalties
-            .Where(item => !item.IsRevoked && !item.IsServed && item.IsPostRaceAdjustment)
-            .Sum(item => item.ValueSeconds ?? 0);
-        var overdue = participant.DriveThroughOverdue && postRaceAdjustment > 0;
-        var accent = completed
-            ? BrushOf(0x4D, 0xD8, 0x91)
-            : driveThrough || servingDriveThrough ? BrushOf(0xF4, 0xC5, 0x24) : BrushOf(0xFF, 0x45, 0x5F);
+        var presentation = PenaltyPresentation(participant);
+        var completed = presentation.Completed;
+        var active = presentation.Active;
+        var accent = presentation.Accent;
         EstateRaceDrawingLayers.Panel(dc, BrushOf(0x00, 0x00, 0x00, 0.34),
             null,
             new Rect(2, 3, width, height),
@@ -1192,6 +1204,48 @@ internal sealed partial class HudSurface
             Math.Max(9, height * 0.105),
             accent,
             true);
+        var title = presentation.Title;
+        var detail = presentation.Detail;
+        RaceText(dc, title, width * 0.045, height * 0.55,
+            Math.Max(14, height * 0.19), White, TextAlignment.Left, true);
+        RaceBoundedText(dc, OverlayTextLocalization.Text(detail),
+            new Rect(width * 0.045, height * 0.67, width * 0.68, height * 0.22),
+            Math.Max(11, height * 0.125), RaceSecondary, true, TextAlignment.Left);
+        var valueText = presentation.ValueText;
+        var valueBounds = new Rect(width * 0.75, height * 0.18, width * 0.21, height * 0.64);
+        dc.DrawRoundedRectangle(BrushWithOpacity(accent, 0.14),
+            new Pen(BrushWithOpacity(accent, 0.46), 1), valueBounds, 5, 5);
+        RaceText(dc, valueText, valueBounds.Left + valueBounds.Width * 0.5, valueBounds.Top + valueBounds.Height * 0.52,
+            Math.Max(20, height * 0.29), completed ? accent : White, TextAlignment.Center, true);
+        if (active && participant.PenaltyServiceRequiredSeconds > 0)
+        {
+            var progress = Math.Clamp(
+                participant.PenaltyServiceElapsedSeconds / participant.PenaltyServiceRequiredSeconds,
+                0,
+                1);
+            dc.DrawRoundedRectangle(BrushOf(0x7E, 0x89, 0x96, 0.24), null,
+                new Rect(width * 0.045, height * 0.93, width * 0.91, height * 0.045), 2, 2);
+            dc.DrawRoundedRectangle(accent, null,
+                new Rect(width * 0.045, height * 0.93, width * 0.91 * progress, height * 0.045), 2, 2);
+        }
+    }
+
+    private sealed record PenaltyHudPresentation(string Title, string Detail, string ValueText,
+        Brush Accent, bool Completed, bool Active);
+
+    private static PenaltyHudPresentation PenaltyPresentation(EstateRaceParticipant participant)
+    {
+        var completed = participant.PenaltyServiceCompleted;
+        var driveThrough = participant.HasPendingDriveThrough;
+        var servingDriveThrough = participant.IsServingDriveThrough;
+        var active = participant.IsServingTimePenalty;
+        var postRaceAdjustment = participant.Penalties
+            .Where(item => !item.IsRevoked && !item.IsServed && item.IsPostRaceAdjustment)
+            .Sum(item => item.ValueSeconds ?? 0);
+        var overdue = participant.DriveThroughOverdue && postRaceAdjustment > 0;
+        var accent = completed
+            ? BrushOf(0x4D, 0xD8, 0x91)
+            : driveThrough || servingDriveThrough ? BrushOf(0xF4, 0xC5, 0x24) : BrushOf(0xFF, 0x45, 0x5F);
         var title = completed
             ? "PENALTY SERVED"
             : overdue ? "DRIVE THROUGH MISSED"
@@ -1214,11 +1268,6 @@ internal sealed partial class HudSurface
                 : active
                     ? "保持静止 · 不要打开暂停菜单"
                     : "先执行罚时，完成后才能开始换胎";
-        RaceText(dc, title, width * 0.045, height * 0.55,
-            Math.Max(14, height * 0.19), White, TextAlignment.Left, true);
-        RaceBoundedText(dc, OverlayTextLocalization.Text(detail),
-            new Rect(width * 0.045, height * 0.67, width * 0.68, height * 0.22),
-            Math.Max(11, height * 0.125), RaceSecondary, true, TextAlignment.Left);
         var valueText = completed
             ? "OK"
             : overdue ? $"+{postRaceAdjustment:0}s"
@@ -1226,22 +1275,7 @@ internal sealed partial class HudSurface
             : active
                 ? $"{Math.Max(0, participant.PenaltyServiceRequiredSeconds - participant.PenaltyServiceElapsedSeconds):0.0}"
                 : $"+{participant.PendingTimePenaltySeconds:0.#}s";
-        var valueBounds = new Rect(width * 0.75, height * 0.18, width * 0.21, height * 0.64);
-        dc.DrawRoundedRectangle(BrushWithOpacity(accent, 0.14),
-            new Pen(BrushWithOpacity(accent, 0.46), 1), valueBounds, 5, 5);
-        RaceText(dc, valueText, valueBounds.Left + valueBounds.Width * 0.5, valueBounds.Top + valueBounds.Height * 0.52,
-            Math.Max(20, height * 0.29), completed ? accent : White, TextAlignment.Center, true);
-        if (active && participant.PenaltyServiceRequiredSeconds > 0)
-        {
-            var progress = Math.Clamp(
-                participant.PenaltyServiceElapsedSeconds / participant.PenaltyServiceRequiredSeconds,
-                0,
-                1);
-            dc.DrawRoundedRectangle(BrushOf(0x7E, 0x89, 0x96, 0.24), null,
-                new Rect(width * 0.045, height * 0.93, width * 0.91, height * 0.045), 2, 2);
-            dc.DrawRoundedRectangle(accent, null,
-                new Rect(width * 0.045, height * 0.93, width * 0.91 * progress, height * 0.045), 2, 2);
-        }
+        return new(title, detail, valueText, accent, completed, active);
     }
 
     private sealed class PitHudRuntime
@@ -1271,6 +1305,7 @@ internal sealed partial class HudSurface
 
     private sealed class RaceWidgetDrawingRuntime
     {
+        public string? ThemeId { get; set; }
         public EstateRaceDrawingLayers? Current { get; set; }
         public EstateRaceDrawingLayers? Outgoing { get; set; }
         public string? ContentKey { get; set; }

@@ -149,43 +149,7 @@ internal sealed partial class HudSurface
         // The lower strip is reserved for session progress. Flag animations are
         // confined to the top bar so remaining time and race laps never jump,
         // disappear or get replaced by marshal instructions.
-        var stageDetail = session.Phase switch
-        {
-            RaceSessionPhase.Finished =>
-                $"RACE TIME {FormatRaceTime(participants.FirstOrDefault()?.AdjustedRaceTotalSeconds)} · {participants.Count(item => item.Status == RaceParticipantStatus.Finished)} CLASSIFIED",
-            RaceSessionPhase.Practice when session.PracticeEndsAt is DateTimeOffset practiceEnding =>
-                $"{(session.PracticeSessionCount > 1 ? $"FP{session.PracticeSessionNumber} · " : string.Empty)}REMAINING {FormatRemaining(practiceEnding - estimatedServerNow)}",
-            RaceSessionPhase.Practice when session.PracticeTimeExpired &&
-                                                   session.PracticeSessionCount > 1 &&
-                                                   session.PracticeSessionNumber < session.PracticeSessionCount =>
-                $"FP{session.PracticeSessionNumber} COMPLETE · WAITING FOR FP{session.PracticeSessionNumber + 1}",
-            RaceSessionPhase.Practice when session.PracticeTimeExpired =>
-                $"{(session.PracticeSessionCount > 1 ? $"FP{session.PracticeSessionNumber}" : "PRACTICE")} COMPLETE",
-            RaceSessionPhase.Qualifying when session.QualifyingEndsAt is DateTimeOffset ending =>
-                $"{(session.QualifyingSessionCount > 1 ? $"Q{session.QualifyingSessionNumber} · " : string.Empty)}REMAINING {FormatRemaining(ending - estimatedServerNow)}",
-            RaceSessionPhase.Qualifying when session.QualifyingTimeExpired &&
-                                                     session.QualifyingSessionCount > 1 &&
-                                                     session.QualifyingSessionNumber < session.QualifyingSessionCount =>
-                $"Q{session.QualifyingSessionNumber} COMPLETE · WAITING FOR Q{session.QualifyingSessionNumber + 1}",
-            RaceSessionPhase.Qualifying when session.QualifyingTimeExpired =>
-                $"{(session.QualifyingSessionCount > 1 ? $"Q{session.QualifyingSessionNumber}" : "QUALIFYING")} COMPLETE",
-            RaceSessionPhase.Race when session.TotalRaceLaps > 0 =>
-                $"TIME {FormatRaceTime(EstimatedRaceElapsedSeconds(session, estimatedServerNow))} · LAP {DisplayedRaceLap(participants.FirstOrDefault(), session.TotalRaceLaps)}/{session.TotalRaceLaps}",
-            RaceSessionPhase.Suspended when session.SuspendedFromPhase == RaceSessionPhase.Qualifying &&
-                                           session.QualifyingEndsAt is DateTimeOffset ending =>
-                $"SESSION SUSPENDED · REMAINING {FormatRemaining(ending - session.ServerTime)}",
-            RaceSessionPhase.Suspended when session.SuspendedFromPhase == RaceSessionPhase.Practice &&
-                                           session.PracticeEndsAt is DateTimeOffset practiceEnding =>
-                $"SESSION SUSPENDED · REMAINING {FormatRemaining(practiceEnding - session.ServerTime)}",
-            RaceSessionPhase.Suspended when session.SuspendedFromPhase == RaceSessionPhase.Race &&
-                                           session.TotalRaceLaps > 0 =>
-                $"SESSION SUSPENDED · LAP {DisplayedRaceLap(participants.FirstOrDefault(), session.TotalRaceLaps)}/{session.TotalRaceLaps}",
-            RaceSessionPhase.OutLap => "PROCEED TO THE GRID",
-            RaceSessionPhase.FormationLap => "FORMATION LAP",
-            RaceSessionPhase.Countdown => "START PROCEDURE",
-            RaceSessionPhase.Grid => "GRID SET · WAITING FOR RACE CONTROL",
-            _ => "WAITING FOR RACE CONTROL"
-        };
+        var stageDetail = RaceStageDetail(session, participants, estimatedServerNow);
         if (finished)
         {
             var detailProgress = SmoothStep((transitionProgress - 0.14) / 0.86);
@@ -385,6 +349,46 @@ internal sealed partial class HudSurface
         }
         dc.Pop();
     }
+
+    private static string RaceStageDetail(EstateRaceSession session,
+        IReadOnlyList<EstateRaceParticipant> participants, DateTimeOffset estimatedServerNow) =>
+        session.Phase switch
+        {
+            RaceSessionPhase.Finished =>
+                $"RACE TIME {FormatRaceTime(participants.FirstOrDefault()?.AdjustedRaceTotalSeconds)} · {participants.Count(item => item.Status == RaceParticipantStatus.Finished)} CLASSIFIED",
+            RaceSessionPhase.Practice when session.PracticeEndsAt is DateTimeOffset practiceEnding =>
+                $"{(session.PracticeSessionCount > 1 ? $"FP{session.PracticeSessionNumber} · " : string.Empty)}REMAINING {FormatRemaining(practiceEnding - estimatedServerNow)}",
+            RaceSessionPhase.Practice when session.PracticeTimeExpired &&
+                                                   session.PracticeSessionCount > 1 &&
+                                                   session.PracticeSessionNumber < session.PracticeSessionCount =>
+                $"FP{session.PracticeSessionNumber} COMPLETE · WAITING FOR FP{session.PracticeSessionNumber + 1}",
+            RaceSessionPhase.Practice when session.PracticeTimeExpired =>
+                $"{(session.PracticeSessionCount > 1 ? $"FP{session.PracticeSessionNumber}" : "PRACTICE")} COMPLETE",
+            RaceSessionPhase.Qualifying when session.QualifyingEndsAt is DateTimeOffset ending =>
+                $"{(session.QualifyingSessionCount > 1 ? $"Q{session.QualifyingSessionNumber} · " : string.Empty)}REMAINING {FormatRemaining(ending - estimatedServerNow)}",
+            RaceSessionPhase.Qualifying when session.QualifyingTimeExpired &&
+                                                     session.QualifyingSessionCount > 1 &&
+                                                     session.QualifyingSessionNumber < session.QualifyingSessionCount =>
+                $"Q{session.QualifyingSessionNumber} COMPLETE · WAITING FOR Q{session.QualifyingSessionNumber + 1}",
+            RaceSessionPhase.Qualifying when session.QualifyingTimeExpired =>
+                $"{(session.QualifyingSessionCount > 1 ? $"Q{session.QualifyingSessionNumber}" : "QUALIFYING")} COMPLETE",
+            RaceSessionPhase.Race when session.TotalRaceLaps > 0 =>
+                $"TIME {FormatRaceTime(EstimatedRaceElapsedSeconds(session, estimatedServerNow))} · LAP {DisplayedRaceLap(participants.FirstOrDefault(), session.TotalRaceLaps)}/{session.TotalRaceLaps}",
+            RaceSessionPhase.Suspended when session.SuspendedFromPhase == RaceSessionPhase.Qualifying &&
+                                           session.QualifyingEndsAt is DateTimeOffset ending =>
+                $"SESSION SUSPENDED · REMAINING {FormatRemaining(ending - session.ServerTime)}",
+            RaceSessionPhase.Suspended when session.SuspendedFromPhase == RaceSessionPhase.Practice &&
+                                           session.PracticeEndsAt is DateTimeOffset practiceEnding =>
+                $"SESSION SUSPENDED · REMAINING {FormatRemaining(practiceEnding - session.ServerTime)}",
+            RaceSessionPhase.Suspended when session.SuspendedFromPhase == RaceSessionPhase.Race &&
+                                           session.TotalRaceLaps > 0 =>
+                $"SESSION SUSPENDED · LAP {DisplayedRaceLap(participants.FirstOrDefault(), session.TotalRaceLaps)}/{session.TotalRaceLaps}",
+            RaceSessionPhase.OutLap => "PROCEED TO THE GRID",
+            RaceSessionPhase.FormationLap => "FORMATION LAP",
+            RaceSessionPhase.Countdown => "START PROCEDURE",
+            RaceSessionPhase.Grid => "GRID SET · WAITING FOR RACE CONTROL",
+            _ => "WAITING FOR RACE CONTROL"
+        };
 
     private void UpdateRaceHeaderSignal(RaceHeaderSignal target)
     {
