@@ -1,4 +1,10 @@
 {
+  "literal:透明度与动态": "Opacity and motion",
+  "literal:调节整体可见度、赛事底板与动态效果。": "Adjust overall visibility, race panels and motion effects.",
+  "literal:整体不透明度": "Overall opacity",
+  "literal:同时调整所有 HUD 的文字与底板；会与部件不透明度叠加。": "Adjusts all HUD text and panels together; combines with widget opacity.",
+  "literal:地产赛事底板不透明度": "Estate race panel opacity",
+  "literal:只调整赛事面板底色，文字、旗语和状态标识保持清晰。": "Adjusts panel backgrounds only. Text, flags and status indicators stay clear.",
   "literal:速度": "Speed",
   "literal:弯名": "Name",
   "lap.classFilter.hide": "Hide class {0}",

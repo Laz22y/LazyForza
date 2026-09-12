@@ -16,6 +16,13 @@ internal sealed class EstateFullRaceStrategyHudRuntime
     private RaceSessionPhase? previousPhase;
     private string? sessionKey;
 
+    public void Reset()
+    {
+        formationLapStartedAtMonotonicSeconds = null;
+        previousPhase = null;
+        sessionKey = null;
+    }
+
     public FullRaceStrategyHudSnapshot Update(
         EstateRaceSession session,
         Guid? localParticipantId,

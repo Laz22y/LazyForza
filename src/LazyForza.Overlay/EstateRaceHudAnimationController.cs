@@ -16,6 +16,8 @@ internal sealed class EstateRaceHudAnimationController
 
     public bool AnyAnimating => states.Values.Any(state => state.IsAnimating);
 
+    public void Reset() => states.Clear();
+
     public EstateRaceWidgetVisual Update(
         EstateRaceHudWidgetKind kind,
         bool visible,
@@ -36,15 +38,13 @@ internal sealed class EstateRaceHudAnimationController
         var deltaSeconds = Math.Clamp(nowSeconds - state.LastSeconds, 0, 0.25);
         state.LastSeconds = nowSeconds;
         var spec = Spec(kind);
-        if (instant)
+        if (instant || reduceMotion)
         {
             state.Progress = visible ? 1 : 0;
         }
         else
         {
-            var duration = reduceMotion
-                ? 0.10
-                : visible ? spec.EnterSeconds : spec.ExitSeconds;
+            var duration = visible ? spec.EnterSeconds : spec.ExitSeconds;
             state.Progress = MoveTowards(
                 state.Progress,
                 visible ? 1 : 0,

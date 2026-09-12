@@ -45,7 +45,8 @@ public sealed record OverlayLayout(
     double? EstateRaceHudLeft = null,
     double? EstateRaceHudTop = null,
     double? EstateRaceHudWidth = null,
-    double? EstateRaceHudHeight = null);
+    double? EstateRaceHudHeight = null,
+    double EstateRaceBackdropOpacity = 1);
 
 public enum OverlayHudKind
 {
@@ -337,6 +338,9 @@ public static class OverlayLayoutGeometry
             Width = width,
             Height = height,
             Scale = scale,
+            Opacity = double.IsFinite(value.Opacity) ? Math.Clamp(value.Opacity, 0.25, 1) : 1,
+            EstateRaceBackdropOpacity = double.IsFinite(value.EstateRaceBackdropOpacity)
+                ? Math.Clamp(value.EstateRaceBackdropOpacity, 0, 1) : 1,
             DashboardWidgets = DashboardWidgetLayoutSettings.Normalize(
                 value.DashboardWidgets),
             EstateRaceWidgets = EstateRaceHudLayoutSettings.Normalize(

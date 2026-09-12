@@ -545,10 +545,14 @@ internal sealed class OverlayLayoutEditorWindow : Window
             getContributions,
             HudSurfaceKind.EstateRace);
         selectedHud = dashboardHud;
-        canvas.Children.Add(dashboardHud.Frame);
-        canvas.Children.Add(lapHud.Frame);
-        canvas.Children.Add(driftHud.Frame);
-        canvas.Children.Add(estateRaceHud.Frame);
+        // Fade the composed HUD once, exactly as in the live overlay. Selection
+        // handles and guides remain in the outer, fully visible editor canvas.
+        var previewHost = new Canvas { Opacity = OverlayLayoutGeometry.Normalize(original).Opacity };
+        canvas.Children.Add(previewHost);
+        previewHost.Children.Add(dashboardHud.Frame);
+        previewHost.Children.Add(lapHud.Frame);
+        previewHost.Children.Add(driftHud.Frame);
+        previewHost.Children.Add(estateRaceHud.Frame);
 
         dashboardWidgetFrame = new Border
         {

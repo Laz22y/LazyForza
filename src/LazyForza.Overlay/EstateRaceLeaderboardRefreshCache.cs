@@ -9,6 +9,13 @@ internal sealed class EstateRaceLeaderboardRefreshCache(TimeSpan? refreshInterva
     private DateTimeOffset nextRefreshAt;
     private Guid? referenceId;
 
+    public void Reset()
+    {
+        comparisons.Clear();
+        nextRefreshAt = default;
+        referenceId = null;
+    }
+
     public string Format(
         EstateRaceParticipant participant,
         EstateRaceParticipant? localParticipant,

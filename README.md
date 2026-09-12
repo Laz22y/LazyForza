@@ -60,6 +60,8 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 设置页提供默认蓝、暗夜紫、清新绿、鲜艳红、纯粹白和低调灰六种 UI 强调色；切换只影响界面高亮与选中状态，不改变 HUD、图表语义色或其他界面样式。
 
+HUD 设置中的“地产赛事底板不透明度”只调整面板底色，文字、旗语与状态标识保持清晰；“整体不透明度”仍同时影响所有 HUD，并与各赛事部件的不透明度叠加。设置保存后在重启时保留。开启“减少动态”可立即显示赛事状态，关闭淡入、位移和闪动效果。
+
 ```powershell
 LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 ```
@@ -164,6 +166,8 @@ Current source supports independent connect/disconnect switches. Disabling a cue
 The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu entry, and can optionally create a desktop shortcut and associate `.lfztelemetry`, `.lfzlap` and `.lfzestate` files. The portable build does not write those system entries. Stable installed builds check for updates by default; stable portable builds do not, and both settings can be changed later. Preview builds use separate initialization state and GitCode/GitHub prerelease channels; they check on every startup and install only newer previews automatically. Stable releases never enter the preview channel, so a preview build does not automatically become stable. Every package includes the .NET runtime.
 
 Settings provides six UI accent colors: Default Blue, Midnight Purple, Fresh Green, Vivid Red, Pure White and Subtle Gray. The selection changes interface highlights and selected states without recoloring HUDs, chart semantics or other interface styling.
+
+In HUD settings, Estate race panel opacity changes panel backgrounds while keeping text, flags and status indicators clear. Overall opacity still affects all HUD content and combines with individual race widget opacity. Saved settings persist across restarts. Reduce motion shows race states immediately without fades, movement or pulsing.
 
 Use an explicit data directory from the command line when needed:
 
