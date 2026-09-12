@@ -7,6 +7,21 @@ namespace LazyForza.IntegrationTests;
 public sealed class LapEventSendQueueTests
 {
     [TestMethod]
+    public void NewEventClearsReceiptsEvenWhenLobbyAndTrackAreUnchanged()
+    {
+        var queue = new LapEventSendQueue();
+        var session = Session() with { Phase = RaceSessionPhase.Lobby, StartsAt = null, EventId = Guid.NewGuid() };
+        queue.ApplySession(session);
+        var lap = Lap();
+        queue.Enqueue(lap);
+        Assert.IsFalse(queue.ApplySession(session));
+        Assert.IsTrue(queue.Contains(lap.EventId));
+        Assert.IsTrue(queue.ApplySession(session with { EventId = Guid.NewGuid() }));
+        Assert.IsNull(queue.TakeDue(5000));
+        Assert.IsFalse(queue.Acknowledge(lap.EventId));
+    }
+
+    [TestMethod]
     public void RetryHintsAreOptionalAndDoNotChangeLegacyErrorMeaning()
     {
         var options = EstateRaceWireProtocol.JsonOptions;

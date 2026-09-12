@@ -81,6 +81,8 @@ LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 
 只使用实时 HUD 和圈速分析时不需要部署服务端。部署前阅读[赛事服务端指引](https://laz22y.github.io/LazyForza/docs/#race-server)。
 
+当前源码的总控将项目、规则与赛程、赛果记录分开管理。一项目对应一场赛事，准备新一场保留旧赛果并释放离线占位；客户端主动退出房间需收到服务端确认后才清除恢复身份。协议仍为 v2，旧服务端不支持立即释放时会保留恢复令牌。部署与兼容规则见 [RaceServer 说明](https://github.com/Laz22y/LazyForza.RaceServer#长期房间与赛事管理当前源码尚未发行)。
+
 ## 本地构建
 
 需要 Windows 10/11 x64、.NET SDK 9 和 PowerShell 7：

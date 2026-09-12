@@ -47,6 +47,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private readonly object trackMapCacheSync = new();
     private readonly SemaphoreSlim connectionLock = new(1, 1);
     private readonly SemaphoreSlim sendLock = new(1, 1);
+    private TaskCompletionSource? leaveAcknowledged;
     private readonly EstateRaceGripEstimator gripEstimator = new();
     private readonly EstatePitServiceTracker pitServiceTracker = new();
     private readonly EstatePitStrategyPredictor pitStrategyPredictor = new();
@@ -79,6 +80,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private DateTimeOffset lastTelemetrySentAt;
     private long lastTelemetrySentMonotonicMilliseconds;
     private RaceSessionPhase? lastSessionPhase;
+    private Guid? lastRaceEventId;
     private int lastQualifyingSessionNumber;
     private int lastPracticeSessionNumber;
     private EstateRaceProjection? lastValidProjection;
@@ -477,6 +479,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         try
         {
             intentionalDisconnect = true;
+            await LeaveRoomAsync().ConfigureAwait(false);
             await DisconnectCoreAsync().ConfigureAwait(false);
             activeProfile = null;
             requestedTrackPackageHash = null;
@@ -517,9 +520,15 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     protected override async ValueTask OnStopAsync(CancellationToken cancellationToken)
     {
         intentionalDisconnect = true;
-        runCancellation?.Cancel();
         await CancelReconnectAsync().ConfigureAwait(false);
-        await DisconnectCoreAsync().ConfigureAwait(false);
+        await connectionLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await LeaveRoomAsync().ConfigureAwait(false);
+            runCancellation?.Cancel();
+            await DisconnectCoreAsync().ConfigureAwait(false);
+        }
+        finally { connectionLock.Release(); }
         if (subscription is not null) await subscription.DisposeAsync().ConfigureAwait(false);
         if (telemetryTask is not null)
         {
@@ -875,6 +884,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                         }
                         PublishSnapshot(EstateRaceConnectionState.Connected, "已连接赛事服务");
                     }
+                    else if (envelope.Type == EstateRaceMessageTypes.Left)
+                    {
+                        Volatile.Read(ref leaveAcknowledged)?.TrySetResult();
+                    }
                     else if (envelope.Type == "pong")
                     {
                         var pong = envelope.Payload.Deserialize<RaceClockPong>(EstateRaceWireProtocol.JsonOptions);
@@ -1183,6 +1196,32 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
+    }
+
+    private async Task LeaveRoomAsync()
+    {
+        if (socket?.State != WebSocketState.Open) return;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref leaveAcknowledged, completion);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        try
+        {
+            await SendAsync(EstateRaceMessageTypes.Leave, new { }, timeout.Token).ConfigureAwait(false);
+            await completion.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
+            // Only discard identity after a server confirms its durable release.
+            if (connectionIsObserver) observerResumeToken = null;
+            else driverResumeToken = null;
+            resumeToken = null;
+            await Context.Settings.SetAsync(ModuleId,
+                connectionIsObserver ? ObserverResumeTokenSetting : ResumeTokenSetting,
+                string.Empty, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            // Old servers do not implement leave; keep the token for their existing resume flow.
+            LogIfInitialized($"Estate room leave was not confirmed: {exception.Message}");
+        }
+        finally { Volatile.Write(ref leaveAcknowledged, null); }
     }
 
     private async Task DisconnectCoreAsync(bool preserveSessionState = false)
@@ -1546,6 +1585,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         EstateRaceSession value,
         bool resetForConnection = false)
     {
+        resetForConnection |= lastRaceEventId != value.EventId;
+        lastRaceEventId = value.EventId;
         lock (lapEventSync)
         {
             if (lapSendQueue.ApplySession(value, resetForConnection))

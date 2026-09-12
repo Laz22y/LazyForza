@@ -1122,6 +1122,71 @@ public sealed class EstateRaceClientModuleTests
     }
 
     [TestMethod]
+    [DataRow(true, false)]
+    [DataRow(false, false)]
+    [DataRow(true, true)]
+    [DataRow(false, true)]
+    public async Task ExplicitLeaveClearsSavedIdentityOnlyAfterReceipt(bool acknowledge, bool observer)
+    {
+        var leaveReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        app.UseWebSockets();
+        app.Map("/ws", async context =>
+        {
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            try
+            {
+                _ = await ReceiveAsync(socket, context.RequestAborted);
+                await socket.SendAsync(EstateRaceWireProtocol.Serialize("loginAccepted", 1,
+                    new RaceLoginAccepted(Guid.NewGuid(), "leave-token", EmptySession(), DateTimeOffset.UtcNow, observer)),
+                    WebSocketMessageType.Text, true, context.RequestAborted);
+                while (socket.State == WebSocketState.Open)
+                {
+                    var envelope = await ReceiveAsync(socket, context.RequestAborted);
+                    if (envelope.Type != EstateRaceMessageTypes.Leave) continue;
+                    leaveReceived.TrySetResult();
+                    if (acknowledge)
+                    {
+                        // Duplicate receipts must be harmless.
+                        for (var i = 0; i < 2; i++)
+                            await socket.SendAsync(EstateRaceWireProtocol.Serialize(EstateRaceMessageTypes.Left, 2 + i, new { }),
+                                WebSocketMessageType.Text, true, context.RequestAborted);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (WebSocketException) { }
+        });
+        await app.StartAsync();
+        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-leave-{Guid.NewGuid():N}.db");
+        try
+        {
+            using (var store = new LazyForzaStore(path))
+            {
+                await using var feed = new TestFeed();
+                var track = CreateTrack();
+                await using var module = new EstateRaceModule(() => new EstateRaceTrackContext(track, CreateDefinition(track), 0, 0, 0, true, null));
+                await module.InitializeAsync(new TestContext(feed, store), CancellationToken.None);
+                await module.StartAsync(CancellationToken.None);
+                await module.ConnectAsync(new(address, "password", "Leave test", "#336699", null,
+                    Role: observer ? EstateRaceConnectionRole.Observer : EstateRaceConnectionRole.Driver), CancellationToken.None);
+                Assert.AreEqual(EstateRaceConnectionState.Connected, module.State.ConnectionState);
+                if (observer) await module.StopAsync(CancellationToken.None);
+                else await module.DisconnectAsync();
+                await leaveReceived.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            using var reopened = new LazyForzaStore(path);
+            var saved = await reopened.GetAsync(EstateRaceModule.ModuleId, observer ? "observerResumeToken" : "resumeToken", CancellationToken.None);
+            Assert.AreEqual(acknowledge ? string.Empty : "leave-token", saved,
+                "Old servers and missing receipts retain the resume token; confirmed leave persists its removal.");
+        }
+        finally { await app.StopAsync(); DeleteDatabase(path); }
+    }
+
+    [TestMethod]
     public async Task ReconnectUploadsLocallyCompletedLapWhenServerRecoveryIsEnabled()
     {
         var participantId = Guid.NewGuid();
