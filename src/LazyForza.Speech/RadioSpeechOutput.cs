@@ -94,13 +94,19 @@ public sealed class RadioSpeechOutput : ISpeechOutput
             }
             // Open the radio only after synthesis succeeds, never during a service/model startup wait.
             token.ThrowIfCancellationRequested();
-            await player.PlayAsync(transmission.Connect, volume, token).ConfigureAwait(false);
-            await pause(transmission.AfterConnect, token).ConfigureAwait(false);
+            if (transmission.ConnectEnabled)
+            {
+                await player.PlayAsync(transmission.Connect, volume, token).ConfigureAwait(false);
+                await pause(transmission.AfterConnect, token).ConfigureAwait(false);
+            }
             token.ThrowIfCancellationRequested();
             await player.PlayAsync(audio, volume, token).ConfigureAwait(false);
-            await pause(transmission.BeforeDisconnect, token).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-            await player.PlayAsync(transmission.Disconnect, volume, token).ConfigureAwait(false);
+            if (transmission.DisconnectEnabled)
+            {
+                await pause(transmission.BeforeDisconnect, token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                await player.PlayAsync(transmission.Disconnect, volume, token).ConfigureAwait(false);
+            }
         }
         finally { transmissions.Release(); }
     }

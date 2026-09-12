@@ -6,6 +6,8 @@ public sealed record RadioTransmission
     public static RadioTransmission Default { get; } = new();
     public SpeechAudio Connect { get; init; } = RadioCues.Connect;
     public SpeechAudio Disconnect { get; init; } = RadioCues.Disconnect;
+    public bool ConnectEnabled { get; init; } = true;
+    public bool DisconnectEnabled { get; init; } = true;
     public TimeSpan AfterConnect { get; init; } = TimeSpan.FromMilliseconds(180);
     public TimeSpan BeforeDisconnect { get; init; } = TimeSpan.FromMilliseconds(220);
 

@@ -48,6 +48,8 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 接通音后留出 180 毫秒，语音结束后留出 220 毫秒再播放断开音。展开「自定义接通/断开音」可分别导入 WAV、MP3、M4A 或 FLAC（每段最多 5 秒、10 MB，需系统支持解码），也可分别恢复默认；导入后保存音频副本，不依赖原文件路径。「试听」随机选择一句比赛示例，使用当前音量和提示音，无需连接赛事或开启自动播报；静音和零音量时不可试听，真实赛事消息优先。再次点击可停止试听。
 
+当前源码支持独立开关接通音和断开音，关闭时跳过对应停顿并保留自定义音频。「Windows 音色」列出本机 SAPI 可用的中英文声音，默认跟随界面语言；选择英文音色时使用英文播报。切换会停止旧输出并清空待播消息，音色与提示音开关均在重启后恢复；保存的音色不可用时提示并回退默认。「试听」使用当前选择。
+
 ## 快速开始
 
 1. 从 [Releases](https://github.com/Laz22y/LazyForza/releases/latest) 下载 Windows 安装包，或下载 `win-x64.zip` 便携版并完整解压；
@@ -148,6 +150,8 @@ The Estate racing page includes an optional local race engineer, disabled by def
 Speech uses an installed Windows SAPI voice for the selected language, without a network service. Original radio connect/disconnect cues combine short pulses, subtle frequency sweeps and brief squelch tails. The radio opens only once speech is ready; muting or interrupting stops the transmission. Missing voices or audio failures disable speech without affecting the race. After installing a compatible voice, disable and enable the engineer to retry. Synthesis and playback have separate interfaces; Windows local speech remains the built-in provider. See the [speech integration guide](docs/RACE_ENGINEER_SPEECH.md).
 
 Speech starts 180 ms after the connect cue; the disconnect cue follows speech after 220 ms. Expand “Custom connect/disconnect sounds” to import WAV, MP3, M4A or FLAC clips (up to 5 seconds and 10 MB each, subject to installed Windows codecs), or reset either cue. An audio copy is saved independently of the source file. “Preview” plays a random race sample with the current volume and cues, even offline with automatic speech disabled. Mute and zero volume block previews; live race messages take priority. Click again to stop.
+
+Current source supports independent connect/disconnect switches. Disabling a cue skips its adjacent pause and keeps the imported clip. “Windows voice” lists installed Chinese/English SAPI voices; the default follows the interface language, while an English voice uses English race messages. Switching stops the old output and clears pending speech. Voice and cue settings survive restarts; unavailable saved voices fall back to the default with a notice. Preview uses the current selection.
 
 ### Quick start
 

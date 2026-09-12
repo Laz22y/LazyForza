@@ -4,6 +4,8 @@
 
 工程师默认关闭。App 的 `LocalRaceSpeech` 将 `WindowsSapiSpeechProvider` 和 `WindowsPcmAudioPlayer` 装配到 `RadioSpeechOutput`，继续使用已安装的中文／英文 Windows SAPI 语音；没有在线服务、模型下载或联网回退。原有 AppSettings 开关、静音与音量无需迁移。
 
+「Windows 音色」异步枚举本机 SAPI 可用的中英文音色，并以声音 ID 保存到 `raceEngineer.voiceId`。默认项跟随界面语言；显式选择英文音色时，赛事播报和试听均使用英文。切换先取消并释放旧输出及待播队列，再建立新输出，避免音色缓存或播放重叠。保存的音色不存在时提示并回退默认；枚举失败不影响比赛。系统设置中可见的语音不一定全部向 SAPI 开放，列表以实际枚举为准。
+
 `RaceEngineerObserver` 只读取已有旗语、处罚、个人最快圈和进站预测。预测措辞继续保留不确定性。`RaceEngineer` 负责优先级、事件去重、分类冷却、过期、16 条队列及赛事阶段隔离，不识别服务商。输出故障会停用本次启用周期的播报；比赛逻辑继续运行，关闭再启用工程师可重试。
 
 ## 接口与所有权
@@ -40,6 +42,8 @@ Windows 实现使用 SAPI 内存流合成 24 kHz 单声道 PCM；每个请求的
 ## 原创无线电音与验证
 
 「自定义接通/断开音」可分别选择音频和恢复默认，导入只发生在用户选文件之后。App 通过 `NAudio.Wasapi` 3.1.0／Windows Media Foundation 解码 WAV、MP3、M4A 和 FLAC（可用性取决于安装的系统解码器），限制源文件不超过 10 MiB、音频不超过 5 秒且最多双声道；解码读取输出时再次检查时长，统一重采样为 24 kHz 单声道 PCM16。公共语音核心不依赖 NAudio。空文件、异常格式、超限或取消不会覆盖现有设置；缺少解码器时仍可使用默认提示音。
+
+接通音和断开音可独立开关；关闭某一段时也跳过它相邻的停顿，保留已导入的音频，语音正文照常播放。开关分别保存为 `raceEngineer.connectEnabled` 和 `raceEngineer.disconnectEnabled`，缺失或无效值默认开启；音色 ID 和开关均沿用 AppSettings，无需数据库迁移，旧应用忽略新增设置。每次播报固定一份开关快照，试听使用当前设置。
 
 `CustomRadioCue` 将名称、版本 1 和 PCM 副本存为 `raceEngineer.connectCue`／`raceEngineer.disconnectCue` 两个独立 AppSettings 值，每次更新沿用 SQLite 的单条原子写入。不保存源文件路径，不在播报热路径读取文件；最多约 320 KB 的 Base64 PCM 加少量 JSON 元数据／项。现有设置备份包含该副本，无需数据库迁移；缺失字段沿用默认音，未知版本或损坏数据回退到默认并提示重新导入。恢复默认只清空对应设置，不删除用户原文件。旧应用忽略新增设置。
 

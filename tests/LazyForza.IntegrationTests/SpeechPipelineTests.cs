@@ -12,6 +12,26 @@ public sealed class SpeechPipelineTests
     private static readonly SpeechAudio Audio = new(new byte[4800], 24000);
 
     [TestMethod]
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public async Task RadioSwitchesIndependentlySkipCueAndItsPause(bool connect, bool disconnect)
+    {
+        var player = new Player();
+        var pauses = new List<TimeSpan>();
+        var settings = RadioTransmission.Default with { ConnectEnabled = connect, DisconnectEnabled = disconnect };
+        await using var output = new RadioSpeechOutput(new Provider(), player, "zh-CN",
+            transmissionSettings: () => settings,
+            pause: (delay, _) => { pauses.Add(delay); return Task.CompletedTask; });
+        await output.SpeakAsync("示例", 60, CancellationToken.None);
+        CollectionAssert.AreEqual(new[] { connect ? RadioCues.Connect : null, Audio, disconnect ? RadioCues.Disconnect : null }
+            .Where(item => item is not null).ToArray(), player.Played.Select(item => item.Audio).ToArray());
+        CollectionAssert.AreEqual(new[] { connect ? settings.AfterConnect : TimeSpan.Zero, disconnect ? settings.BeforeDisconnect : TimeSpan.Zero }
+            .Where(delay => delay > TimeSpan.Zero).ToArray(), pauses.ToArray());
+    }
+
+    [TestMethod]
     public async Task ProviderReceivesPlainTextVoiceLanguageAndRateAndCacheDoesNotBakeVolume()
     {
         var provider = new Provider();
