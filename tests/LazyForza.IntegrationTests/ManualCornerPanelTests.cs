@@ -51,7 +51,8 @@ public sealed class ManualCornerPanelTests
                 var selectors = Descendants<ComboBox>(card).ToArray();
                 Assert.AreEqual(2, selectors[1].Items.Count);
                 selectors[1].SelectedIndex = 1;
-                var jump = Descendants<Button>(card).Single(button => button.Content is TextBlock text && text.Text.Contains("查看曲线"));
+                var jump = Descendants<Button>(card).Single(button =>
+                    System.Windows.Automation.AutomationProperties.GetName(button).Contains("查看曲线"));
                 Click(jump);
                 Assert.IsTrue(navigated);
                 Assert.HasCount(0, Descendants<LapInputChart>(card), "Input charts load only when their tab is opened.");

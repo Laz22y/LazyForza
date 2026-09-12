@@ -201,8 +201,19 @@ internal sealed partial class MainWindow
             foreach (var difference in ManualCornerAnalyzer.Describe(comparisons))
             {
                 var jump = AnalysisButton("");
-                jump.Content = new TextBlock { Text = AppLocalization.Literal(difference.Text) + "  " + AppLocalization.Literal("查看曲线 →"), TextWrapping = TextWrapping.Wrap };
-                jump.HorizontalContentAlignment = HorizontalAlignment.Left;
+                var jumpRow = new Grid();
+                jumpRow.ColumnDefinitions.Add(new ColumnDefinition());
+                jumpRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+                jumpRow.Children.Add(new TextBlock { Text = AppLocalization.Literal(difference.Text),
+                    TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
+                var arrow = new TextBlock { Text = "→", FontSize = 20,
+                    HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(arrow, 1);
+                jumpRow.Children.Add(arrow);
+                jump.Content = jumpRow;
+                jump.ToolTip = AppLocalization.Literal("查看曲线 →");
+                System.Windows.Automation.AutomationProperties.SetName(jump, AppLocalization.Literal("查看曲线 →"));
+                jump.HorizontalContentAlignment = HorizontalAlignment.Stretch;
                 jump.Click += (_, _) =>
                 {
                     cursor.Set(jump, selected.Id, difference.ProgressMeters);
