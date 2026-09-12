@@ -22,7 +22,7 @@ public sealed class DisabledListThemeTests
                 using var source = typeof(DisabledListThemeTests).Assembly.GetManifestResourceStream("LazyForzaTheme.xaml")!;
                 var document = XDocument.Load(source);
                 XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
-                var resources = document.Root!.Element(presentation + "Application.Resources")!;
+                var resources = document.Root!;
                 var dictionary = new XElement(presentation + "ResourceDictionary",
                     new XAttribute(XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml"),
                     resources.Elements().Where(element => element.Name.LocalName == "SolidColorBrush" ||
