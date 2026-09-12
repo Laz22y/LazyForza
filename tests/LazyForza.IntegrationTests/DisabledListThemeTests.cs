@@ -3,7 +3,6 @@ using System.Windows.Controls;
 using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Xml.Linq;
 
 namespace LazyForza.IntegrationTests;
 
@@ -20,15 +19,7 @@ public sealed class DisabledListThemeTests
             {
                 // Read the production theme without constructing the application's startup lifecycle.
                 using var source = typeof(DisabledListThemeTests).Assembly.GetManifestResourceStream("LazyForzaTheme.xaml")!;
-                var document = XDocument.Load(source);
-                XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
-                var resources = document.Root!;
-                var dictionary = new XElement(presentation + "ResourceDictionary",
-                    new XAttribute(XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml"),
-                    resources.Elements().Where(element => element.Name.LocalName == "SolidColorBrush" ||
-                        element.Name.LocalName == "Style" && (string?)element.Attribute("TargetType") is "ListBox" or "ListBoxItem")
-                        .Select(element => new XElement(element)));
-                var theme = (ResourceDictionary)XamlReader.Parse(dictionary.ToString());
+                var theme = (ResourceDictionary)XamlReader.Load(source);
                 var owner = new Grid { Width = 280, Height = 320, Resources = theme, Background = (Brush)theme["PanelBrush"] };
                 var list = new ListBox();
                 list.Items.Add("Overview"); list.Items.Add("Race"); list.SelectedIndex = 0;

@@ -10,6 +10,38 @@ namespace LazyForza.Storage.Tests;
 public sealed class StorageTests
 {
     [TestMethod]
+    public void RecentLapSummariesAreNewestFirstBoundedAndSeparatedBySource()
+    {
+        var path = TempDatabasePath();
+        try
+        {
+            using var store = new LazyForzaStore(path);
+            var track = TrackAlgorithms.BuildTemplate("Recent laps", Enumerable.Range(0, 40)
+                .Select(i => new TrackPoint(i * 5, 0, 0, 0, 1, 0)).ToArray()) with { Source = "live" };
+            var demo = track with { Id = Guid.NewGuid(), Source = "simulator" };
+            store.SaveTrack(track, TrackAlgorithms.CreateSectors(track));
+            store.SaveTrack(demo, TrackAlgorithms.CreateSectors(demo));
+            var vehicle = new VehicleProfileFingerprint(123, 5, 850, 2, 8, 8000, "g3_200", "p300_t400_r7000");
+            var now = DateTimeOffset.UtcNow;
+            var laps = Enumerable.Range(0, 4).Select(i => new LapRecord(Guid.NewGuid(), track.Id, track.Direction,
+                TrackAlgorithms.SectorSchemaVersion, Guid.NewGuid(), vehicle, now.AddSeconds(i), 20 + i, i != 2,
+                i == 2 ? "Invalid sample" : null, [new(0, 20 + i, i != 2)],
+                [new(0, 0, 20, 5000, 3, .8, 0, 0, 0, 0, 0)])).ToArray();
+            foreach (var lap in laps) store.SaveLap(lap);
+            store.SaveLap(laps[3] with { Id = Guid.NewGuid(), TrackId = demo.Id, StartedAt = now.AddMinutes(1) });
+            var recent = store.LoadRecentLapSummaries("live", 2);
+            CollectionAssert.AreEqual(new[] { laps[3].Id, laps[2].Id }, recent.Select(l => l.Id).ToArray());
+            Assert.IsFalse(recent[1].IsValid);
+            Assert.AreEqual("Invalid sample", recent[1].InvalidReason);
+            Assert.HasCount(1, recent[0].Segments);
+            Assert.AreEqual(demo.Id, store.LoadRecentLapSummaries(limit: 1)[0].TrackId);
+            Assert.HasCount(0, store.LoadRecentLapSummaries("missing-source"));
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => store.LoadRecentLapSummaries(limit: 0));
+        }
+        finally { DeleteDatabase(path); }
+    }
+
+    [TestMethod]
     public void SchemaTwelveUpgradeKeepsLegacyLapsAndNewLapsRetainRevisionAndFullVehicle()
     {
         var path = TempDatabasePath();

@@ -44,6 +44,12 @@ WPF `AllowsTransparency=True` 提供逐像素 alpha；`WindowStyle=None` 去除�
 
 Dashboard 和 Lap 是两个独立 `IHudContribution`。两者同时存在时共享同一弧心；只有 Lap 时 Overlay 改用紧凑独立面板。位置、缩放、不透明度、显示器标识、点击穿透、锁定、减少动态、加速度跟随开关/强度及全部 HUD 等待与淡入淡出时间保存在 `OverlayLayout`。`DashboardHudDynamics` 负责可测试的静止判定、透明度过渡与加速度弹簧状态；`LapHudDynamics` 对持续无匹配证据计时，淡出后按 `CompetitionSessionId` 锁定到比赛结束。菜单、暂停和回转沿用同一会话 ID，不会解除锁定。窗口仍保持透明、置顶、穿透，业务模块不直接操纵窗口。
 
+地产 HUD 的主题由 `HudSurface.Themes.cs` 中的编译期注册表管理，`EstateRaceHudThemes` 向设置页提供同一份主题目录。各 `EstateRaceHudWidgetPlacement.ThemeId` 保存稳定 ID（`classic`、`broadcast`），11 个组件独立选择。新增主题应注册新 ID 和渲染器，复用已有组件状态、可见性、赛事阶段隔离和动画控制；不加载外部主题 DLL，也不复制赛事规则。
+
+主题只改变绘图，位置、缩放和不透明度继续由统一组件变换处理。`EstateRaceDrawingLayers` 区分底板与内容，底板只合成一次不透明度；排名牌、限速牌等保证文字对比度的语义底色属于内容层。`HudTypography` 为转播主题提供明确列宽、单行省略和共享基线。原始计时与排名不读取显示动画状态。
+
+布局仍作为原有 `overlay.layout` JSON 保存，不修改数据库结构。缺少 `ThemeId` 的旧布局默认使用经典主题；本版本遇到未知 ID 时以经典绘制，保存时保留该 ID。早于主题功能的旧版可以读取布局，但再次保存时可能丢弃它不认识的主题字段。
+
 ## 协议与状态
 
 解析器只解释官方命名偏移 0..322；偏移 323 保留为 `UndefinedTailByte`，没有业务含义。所有字段显式小端读取，同时使用 `IsRaceOn`、RPM、速度、Class/PI、驱动形式与 Fuel 范围检查该假设。`TimestampMS` 处理重复、乱序、回绕和间隔估计；断流只进入 Stale/Disconnected，不推断暂停、倒带或完赛。

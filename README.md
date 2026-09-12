@@ -62,6 +62,10 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 HUD 设置中的“地产赛事底板不透明度”只调整面板底色，文字、旗语与状态标识保持清晰；“整体不透明度”仍同时影响所有 HUD，并与各赛事部件的不透明度叠加。设置保存后在重启时保留。开启“减少动态”可立即显示赛事状态，关闭淡入、位移和闪动效果。
 
+“赛事主题与组件”提供经典、转播两套赛事 HUD 主题，11 个组件可独立选择和混搭，也可一次切换全部组件。经典为默认主题；切换主题保留组件位置、缩放与不透明度，点击“应用 HUD 设置”后立即生效并持久保存。转播主题采用独立计时塔、高对比排名牌和更清楚的旗语、维修区计时；中文名称、车队信息和数字按列排版，过长内容省略显示。
+
+概览集中显示当前赛事、赛道预览、遥测状态和最近圈记录，可直接进入圈速分析或回放工作台；没有赛事或圈记录时显示等待状态。
+
 ```powershell
 LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 ```
@@ -168,6 +172,10 @@ The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu ent
 Settings provides six UI accent colors: Default Blue, Midnight Purple, Fresh Green, Vivid Red, Pure White and Subtle Gray. The selection changes interface highlights and selected states without recoloring HUDs, chart semantics or other interface styling.
 
 In HUD settings, Estate race panel opacity changes panel backgrounds while keeping text, flags and status indicators clear. Overall opacity still affects all HUD content and combines with individual race widget opacity. Saved settings persist across restarts. Reduce motion shows race states immediately without fades, movement or pulsing.
+
+Race themes and widgets offers Classic and Broadcast styles. Choose or mix themes independently for all 11 widgets, or switch them together. Classic remains the default. Switching preserves position, scale and opacity; Apply HUD settings takes effect immediately and saves your choices across restarts. Broadcast adds a timing tower, high-contrast position plates and clearer flag and pit timing panels, with aligned text columns and ellipsis for long names.
+
+Overview brings the current session, track preview, telemetry status and recent laps together, with direct access to lap analysis and replay. It shows an explicit waiting state when no session or lap records are available.
 
 Use an explicit data directory from the command line when needed:
 

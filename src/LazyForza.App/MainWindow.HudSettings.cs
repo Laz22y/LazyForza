@@ -4,11 +4,17 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Automation;
 using System.Text.Json;
 using LazyForza.Domain;
+using LazyForza.Overlay;
 
 namespace LazyForza.App;
 
 internal sealed partial class MainWindow
 {
+    private sealed record HudThemeChoice(string Id, string Name)
+    {
+        public override string ToString() => Name;
+    }
+
     private UIElement BuildHudSettings()
     {
         var current = overlay.CurrentLayout;
@@ -259,50 +265,111 @@ internal sealed partial class MainWindow
             (EstateRaceHudWidgetKind.FullRaceStrategy, "整场进站策略")
         };
         var estateRaceToggles = new Dictionary<EstateRaceHudWidgetKind, ToggleButton>();
-        var estateRaceComponentPanel = new WrapPanel { Margin = new Thickness(-4, -2, 0, 0) };
+        var estateRaceOpacitySliders = new Dictionary<EstateRaceHudWidgetKind, Slider>();
+        var estateRaceThemes = new Dictionary<EstateRaceHudWidgetKind, ComboBox>();
+        var themeControls = new StackPanel();
+        var presets = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
+        foreach (var theme in EstateRaceHudThemes.Definitions)
+        {
+            var preset = new Button
+            {
+                Content = AppLocalization.Format("settings.hud.allTheme", "全部使用{0}", AppLocalization.Literal(theme.Name)),
+                FontSize = 12, Padding = new Thickness(12, 6, 12, 6),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            preset.Click += (_, _) =>
+            {
+                foreach (var selector in estateRaceThemes.Values) selector.SelectedValue = theme.Id;
+            };
+            presets.Children.Add(preset);
+        }
+        themeControls.Children.Add(presets);
+        Grid ComponentRow()
+        {
+            var row = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.7, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.25, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
+            return row;
+        }
+        var tableHeader = ComponentRow();
+        var titles = new[] { "组件", "主题", "显示", "不透明度" };
+        for (var column = 0; column < titles.Length; column++)
+        {
+            var label = Label(titles[column], 11, FontWeights.Normal, "MutedBrush");
+            label.Margin = new Thickness(4, 0, 0, 4);
+            Grid.SetColumn(label, column);
+            tableHeader.Children.Add(label);
+        }
+        themeControls.Children.Add(tableHeader);
         foreach (var (kind, name) in estateRaceComponentItems)
         {
+            var placement = currentEstateRaceWidgets.Get(kind);
+            var row = ComponentRow();
+            var nameLabel = Label(name, 12, FontWeights.Normal);
+            nameLabel.TextTrimming = TextTrimming.CharacterEllipsis;
+            nameLabel.ToolTip = AppLocalization.Literal(name);
+            nameLabel.VerticalAlignment = VerticalAlignment.Center;
+            nameLabel.Margin = new Thickness(4, 0, 8, 0);
+            row.Children.Add(nameLabel);
+            var choices = EstateRaceHudThemes.Definitions.Select(theme => new HudThemeChoice(
+                theme.Id, AppLocalization.Literal(theme.Name))).ToList();
+            if (!choices.Any(choice => string.Equals(choice.Id, placement.ThemeId, StringComparison.OrdinalIgnoreCase)))
+                choices.Add(new HudThemeChoice(placement.ThemeId,
+                    AppLocalization.Format("settings.hud.unavailableTheme", "{0}（暂用经典）", placement.ThemeId)));
+            var selector = new ComboBox
+            {
+                ItemsSource = choices, DisplayMemberPath = nameof(HudThemeChoice.Name),
+                SelectedValuePath = nameof(HudThemeChoice.Id),
+                SelectedValue = choices.First(choice => string.Equals(choice.Id, placement.ThemeId, StringComparison.OrdinalIgnoreCase)).Id,
+                FontSize = 12, MinWidth = 0, MinHeight = 34, Padding = new Thickness(10, 0, 10, 0),
+                Margin = new Thickness(0, 0, 10, 0),
+                VerticalContentAlignment = VerticalAlignment.Center,
+                ToolTip = AppLocalization.Literal("只改变样式，保留组件的位置、缩放和透明度。")
+            };
+            AutomationProperties.SetName(selector, AppLocalization.Literal(name) + " · " + AppLocalization.Literal("主题"));
+            estateRaceThemes[kind] = selector;
+            Grid.SetColumn(selector, 1);
+            row.Children.Add(selector);
             var toggle = new ToggleButton
             {
-                IsChecked = currentEstateRaceWidgets.Get(kind).IsVisible,
-                Margin = new Thickness(4, 2, 4, 6),
-                Padding = new Thickness(10, 6, 10, 6),
-                MinWidth = 116
+                IsChecked = placement.IsVisible, Margin = new Thickness(0, 0, 12, 0),
+                FontSize = 12, Padding = new Thickness(6), VerticalAlignment = VerticalAlignment.Center
             };
-            void RefreshEstateRaceToggle() => toggle.Content = AppLocalization.Format(
-                "settings.hud.componentToggle",
-                "{0}：{1}",
-                AppLocalization.Literal(name),
-                AppLocalization.Literal(toggle.IsChecked == true ? "开" : "关"));
-            toggle.Click += (_, _) => RefreshEstateRaceToggle();
-            RefreshEstateRaceToggle();
+            void RefreshToggle() => toggle.Content = AppLocalization.Literal(toggle.IsChecked == true ? "开" : "关");
+            toggle.Click += (_, _) => RefreshToggle();
+            RefreshToggle();
+            AutomationProperties.SetName(toggle, AppLocalization.Literal(name));
             estateRaceToggles[kind] = toggle;
-            estateRaceComponentPanel.Children.Add(toggle);
+            Grid.SetColumn(toggle, 2);
+            row.Children.Add(toggle);
+            var opacityCell = new Grid();
+            opacityCell.ColumnDefinitions.Add(new ColumnDefinition());
+            opacityCell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(45) });
+            var value = Label(placement.Opacity.ToString("P0"), 11, FontWeights.Normal, "MutedBrush");
+            value.VerticalAlignment = VerticalAlignment.Center;
+            value.TextAlignment = TextAlignment.Right;
+            var slider = new Slider
+            {
+                Minimum = 0.15, Maximum = 1, Value = placement.Opacity,
+                TickFrequency = 0.05, SmallChange = 0.05, IsSnapToTickEnabled = true,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0)
+            };
+            slider.ValueChanged += (_, _) => value.Text = slider.Value.ToString("P0");
+            AutomationProperties.SetName(slider, AppLocalization.Literal(name) + " · " + AppLocalization.Literal("不透明度"));
+            estateRaceOpacitySliders[kind] = slider;
+            opacityCell.Children.Add(slider);
+            Grid.SetColumn(value, 1);
+            opacityCell.Children.Add(value);
+            Grid.SetColumn(opacityCell, 3);
+            row.Children.Add(opacityCell);
+            themeControls.Children.Add(row);
         }
-        hudComponents.Children.Add(SettingGroup(
-            "地产赛事 HUD 部件",
-            "十一个部件可独立开关；进入 Overlay 布局编辑器后可直接选择、拖动、缩放或恢复赛事默认布局。",
-            estateRaceComponentPanel));
-        var estateRaceOpacitySliders = new Dictionary<EstateRaceHudWidgetKind, Slider>();
-        var estateRaceOpacityPanel = new UniformGrid { Columns = 2 };
-        foreach (var (kind, name) in estateRaceComponentItems)
-        {
-            var opacityItem = new StackPanel { Margin = new Thickness(6, 3, 14, 4) };
-            estateRaceOpacitySliders[kind] = AddValueSlider(
-                opacityItem,
-                name,
-                "只调整这个部件，不影响其他 HUD。",
-                currentEstateRaceWidgets.Get(kind).Opacity,
-                0.15,
-                1,
-                0.05,
-                value => $"{value:P0}");
-            estateRaceOpacityPanel.Children.Add(opacityItem);
-        }
-        hudOpacity.Children.Add(SettingGroup(
-            "地产赛事 HUD 透明度",
-            "十一个赛事部件分别保存透明度，互不影响。",
-            estateRaceOpacityPanel));
+        var themeNote = Label("每个组件可独立混搭经典与转播主题。应用后立即生效，重启后保留。", 12, FontWeights.Normal, "MutedBrush");
+        themeNote.Margin = new Thickness(0, 0, 0, 14);
+        themeControls.Children.Insert(0, themeNote);
+        hudOpacity.Children.Add(themeControls);
 
         var timingItems = new UniformGrid { Columns = 2 };
         var dashboardIdleWait = AddTimeSlider(timingItems, "仪表盘静止等待", current.DashboardIdleWaitSeconds, 0, 15, 0.5);
@@ -328,15 +395,15 @@ internal sealed partial class MainWindow
             AppLocalization.Text("settings.hud.components", "部件显示"),
             AppLocalization.Text(
                 "settings.hud.componentsDetail",
-                "管理仪表盘与地产赛事 HUD 的显示内容。"),
+                "管理仪表盘的显示内容。"),
             hudComponents,
             hudComponentsExpanded,
             expanded => hudComponentsExpanded = expanded));
         controls.Children.Add(SettingsSectionExpander(
-            AppLocalization.Text("settings.hud.opacity", "赛事部件透明度"),
+            AppLocalization.Text("settings.hud.themes", "赛事主题与组件"),
             AppLocalization.Text(
-                "settings.hud.opacityDetail",
-                "分别调整每个地产赛事部件的可见度。"),
+                "settings.hud.themesDetail",
+                "逐项选择主题、显示开关和不透明度。"),
             hudOpacity,
             hudOpacityExpanded,
             expanded => hudOpacityExpanded = expanded));
@@ -382,7 +449,8 @@ internal sealed partial class MainWindow
                     placement with
                     {
                         IsVisible = toggle.IsChecked == true,
-                        Opacity = estateRaceOpacitySliders[kind].Value
+                        Opacity = estateRaceOpacitySliders[kind].Value,
+                        ThemeId = estateRaceThemes[kind].SelectedValue as string ?? placement.ThemeId
                     });
             }
             var next = overlay.CurrentLayout with

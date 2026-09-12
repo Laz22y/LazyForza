@@ -520,6 +520,18 @@ public sealed class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisp
         return summaries;
     }
 
+    public IReadOnlyList<LapSummary> LoadRecentLapSummaries(string? source = null, int limit = 3)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, MaxLapsPerTrack);
+        var filter = source is null ? string.Empty : $" WHERE t.Source={Quote(source)}";
+        // Read compact metadata only; the overview never loads sample arrays.
+        return ParseLapSummaries(database.QueryRows(
+            "SELECT l.Id,l.TrackId,l.Direction,l.SectorSchemaVersion,l.SessionId,l.VehicleFingerprint,l.CarClass,l.PerformanceIndex," +
+            "l.StartedAt,l.TotalSeconds,l.IsValid,l.InvalidReason,l.PlayerCode,l.TrackRevision,l.VehicleSnapshot " +
+            $"FROM Laps l JOIN TrackTemplates t ON t.Id=l.TrackId{filter} ORDER BY l.StartedAt DESC,l.Id LIMIT {limit};"));
+    }
+
     public IReadOnlyList<LapRecord> LoadLapsByIds(IReadOnlyCollection<Guid> lapIds)
     {
         if (lapIds.Count == 0) return [];

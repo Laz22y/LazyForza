@@ -6,6 +6,27 @@ namespace LazyForza.IntegrationTests;
 public sealed class StartupProfileTests
 {
     [TestMethod]
+    public void EnglishLocalizationPreservesLiveInlineNumberUpdates() => EstateHudRenderingTests.Sta(() =>
+    {
+        var previous = AppLocalization.CurrentLanguage;
+        try
+        {
+            AppLocalization.UseLanguage("en");
+            var value = new System.Windows.Documents.Run("07") { FontSize = 64 };
+            var unit = new System.Windows.Documents.Run(" / 20") { FontSize = 24 };
+            var block = new System.Windows.Controls.TextBlock();
+            block.Inlines.Add(value);
+            block.Inlines.Add(unit);
+            AppLocalization.ApplyTo(block);
+            value.Text = "08";
+            Assert.AreEqual("08 / 20", new System.Windows.Documents.TextRange(block.ContentStart, block.ContentEnd).Text);
+            Assert.AreSame(value, block.Inlines.FirstInline);
+            Assert.AreEqual(64, value.FontSize);
+        }
+        finally { AppLocalization.UseLanguage(previous); }
+    });
+
+    [TestMethod]
     public void AccentColorCatalogContainsSixDistinctChoices()
     {
         var definitions = AppAccentColors.Definitions;

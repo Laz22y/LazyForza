@@ -424,7 +424,12 @@ internal static class AppLocalization
         if (root is Window window)
             window.Title = Literal(window.Title);
         if (root is TextBlock textBlock)
-            textBlock.Text = Literal(textBlock.Text);
+        {
+            var translated = Literal(textBlock.Text);
+            // Setting Text destroys formatted Inlines and their live Run references.
+            // Already localized numbers/units should retain their typography and updates.
+            if (!string.Equals(translated, textBlock.Text, StringComparison.Ordinal)) textBlock.Text = translated;
+        }
         if (root is ContentControl { Content: string content } contentControl)
             contentControl.Content = Literal(content);
         if (root is HeaderedContentControl { Header: string header } headered)

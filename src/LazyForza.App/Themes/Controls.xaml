@@ -1,9 +1,10 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <SolidColorBrush x:Key="WindowBrush" Color="#0B0F14" />
-    <SolidColorBrush x:Key="PanelBrush" Color="#111821" />
-    <SolidColorBrush x:Key="CardBrush" Color="#171F2A" />
-    <SolidColorBrush x:Key="BorderBrush" Color="#2A3645" />
+    <SolidColorBrush x:Key="WindowBrush" Color="#0E1116" />
+    <SolidColorBrush x:Key="SidebarBrush" Color="#0A0D12" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#11161D" />
+    <SolidColorBrush x:Key="CardBrush" Color="#141B23" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#29333F" />
     <SolidColorBrush x:Key="TextBrush" Color="#F3F4F5" />
     <SolidColorBrush x:Key="MutedBrush" Color="#9AA4B2" />
     <SolidColorBrush x:Key="AccentBrush" Color="#20B8CF" />
@@ -32,6 +33,39 @@
         <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
         <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
         <Setter Property="FontSize" Value="14" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+        <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
+    </Style>
+    <Style x:Key="SidebarNavigationItem" TargetType="ListBoxItem">
+        <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Padding" Value="14,10" />
+        <Setter Property="Margin" Value="0,3" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Grid>
+                        <Border x:Name="Chrome" CornerRadius="7" Background="Transparent" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                        <Border x:Name="Marker" Width="2" Height="16" Background="{DynamicResource AccentBrush}"
+                                HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Collapsed" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource PanelBrush}" /></Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource CardBrush}" />
+                            <Setter TargetName="Marker" Property="Visibility" Value="Visible" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
     <Style TargetType="Button">
         <Setter Property="Background" Value="{DynamicResource ControlBrush}" />

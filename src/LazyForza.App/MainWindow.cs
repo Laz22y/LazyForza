@@ -420,6 +420,18 @@ internal sealed partial class MainWindow : Window
                     this,
                     Path.Combine(directory, $"settings-{fileName}-{width:0}x{height:0}.png"));
                 CollectHanText(this, $"settings {category}", englishHanAudit);
+                if (category == SettingsCategory.Hud)
+                {
+                    var expanded = (hudAppearanceExpanded, hudComponentsExpanded, hudOpacityExpanded, hudTimingExpanded);
+                    hudAppearanceExpanded = hudComponentsExpanded = hudTimingExpanded = false;
+                    hudOpacityExpanded = true;
+                    RenderSelectedPage();
+                    UpdateLayout();
+                    await Task.Delay(100);
+                    CaptureVisual(this, Path.Combine(directory, $"settings-hud-themes-{width:0}x{height:0}.png"));
+                    CollectHanText(this, "HUD themes", englishHanAudit);
+                    (hudAppearanceExpanded, hudComponentsExpanded, hudOpacityExpanded, hudTimingExpanded) = expanded;
+                }
             }
         }
         Width = 1440;
@@ -554,47 +566,52 @@ internal sealed partial class MainWindow : Window
     private UIElement BuildShell()
     {
         var root = new Grid { Background = Brush("WindowBrush") };
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(248) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(208) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var sidebar = new Border { Background = Brush("PanelBrush"), BorderBrush = Brush("BorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
-        var sideStack = new DockPanel { Margin = new Thickness(14, 18, 14, 14) };
-        var brand = new StackPanel { Margin = new Thickness(8, 0, 8, 22) };
+        var sidebar = new Border { Background = Brush("SidebarBrush"), BorderBrush = Brush("BorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
+        var sideStack = new DockPanel { Margin = new Thickness(12, 25, 12, 14) };
+        var brand = new StackPanel { Margin = new Thickness(14, 0, 0, 28) };
         brand.Children.Add(new Image
         {
             Source = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForzaWordmark.png", UriKind.Absolute)),
-            Width = 200,
-            Height = 35,
+            Width = 154,
+            Height = 28,
             Stretch = Stretch.Uniform,
             HorizontalAlignment = HorizontalAlignment.Left,
             SnapsToDevicePixels = true
         });
-        var sourceLabel = Label(sourceKind == TelemetrySourceKind.Live ? $"LIVE UDP · {ConfiguredLiveEndpoint()}" : "模拟 / 回放", 12, FontWeights.Normal, "AccentBrush");
-        sourceLabel.Margin = new Thickness(0, 7, 0, 0);
-        brand.Children.Add(sourceLabel);
         DockPanel.SetDock(brand, Dock.Top);
         sideStack.Children.Add(brand);
+        navigation.ItemContainerStyle = (Style)FindResource("SidebarNavigationItem");
+        ScrollViewer.SetHorizontalScrollBarVisibility(navigation, ScrollBarVisibility.Disabled);
         PopulateNavigation();
         sideStack.Children.Add(navigation);
         sidebar.Child = sideStack;
         Grid.SetColumn(sidebar, 0);
         root.Children.Add(sidebar);
 
-        var main = new Grid { Margin = new Thickness(30, 24, 30, 26), Background = Brush("WindowBrush") };
+        var main = new Grid { Margin = new Thickness(32, 25, 24, 26), Background = Brush("WindowBrush") };
         content.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         content.VerticalContentAlignment = VerticalAlignment.Stretch;
         main.Children.Add(content);
         var sourceChip = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(36, 49, 60)),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(12, 6, 12, 6),
+            Background = Brush("CardBrush"),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(14, 6, 14, 6),
             Margin = new Thickness(0, 0, 14, 0),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Child = Label(sourceKind == TelemetrySourceKind.Live ? "LIVE" : "模拟 / 回放", 12, FontWeights.SemiBold)
+            Child = Label(sourceKind == TelemetrySourceKind.Live ? "LIVE UDP" : "模拟 / 回放", 12, FontWeights.SemiBold),
+            ToolTip = sourceKind == TelemetrySourceKind.Live ? ConfiguredLiveEndpoint() : AppLocalization.Literal("模拟 / 回放")
         };
         Panel.SetZIndex(sourceChip, 1);
         main.Children.Add(sourceChip);
+        content.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, args) =>
+        {
+            if (ReferenceEquals(args.OriginalSource, content.Content))
+                sourceChip.Visibility = args.VerticalOffset < 24 ? Visibility.Visible : Visibility.Collapsed;
+        }));
         Grid.SetColumn(main, 1);
         root.Children.Add(main);
         return root;
@@ -604,9 +621,11 @@ internal sealed partial class MainWindow : Window
     {
         navigation.Items.Clear();
         foreach (var page in PrimaryPages)
-            navigation.Items.Add(NavigationEntry(
-                page.IconData,
-                AppLocalization.Text(page.Key, page.Title)));
+        {
+            var entry = NavigationEntry(page.IconData, AppLocalization.Text(page.Key, page.Title));
+            navigation.Items.Add(new ListBoxItem { Content = entry,
+                Margin = new Thickness(0, page.Key is "nav.lapAnalysis" or "nav.settings" ? 19 : 3, 0, 3) });
+        }
         if (showDiagnosticsNavigation)
             navigation.Items.Add(NavigationEntry(
                 DiagnosticsPageEntry.IconData,
@@ -3766,12 +3785,13 @@ internal sealed partial class MainWindow : Window
     {
         var stack = new StackPanel();
         var titleLabel = Label(title, 28, FontWeights.SemiBold);
-        titleLabel.Margin = new Thickness(0, 0, 0, 5);
+        titleLabel.Margin = new Thickness(0, 0, 150, 5);
         stack.Children.Add(titleLabel);
 
-        var descriptionLabel = Label(description, 14, FontWeights.Normal, "MutedBrush");
+        var descriptionLabel = Label(description, 13, FontWeights.Normal, "MutedBrush");
         descriptionLabel.Margin = new Thickness(0, 0, 0, 18);
-        stack.Children.Add(descriptionLabel);
+        stack.Children.Add(new Border { Child = descriptionLabel, BorderBrush = Brush("BorderBrush"),
+            BorderThickness = new Thickness(0, 0, 0, 1), Margin = new Thickness(0, 0, 10, 20) });
         return stack;
     }
 
@@ -3785,10 +3805,10 @@ internal sealed partial class MainWindow : Window
         var icon = new VectorPath
         {
             Data = Geometry.Parse(iconData),
-            Width = 22,
-            Height = 22,
+            Width = 20,
+            Height = 20,
             Stretch = Stretch.Uniform,
-            StrokeThickness = 1.8,
+            StrokeThickness = 1.5,
             StrokeStartLineCap = PenLineCap.Round,
             StrokeEndLineCap = PenLineCap.Round,
             StrokeLineJoin = PenLineJoin.Round,
@@ -3803,8 +3823,8 @@ internal sealed partial class MainWindow : Window
         var label = new TextBlock
         {
             Text = title,
-            FontSize = 15,
-            FontWeight = FontWeights.SemiBold,
+            FontSize = 13,
+            FontWeight = FontWeights.Normal,
             FontFamily = UiFont,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
@@ -3906,8 +3926,8 @@ internal sealed partial class MainWindow : Window
         Background = Brush("CardBrush"),
         BorderBrush = Brush("BorderBrush"),
         BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(10),
-        Padding = new Thickness(16),
+        CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(18),
         Margin = new Thickness(0, 8, 10, 4),
         Child = child
     };
@@ -3922,13 +3942,7 @@ internal sealed partial class MainWindow : Window
         FontFamily = UiFont
     };
 
-    private static double ReadableFontSize(double size) => size switch
-    {
-        <= 10 => 12,
-        <= 11 => 13,
-        <= 13 => 14,
-        _ => size
-    };
+    private static double ReadableFontSize(double size) => Math.Max(12, size);
 
     private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];
     private static ScrollViewer Scroll(UIElement content) => new()
