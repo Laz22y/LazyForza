@@ -58,6 +58,7 @@ internal sealed partial class MainWindow : Window
     private readonly MainWindowPageRefreshState pageRefresh = new();
     private readonly ContentControl content = new();
     private readonly ListBox navigation = new();
+    private ReleaseBrandLine? releaseBrandLine;
     private readonly DispatcherTimer refreshTimer;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly HashSet<Guid> selectedLapIds = [];
@@ -130,6 +131,8 @@ internal sealed partial class MainWindow : Window
         navigation.SelectedIndex = 0;
         refreshTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) =>
         {
+            releaseBrandLine?.SetReduceMotion(overlay.TimingLayout.ReduceMotion || !SystemParameters.ClientAreaAnimation);
+            releaseBrandLine?.SetReleaseName(ApplicationVersionInfo.ReleaseName);
             UpdateRaceEngineer();
             var lapModule = moduleManager.Modules.OfType<LapAnalysisModule>().FirstOrDefault();
             if (lapModule is not null) diagnosticCapture.UpdateTrackMatch(lapModule.MatchDiagnostics);
@@ -329,7 +332,10 @@ internal sealed partial class MainWindow : Window
             File.WriteAllText(Path.Combine(directory, "startup-layout.json"), JsonSerializer.Serialize(new
             {
                 Width, Height, ActualWidth, ActualHeight, Left, Top,
-                startupScroll.ViewportHeight, startupScroll.ExtentHeight, startupScroll.ScrollableHeight
+                startupScroll.ViewportHeight, startupScroll.ExtentHeight, startupScroll.ScrollableHeight,
+                ReleaseName = ApplicationVersionInfo.ReleaseName,
+                ReleaseLabelMode = releaseBrandLine?.DisplayMode.ToString(),
+                ReleaseAnimationScheduled = releaseBrandLine?.IsAnimationScheduled
             }, new JsonSerializerOptions { WriteIndented = true }));
         var englishHanAudit = new SortedSet<string>(StringComparer.Ordinal);
         EnsureEstateQaTrack();
@@ -582,7 +588,7 @@ internal sealed partial class MainWindow : Window
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var sidebar = new Border { Background = Brush("SidebarBrush"), BorderBrush = Brush("BorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
         var sideStack = new DockPanel { Margin = new Thickness(12, 25, 12, 14) };
-        var brand = new StackPanel { Margin = new Thickness(14, 0, 0, 28) };
+        var brand = new StackPanel { Margin = new Thickness(14, 0, 0, 18) };
         brand.Children.Add(new Image
         {
             Source = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForzaWordmark.png", UriKind.Absolute)),
@@ -592,6 +598,14 @@ internal sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             SnapsToDevicePixels = true
         });
+        releaseBrandLine = new ReleaseBrandLine($"v{ApplicationVersionInfo.Display}", ApplicationVersionInfo.ReleaseName)
+        {
+            // Match the wordmark's visible left edge inside its transparent image padding.
+            Margin = new Thickness(2, 8, 0, 0)
+        };
+        releaseBrandLine.SetResourceReference(ForegroundProperty, "MutedBrush");
+        releaseBrandLine.SetReduceMotion(overlay.TimingLayout.ReduceMotion || !SystemParameters.ClientAreaAnimation);
+        brand.Children.Add(releaseBrandLine);
         DockPanel.SetDock(brand, Dock.Top);
         sideStack.Children.Add(brand);
         navigation.ItemContainerStyle = (Style)FindResource("SidebarNavigationItem");

@@ -68,6 +68,8 @@ HUD 设置中的“地产赛事底板不透明度”只调整面板底色，文�
 
 主窗口默认以 1440×900 的逻辑尺寸居中打开；按所在屏幕的缩放和工作区自动收敛，给桌面留出边距。小屏幕或手动缩小窗口时仍可滚动查看完整内容。概览集中显示当前赛事、赛道预览、遥测状态和最近圈记录，可直接进入圈速分析或回放工作台；没有赛事或圈记录时显示等待状态。
 
+Logo 下方以灰色小字显示当前版本号与更新名：宽度足够时同排，空间不足时淡入淡出轮换，仅超长项缓慢滚动。鼠标悬停暂停并显示完整信息，窗口失焦或最小化时暂停动画；HUD 设置中的“减少动态”及 Windows 动画开关均可使其改为静态省略显示。更新名配置与时序见[侧栏版本信息说明](docs/RELEASE_BRAND_LABEL.md)。
+
 ```powershell
 LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 ```
@@ -180,6 +182,8 @@ In HUD settings, Estate race panel opacity changes panel backgrounds while keepi
 Race themes and widgets offers Classic and Broadcast styles. Choose or mix themes independently for all 11 widgets, or switch them together. Classic remains the default. Switching preserves position, scale and opacity; Apply HUD settings takes effect immediately and saves your choices across restarts. Broadcast adds a timing tower, high-contrast position plates and clearer flag and pit timing panels, with aligned text columns and ellipsis for long names.
 
 The main window opens centered at a preferred size of 1440×900 device-independent units, constrained to its screen's scale and work area with a small desktop margin. Scrolling remains available on smaller screens or when the window is resized. Overview brings the current session, track preview, telemetry status and recent laps together, with direct access to lap analysis and replay. It shows an explicit waiting state when no session or lap records are available.
+
+Muted text below the logo shows the current version and release name together when they fit. Otherwise, they alternate with a short fade; only an oversized item scrolls. Hover to pause and read the full information in a tooltip. Animation pauses when the window is inactive or minimized. HUD Reduce motion and the Windows animation preference switch the label to static text with an ellipsis. See the [release label configuration and timing notes](docs/RELEASE_BRAND_LABEL.md).
 
 Use an explicit data directory from the command line when needed:
 

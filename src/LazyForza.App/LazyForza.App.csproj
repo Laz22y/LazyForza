@@ -6,10 +6,14 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Version>1.5.2</Version>
+    <ReleaseNameZh>Radio Check</ReleaseNameZh>
+    <ReleaseNameEn>Radio Check</ReleaseNameEn>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\LazyForza.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <AssemblyMetadata Include="ReleaseName.zh-Hans" Value="$(ReleaseNameZh)" />
+    <AssemblyMetadata Include="ReleaseName.en" Value="$(ReleaseNameEn)" />
     <Using Remove="System.Drawing" />
     <Using Remove="System.Windows.Forms" />
   </ItemGroup>

@@ -5,6 +5,15 @@ namespace LazyForza.App;
 
 internal static class ApplicationVersionInfo
 {
+    private static readonly IReadOnlyDictionary<string, string?> ReleaseNames = typeof(ApplicationVersionInfo).Assembly
+        .GetCustomAttributes<AssemblyMetadataAttribute>().Where(attribute => attribute.Key.StartsWith("ReleaseName.", StringComparison.Ordinal))
+        .ToDictionary(attribute => attribute.Key, attribute => attribute.Value);
+
+    public static string ReleaseName => ReleaseNameForLanguage(AppLocalization.CurrentLanguage);
+
+    internal static string ReleaseNameForLanguage(string language) =>
+        ReleaseNames.GetValueOrDefault(language.StartsWith("en", StringComparison.OrdinalIgnoreCase) ? "ReleaseName.en" : "ReleaseName.zh-Hans")?.Trim() ?? "";
+
     public static string Informational
     {
         get
