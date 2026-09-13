@@ -66,7 +66,7 @@ HUD 设置中的“地产赛事底板不透明度”只调整面板底色，文�
 
 “赛事主题与组件”提供经典、转播两套赛事 HUD 主题，11 个组件可独立选择和混搭，也可一次切换全部组件。经典为默认主题；切换主题保留组件位置、缩放与不透明度，点击“应用 HUD 设置”后立即生效并持久保存。转播主题采用独立计时塔、高对比排名牌和更清楚的旗语、维修区计时；中文名称、车队信息和数字按列排版，过长内容省略显示。
 
-概览集中显示当前赛事、赛道预览、遥测状态和最近圈记录，可直接进入圈速分析或回放工作台；没有赛事或圈记录时显示等待状态。
+主窗口默认以 1440×900 的逻辑尺寸居中打开；按所在屏幕的缩放和工作区自动收敛，给桌面留出边距。小屏幕或手动缩小窗口时仍可滚动查看完整内容。概览集中显示当前赛事、赛道预览、遥测状态和最近圈记录，可直接进入圈速分析或回放工作台；没有赛事或圈记录时显示等待状态。
 
 ```powershell
 LazyForza.App.exe --data-dir "D:\LazyForza_Data"
@@ -179,7 +179,7 @@ In HUD settings, Estate race panel opacity changes panel backgrounds while keepi
 
 Race themes and widgets offers Classic and Broadcast styles. Choose or mix themes independently for all 11 widgets, or switch them together. Classic remains the default. Switching preserves position, scale and opacity; Apply HUD settings takes effect immediately and saves your choices across restarts. Broadcast adds a timing tower, high-contrast position plates and clearer flag and pit timing panels, with aligned text columns and ellipsis for long names.
 
-Overview brings the current session, track preview, telemetry status and recent laps together, with direct access to lap analysis and replay. It shows an explicit waiting state when no session or lap records are available.
+The main window opens centered at a preferred size of 1440×900 device-independent units, constrained to its screen's scale and work area with a small desktop margin. Scrolling remains available on smaller screens or when the window is resized. Overview brings the current session, track preview, telemetry status and recent laps together, with direct access to lap analysis and replay. It shows an explicit waiting state when no session or lap records are available.
 
 Use an explicit data directory from the command line when needed:
 

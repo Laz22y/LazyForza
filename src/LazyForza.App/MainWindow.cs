@@ -113,16 +113,17 @@ internal sealed partial class MainWindow : Window
             out var showDiagnostics) && showDiagnostics;
         Title = $"LazyForza {ApplicationVersionInfo.Display}";
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForza.png", UriKind.Absolute));
-        Width = 1280;
-        Height = 800;
-        MinWidth = 960;
-        MinHeight = 640;
+        SetStartupWindowSize(SystemParameters.WorkArea.Size);
         Background = Brush("WindowBrush");
         Foreground = Brush("TextBrush");
         FontFamily = UiFont;
         UseLayoutRounding = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        SourceInitialized += (_, _) => ApplyDarkTitleBar();
+        SourceInitialized += (_, _) =>
+        {
+            FitStartupWindowToMonitor();
+            ApplyDarkTitleBar();
+        };
         InitializeRaceEngineer();
         Content = BuildShell();
         navigation.SelectionChanged += (_, _) => RenderSelectedPage();
@@ -319,6 +320,17 @@ internal sealed partial class MainWindow : Window
     internal async Task CaptureEstateRacePageQaAsync(string directory)
     {
         Directory.CreateDirectory(directory);
+        // Capture the actual startup size before the fixed QA viewports below replace it.
+        navigation.SelectedIndex = 0;
+        UpdateLayout();
+        await Task.Delay(180);
+        CaptureVisual(this, Path.Combine(directory, "overview-startup.png"));
+        if (content.Content is ScrollViewer startupScroll)
+            File.WriteAllText(Path.Combine(directory, "startup-layout.json"), JsonSerializer.Serialize(new
+            {
+                Width, Height, ActualWidth, ActualHeight, Left, Top,
+                startupScroll.ViewportHeight, startupScroll.ExtentHeight, startupScroll.ScrollableHeight
+            }, new JsonSerializerOptions { WriteIndented = true }));
         var englishHanAudit = new SortedSet<string>(StringComparer.Ordinal);
         EnsureEstateQaTrack();
         WindowState = WindowState.Normal;

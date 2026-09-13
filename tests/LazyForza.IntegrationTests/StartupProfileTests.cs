@@ -6,6 +6,21 @@ namespace LazyForza.IntegrationTests;
 public sealed class StartupProfileTests
 {
     [TestMethod]
+    [DataRow(1920, 1040, 1.0)]
+    [DataRow(1920, 1040, 1.25)]
+    [DataRow(1920, 1040, 1.5)]
+    [DataRow(1366, 728, 1.0)]
+    [DataRow(3840, 2080, 2.0)]
+    public void StartupWindowFitsAvailableScreenAtCommonScales(double width, double height, double scale)
+    {
+        var size = MainWindow.ConstrainStartupWindowSize(new System.Windows.Size(width / scale, height / scale));
+        Assert.IsTrue(size.Width * scale <= width - 32 * scale);
+        Assert.IsTrue(size.Height * scale <= height - 32 * scale);
+        if (width / scale >= 1472 && height / scale >= 932)
+            Assert.AreEqual(new System.Windows.Size(1440, 900), size);
+    }
+
+    [TestMethod]
     public void EnglishLocalizationPreservesLiveInlineNumberUpdates() => EstateHudRenderingTests.Sta(() =>
     {
         var previous = AppLocalization.CurrentLanguage;

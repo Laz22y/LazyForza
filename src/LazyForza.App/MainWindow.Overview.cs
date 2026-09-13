@@ -89,7 +89,7 @@ internal sealed partial class MainWindow
         records.Children.Add(recentRows);
         lower.Children.Add(records);
         var actions = new StackPanel();
-        actions.Children.Add(Label("继续工作", 17, FontWeights.SemiBold));
+        actions.Children.Add(Label("继续", 17, FontWeights.SemiBold));
         foreach (var (title, detail, index) in new[]
         {
             ("圈速分析", "比较圈时、分段和弯道", 4),
