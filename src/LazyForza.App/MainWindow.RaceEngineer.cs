@@ -31,8 +31,9 @@ internal sealed partial class MainWindow
     private Button? engineerServiceButton;
     private bool engineerVoiceChanging;
     private bool engineerVoicesLoaded;
-    private bool EngineerSpeechEnglish => engineerSpeechSettings.UseElevenLabs
-        ? engineerSpeechSettings.Language == "en-US" || engineerSpeechSettings.Language != "zh-CN" && EngineerEnglish
+    private bool EngineerSpeechEnglish => engineerSpeechSettings.IsOnline
+        ? engineerSpeechSettings.SpeechLanguage.StartsWith("en", StringComparison.OrdinalIgnoreCase) ||
+            !engineerSpeechSettings.SpeechLanguage.StartsWith("zh", StringComparison.OrdinalIgnoreCase) && EngineerEnglish
         : engineerVoice?.Language.StartsWith("en", StringComparison.OrdinalIgnoreCase) ?? EngineerEnglish;
 
     private bool EngineerEnglish => AppLocalization.CurrentLanguage.StartsWith("en", StringComparison.OrdinalIgnoreCase);
@@ -111,15 +112,18 @@ internal sealed partial class MainWindow
     private ISpeechOutput CreateEngineerSpeech()
     {
         engineerFallback = null;
-        if (!engineerSpeechSettings.UseElevenLabs)
+        if (!engineerSpeechSettings.IsOnline)
             return new LocalRaceSpeech(EngineerSpeechEnglish, () => Volatile.Read(ref engineerTransmission), engineerVoice);
-        if (!EngineerCredentialProtection.TryUnprotect(engineerSpeechSettings.ProtectedApiKey, out var apiKey))
-            engineerCueNotice = EngineerText("ElevenLabs 密钥无法解密，请在语音服务中重新填写。", "Re-enter your ElevenLabs key in Speech service; the saved key cannot be decrypted.");
-        ISpeechSynthesisProvider provider = new ElevenLabsSpeechProvider(apiKey, engineerSpeechSettings.ModelId);
+        var azure = engineerSpeechSettings.ActiveProvider == EngineerSpeechSettings.Azure;
+        if (!EngineerCredentialProtection.TryUnprotect(azure ? engineerSpeechSettings.AzureProtectedApiKey : engineerSpeechSettings.ProtectedApiKey, out var apiKey))
+            engineerCueNotice = EngineerText("保存的服务密钥无法解密，请在语音服务中重新填写。", "The saved service key cannot be decrypted. Re-enter it in Speech service.");
+        ISpeechSynthesisProvider provider = azure
+            ? new AzureSpeechProvider(apiKey, engineerSpeechSettings.AzureRegion)
+            : new ElevenLabsSpeechProvider(apiKey, engineerSpeechSettings.ModelId);
         if (engineerSpeechSettings.FallbackToWindows)
             provider = engineerFallback = new FallbackSpeechProvider(provider, new WindowsSapiSpeechProvider());
         return new RadioSpeechOutput(provider, new WindowsPcmAudioPlayer(),
-            EngineerSpeechEnglish ? "en-US" : "zh-CN", engineerSpeechSettings.VoiceId,
+            EngineerSpeechEnglish ? "en-US" : "zh-CN", azure ? engineerSpeechSettings.AzureVoiceId : engineerSpeechSettings.VoiceId,
             transmissionSettings: () => Volatile.Read(ref engineerTransmission));
     }
 
@@ -142,7 +146,9 @@ internal sealed partial class MainWindow
             moduleManager.Modules.OfType<EstateRaceModule>().FirstOrDefault() is { } module)
             engineerObserver?.Observe(module.State);
         if (engineerServiceSummary is not null)
-            engineerServiceSummary.Text = engineerSpeechSettings.UseElevenLabs ? "ElevenLabs · " + (engineerSpeechSettings.ModelId switch
+            engineerServiceSummary.Text = engineerSpeechSettings.ActiveProvider == EngineerSpeechSettings.Azure
+                ? "Azure Speech · " + engineerSpeechSettings.AzureVoiceId
+                : engineerSpeechSettings.ActiveProvider == EngineerSpeechSettings.ElevenLabs ? "ElevenLabs · " + (engineerSpeechSettings.ModelId switch
                 { "eleven_multilingual_v2" => "Multilingual v2", "eleven_v3" => "Eleven v3", _ => "Flash v2.5" })
                 : EngineerText("Windows 本地语音", "Windows local speech") + " · " + (engineerVoice?.Name ?? EngineerText("默认音色", "Default voice"));
         if (engineerServiceButton is not null) engineerServiceButton.IsEnabled = engineerVoicesLoaded && !engineerVoiceChanging;
@@ -150,7 +156,7 @@ internal sealed partial class MainWindow
             engineerStatus.Text = raceEngineer?.Error is not null
                 ? EngineerText("语音不可用。请检查语音服务和音频设备，再关闭并重新启用。", "Speech unavailable. Check Speech service and audio devices, then disable and enable again.")
                 : engineerFallback?.LastFailure is { } failure
-                    ? EngineerSpeechSettingsWindow.FailureText(failure, EngineerEnglish) + EngineerText(" 已暂时使用 Windows 本地语音。", " Temporarily using Windows speech.")
+                    ? EngineerSpeechSettingsWindow.FailureText(failure, EngineerEnglish, engineerSpeechSettings.ServiceName) + EngineerText(" 已暂时使用 Windows 本地语音。", " Temporarily using Windows speech.")
                     : engineerCueNotice ?? EngineerText("仅播报重要变化；进站建议为预测。", "Important changes only; pit advice remains a prediction.");
         if (engineerPreviewButton is not null)
         {

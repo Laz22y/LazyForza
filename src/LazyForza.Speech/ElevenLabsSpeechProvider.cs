@@ -1,23 +1,7 @@
-using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace LazyForza.Speech;
-
-public enum SpeechServiceFailure { Configuration, Authentication, RateLimited, Unavailable, InvalidAudio, Timeout }
-
-/// <summary>Safe error metadata only: never retain service response bodies, headers or credentials.</summary>
-public sealed class SpeechServiceException(SpeechServiceFailure failure, TimeSpan? retryAfter = null)
-    : Exception($"Speech service: {failure}")
-{
-    public SpeechServiceFailure Failure { get; } = failure;
-    public TimeSpan? RetryAfter { get; } = retryAfter;
-}
-
-public sealed record SpeechVoiceInfo(string Id, string Name)
-{
-    public override string ToString() => Name;
-}
 
 /// <summary>Official HTTPS API; short requests return bounded raw PCM16, never a remote playback URL.</summary>
 public sealed class ElevenLabsSpeechProvider : ISpeechSynthesisProvider
@@ -26,12 +10,9 @@ public sealed class ElevenLabsSpeechProvider : ISpeechSynthesisProvider
     public static IReadOnlyList<string> Models { get; } = Array.AsReadOnly(new[]
         { DefaultModel, "eleven_multilingual_v2", "eleven_v3" });
     private const int SampleRate = 24000;
-    private readonly HttpClient client;
+    private readonly SpeechServiceHttpClient client;
     private readonly string apiKey;
     private readonly string model;
-    private readonly TimeSpan timeout;
-    private readonly CancellationTokenSource lifetime = new();
-    private int disposed;
     public string Id => "elevenlabs";
     public SpeechProviderLocation Location => SpeechProviderLocation.Online;
 
@@ -40,11 +21,7 @@ public sealed class ElevenLabsSpeechProvider : ISpeechSynthesisProvider
     {
         this.apiKey = apiKey.Trim();
         this.model = model;
-        this.timeout = timeout ?? TimeSpan.FromSeconds(6);
-        if (this.timeout <= TimeSpan.Zero || this.timeout > TimeSpan.FromSeconds(10))
-            throw new ArgumentOutOfRangeException(nameof(timeout));
-        client = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false }, disposeHandler: true)
-        { BaseAddress = new Uri("https://api.elevenlabs.io/"), Timeout = Timeout.InfiniteTimeSpan };
+        client = new SpeechServiceHttpClient(new Uri("https://api.elevenlabs.io/"), handler, timeout);
     }
 
     public static bool IsValidVoiceId(string? id) => !string.IsNullOrWhiteSpace(id) && id.Length <= 128 &&
@@ -65,7 +42,7 @@ public sealed class ElevenLabsSpeechProvider : ISpeechSynthesisProvider
             model_id = model,
             voice_settings = new { speed = request.Rate }
         });
-        var bytes = await SendAsync(message, SampleRate * 2 * SpeechAudio.MaximumDurationSeconds,
+        var bytes = await client.SendAsync(message, SampleRate * 2 * SpeechAudio.MaximumDurationSeconds,
             cancellationToken).ConfigureAwait(false);
         if (bytes.Length == 0 || bytes.Length % 2 != 0)
             throw new SpeechServiceException(SpeechServiceFailure.InvalidAudio);
@@ -82,7 +59,7 @@ public sealed class ElevenLabsSpeechProvider : ISpeechSynthesisProvider
         {
             using var message = CreateRequest(HttpMethod.Get, "v2/voices?page_size=100&include_total_count=false" +
                 (next is null ? "" : "&next_page_token=" + Uri.EscapeDataString(next)));
-            var bytes = await SendAsync(message, 1024 * 1024, cancellationToken).ConfigureAwait(false);
+            var bytes = await client.SendAsync(message, 1024 * 1024, cancellationToken).ConfigureAwait(false);
             try
             {
                 using var json = JsonDocument.Parse(bytes);
@@ -104,68 +81,8 @@ public sealed class ElevenLabsSpeechProvider : ISpeechSynthesisProvider
         throw new SpeechServiceException(SpeechServiceFailure.Unavailable);
     }
 
-    private HttpRequestMessage CreateRequest(HttpMethod method, string path)
-    {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
-        if (apiKey.Length is < 1 or > 512 || apiKey.Any(c => c < '!' || c > '~'))
-            throw new SpeechServiceException(SpeechServiceFailure.Configuration);
-        var message = new HttpRequestMessage(method, path);
-        message.Headers.Add("xi-api-key", apiKey);
-        return message;
-    }
+    private HttpRequestMessage CreateRequest(HttpMethod method, string path) =>
+        client.CreateRequest(method, path, "xi-api-key", apiKey);
 
-    private async Task<byte[]> SendAsync(HttpRequestMessage request, int maximum, CancellationToken cancellationToken)
-    {
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
-        cancellation.CancelAfter(timeout);
-        var token = cancellation.Token;
-        try
-        {
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                var failure = response.StatusCode switch
-                {
-                    HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => SpeechServiceFailure.Authentication,
-                    HttpStatusCode.TooManyRequests => SpeechServiceFailure.RateLimited,
-                    HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity => SpeechServiceFailure.Configuration,
-                    _ => SpeechServiceFailure.Unavailable
-                };
-                var retry = response.Headers.RetryAfter?.Delta ??
-                    (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow);
-                throw new SpeechServiceException(failure, retry);
-            }
-            var type = response.Content.Headers.ContentType?.MediaType;
-            if (request.Method == HttpMethod.Post && type is not null &&
-                type != "application/octet-stream" && type != "audio/pcm" && type != "audio/raw" && type != "audio/x-pcm")
-                throw new SpeechServiceException(SpeechServiceFailure.InvalidAudio);
-            if (response.Content.Headers.ContentLength > maximum)
-                throw new SpeechServiceException(SpeechServiceFailure.InvalidAudio);
-            await using var stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
-            using var output = new MemoryStream();
-            var buffer = new byte[8192];
-            int count;
-            while ((count = await stream.ReadAsync(buffer, token).ConfigureAwait(false)) != 0)
-            {
-                if (output.Length + count > maximum)
-                    throw new SpeechServiceException(SpeechServiceFailure.InvalidAudio);
-                output.Write(buffer, 0, count);
-            }
-            return output.ToArray();
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !lifetime.IsCancellationRequested)
-        { throw new SpeechServiceException(SpeechServiceFailure.Timeout); }
-        catch (HttpRequestException) { throw new SpeechServiceException(SpeechServiceFailure.Unavailable); }
-        catch (IOException) { throw new SpeechServiceException(SpeechServiceFailure.Unavailable); }
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref disposed, 1) == 0)
-        {
-            lifetime.Cancel();
-            client.Dispose();
-        }
-        return ValueTask.CompletedTask;
-    }
+    public ValueTask DisposeAsync() => client.DisposeAsync();
 }

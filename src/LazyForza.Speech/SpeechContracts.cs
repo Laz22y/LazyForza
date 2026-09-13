@@ -29,3 +29,18 @@ public interface ISpeechOutput : IAsyncDisposable
 {
     Task SpeakAsync(string text, int volume, CancellationToken cancellationToken);
 }
+
+public enum SpeechServiceFailure { Configuration, Authentication, RateLimited, Unavailable, InvalidAudio, Timeout }
+
+/// <summary>Safe error metadata only: never retain service response bodies, headers or credentials.</summary>
+public sealed class SpeechServiceException(SpeechServiceFailure failure, TimeSpan? retryAfter = null)
+    : Exception($"Speech service: {failure}")
+{
+    public SpeechServiceFailure Failure { get; } = failure;
+    public TimeSpan? RetryAfter { get; } = retryAfter;
+}
+
+public sealed record SpeechVoiceInfo(string Id, string Name)
+{
+    public override string ToString() => Name;
+}

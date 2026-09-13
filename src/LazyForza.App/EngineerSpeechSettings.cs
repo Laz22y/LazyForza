@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using LazyForza.Speech;
 
 namespace LazyForza.App;
@@ -13,16 +14,33 @@ internal sealed record EngineerSpeechSettings(
     string ModelId = ElevenLabsSpeechProvider.DefaultModel,
     string Language = "auto",
     bool FallbackToWindows = true,
-    string? WindowsVoiceId = null)
+    string? WindowsVoiceId = null,
+    string? ProviderId = null,
+    string AzureProtectedApiKey = "",
+    string AzureRegion = "eastasia",
+    string AzureVoiceId = "",
+    string AzureLanguage = "auto")
 {
+    public const string Windows = "windows", ElevenLabs = "elevenlabs", Azure = "azure";
     public const string StoreKey = "raceEngineer.speechService.v1";
+    [JsonIgnore]
+    public string ActiveProvider => ProviderId is null ? (UseElevenLabs ? ElevenLabs : Windows)
+        : ProviderId is ElevenLabs or Azure ? ProviderId : Windows;
+    [JsonIgnore]
+    public bool IsOnline => ActiveProvider != Windows;
+    [JsonIgnore]
+    public string ServiceName => ActiveProvider == Azure ? "Azure Speech" : ActiveProvider == ElevenLabs ? "ElevenLabs" : "Windows";
+    [JsonIgnore]
+    public string SpeechLanguage => (ActiveProvider == Azure
+        ? AzureLanguage == "auto" ? AzureSpeechProvider.VoiceLocale(AzureVoiceId) ?? "auto" : AzureLanguage
+        : Language) ?? "auto";
     public static EngineerSpeechSettings Load(string? json)
     {
         try { return (string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<EngineerSpeechSettings>(json)) ?? new(); }
         catch (JsonException) { return new(); }
     }
     public string Serialize() => JsonSerializer.Serialize(this);
-    public override string ToString() => UseElevenLabs ? "ElevenLabs" : "Windows";
+    public override string ToString() => ServiceName;
 }
 
 /// <summary>User-supplied credentials are protected with Windows DPAPI for this user, not stored as plaintext.</summary>

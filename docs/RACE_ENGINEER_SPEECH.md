@@ -2,7 +2,7 @@
 
 ## 当前装配
 
-工程师默认关闭，默认来源为无需联网的 Windows SAPI。地产赛事页的「语音服务…」打开独立浮窗，可选择 Windows 本地音色或 ElevenLabs；主页面保留当前服务摘要、音量、试听和立即静音。原有 AppSettings 开关、静音与音量无需迁移。
+工程师默认关闭，默认来源为无需联网的 Windows SAPI。地产赛事页的「语音服务…」打开独立浮窗，可选择 Windows 本地音色、ElevenLabs 或 Azure Speech；主页面保留当前服务摘要、音量、试听和立即静音。原有 AppSettings 开关、静音与音量无需迁移。
 
 ## ElevenLabs
 
@@ -10,13 +10,31 @@
 
 仅在用户选择并保存 ElevenLabs 后，播报／试听才发送文本到官方 `api.elevenlabs.io`。不上传原始遥测、录音或自定义提示音。合成会消耗 ElevenLabs 账户额度；读取音色也需要相应 API 权限。密钥通过 `xi-api-key` 请求头发送，不放在 URL、播报文本或错误详情中，不内置共享密钥。HTTP 重定向被禁用。
 
-密钥使用 Windows DPAPI 当前用户保护后，与服务、模型、语言及音色选择一起写入单个 `raceEngineer.speechService.v1` AppSettings 值。备份只包含密文；换电脑／Windows 用户后通常需要重新填写密钥。旧应用忽略新设置，继续使用自己的 Windows 配置；新应用在没有新设置时读取原 `raceEngineer.voiceId`。没有数据库或地产协议变更。
+适配器调用 `POST /v1/text-to-speech/{voice_id}?output_format=pcm_24000`。`GET /v2/voices` 使用 `has_more` 和 `next_page_token` 分页，每页最多读取 1 MiB，最多 20 页；浮窗关闭会取消读取。
+
+实现参考：[语音合成](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)、[账户音色](https://elevenlabs.io/docs/api-reference/voices/search)、[API 认证](https://elevenlabs.io/docs/api-reference/authentication)、[模型](https://elevenlabs.io/docs/overview/models)。
+
+## Azure Speech
+
+在同一「语音服务…」浮窗选择 Azure Speech，填写 Speech 资源密钥、资源区域代码（例如 `eastasia`，须与密钥所属资源一致）和音色 ID。点击「获取音色」从所填区域读取可用的中英文音色，选择后自动填写 `ShortName`，例如 `zh-CN-XiaoxiaoNeural` 或 `en-US-JennyNeural`；也可手动填写。语言默认跟随音色，也可固定中文／英文；固定语言应选择支持该语言的音色。保存后用主页面「试听」验证，提示音、音量、静音和回退设置与 ElevenLabs 共用。
+
+当前支持 Azure 全球公有云的区域端点及预构建音色，不支持中国云、美国政府云、自定义域名／私有端点、Entra 认证或需要部署 ID 的自定义声音。区域栏只接受区域代码，不能填写 URL。获取音色只读取目录，不合成音频；仅保存并选用 Azure 后，播报／试听才向该区域发送文本并消耗 Azure 账户额度，不上传原始遥测、录音或提示音。
+
+适配器通过 `Ocp-Apim-Subscription-Key` 请求头认证，调用 `https://{region}.tts.speech.microsoft.com/cognitiveservices/v1`，将纯文本安全转义为 SSML，输出 `raw-24khz-16bit-mono-pcm`。音色读取路径为 `/cognitiveservices/voices/list`，响应上限 4 MiB。音色 ID 与区域在发出请求前校验，密钥不会放在 URL 或 SSML 中。
+
+实现参考：[Azure Text to speech REST API](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech)、[SSML 文档结构](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure)、[主权云与端点区别](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/sovereign-clouds)。
+
+## 在线服务共同行为与兼容
+
+密钥使用 Windows DPAPI 当前用户保护后，与服务、模型、语言及音色选择一起写入单个 `raceEngineer.speechService.v1` AppSettings 值。两家在线服务分别保存密钥、音色和语言，切换服务不会覆盖另一家的配置。备份只包含密文；换电脑／Windows 用户后通常需要重新填写密钥。浮窗保持草稿，只有保存才更换输出；取消或关闭不应用修改。
+
+新增可选 `ProviderId` 和 Azure 专用字段；缺少 `ProviderId` 时沿用旧 `UseElevenLabs`，未知来源回到 Windows。保存 Azure 时旧布尔值为 false，因此只支持 ElevenLabs 的旧应用会使用 Windows，不会将 Azure 密钥发给 ElevenLabs；旧应用重新保存设置可能丢弃不认识的 Azure 字段。更早的应用忽略整个服务设置；新应用仍兼容原 `raceEngineer.voiceId`。没有数据库或地产协议变更。
 
 可启用「服务不可用时使用 Windows 本地语音」（默认勾选）。在线合成限时 6 秒；认证、额度限制、网络及无效响应失败后可用同语言的 Windows 默认音色播报，并在主页面提示。普通失败暂停在线尝试至少 60 秒，认证／配置失败至少 5 分钟；遇到 `Retry-After` 延长等待，最多 1 小时。不会自动重试同一次付费 POST；冷却后由下一次播报尝试在线服务。回退声音不进入在线声音缓存。关闭回退时，故障只停用语音输出；重新保存服务设置或关闭再启用工程师可重试。主动静音、赛事切换和退出只取消请求，不触发回退。
 
-适配器调用 `POST /v1/text-to-speech/{voice_id}?output_format=pcm_24000`，使用 24 kHz、单声道 PCM16，读取过程中限制为 30 秒音频。模型和声音随输出实例固定；原有 32 条／4 MiB 内存缓存继续生效，不持久保存合成音频。`GET /v2/voices` 使用 `has_more` 和 `next_page_token` 分页，每页最多读取 1 MiB，最多 20 页；浮窗关闭会取消读取。
+两个适配器共用有界 HTTP 传输，禁止重定向，错误仅暴露分类和重试时间，不显示服务端原文。音频为 24 kHz、单声道 PCM16，读取过程中限制为 30 秒，即使响应不带 `Content-Length` 也会检查大小。模型、区域和声音随输出实例固定；原有 32 条／4 MiB 内存缓存继续生效，不持久保存合成音频。
 
-实现参考：[语音合成](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)、[账户音色](https://elevenlabs.io/docs/api-reference/voices/search)、[API 认证](https://elevenlabs.io/docs/api-reference/authentication)、[模型](https://elevenlabs.io/docs/overview/models)。
+`AzureSpeechTests`、`ElevenLabsSpeechTests` 覆盖官方请求格式、SSML 转义、认证和错误脱敏、无付费重试、音色目录、区域边界、流式响应上限、取消／释放、回退冷却以及设置兼容。`EngineerSpeechSettingsWindowTests` 检查两家服务的中英文浮窗、窄宽度布局和草稿隔离。测试使用 HTTP 替身，不消耗账户额度；真实区域、密钥权限、音色可用性和听感仍需使用用户自己的资源试听确认。
 
 ## 本地音色与原有设置
 
