@@ -42,13 +42,15 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 弯道比较要求路线修订、方向、分段版本及车辆条件兼容。旧圈缺少路线修订或完整车辆信息时仍可查看和回放，但不生成弯道结论。区间采样缺失、间隔过大或输入事件证据不足时会明确提示；差异说明不把相关性当成提速原因，也不代替对调校、天气等条件的核对。
 
-地产赛事页提供默认关闭的「本地语音比赛工程师」，播报旗语变化、新处罚、个人最快圈和关键进站预测。可调整音量或立即静音；静音会停止当前语音及提示音并清空待播消息，恢复后不补播。红旗优先打断普通播报，重复事件与频繁预测会被去重和冷却。进站建议保留「预计」「可能」等不确定性表述。
+地产赛事页提供默认关闭的「语音比赛工程师」，播报旗语变化、新处罚、个人最快圈和关键进站预测。可调整音量或立即静音；静音会停止当前语音及提示音并清空待播消息，恢复后不补播。红旗优先打断普通播报，重复事件与频繁预测会被去重和冷却。进站建议保留「预计」「可能」等不确定性表述。
 
-语音使用 Windows 已安装的对应语言本地 SAPI 语音，无需联网；每次完整播报前后有原创的无线电接通／断开音，包含短双脉冲、轻微扫频和电台噪声尾音。语音准备好后才播放接通音，静音或中断会立即停止本次输出。缺少语音或音频不可用时只停用播报，比赛照常进行。安装对应语音后，可关闭再启用工程师以重试。合成与播放已通过独立接口分离，当前内置实现仍为 Windows 本地语音；开发接口见 [语音输出说明](docs/RACE_ENGINEER_SPEECH.md)。
+语音默认使用 Windows 已安装的对应语言本地 SAPI 语音，无需联网；每次完整播报前后有原创的无线电接通／断开音，包含短双脉冲、轻微扫频和电台噪声尾音。语音准备好后才播放接通音，静音或中断会立即停止本次输出。缺少语音或音频不可用时只停用播报，比赛照常进行。安装对应语音后，可关闭再启用工程师以重试。合成与播放已通过独立接口分离，内置 Windows 本地语音和可选的 ElevenLabs API；开发接口见 [语音输出说明](docs/RACE_ENGINEER_SPEECH.md)。
 
 接通音后留出 180 毫秒，语音结束后留出 220 毫秒再播放断开音。展开「自定义接通/断开音」可分别导入 WAV、MP3、M4A 或 FLAC（每段最多 5 秒、10 MB，需系统支持解码），也可分别恢复默认；导入后保存音频副本，不依赖原文件路径。「试听」随机选择一句比赛示例，使用当前音量和提示音，无需连接赛事或开启自动播报；静音和零音量时不可试听，真实赛事消息优先。再次点击可停止试听。
 
 当前源码支持独立开关接通音和断开音，关闭时跳过对应停顿并保留自定义音频。「Windows 音色」列出本机 SAPI 可用的中英文声音，默认跟随界面语言；选择英文音色时使用英文播报。切换会停止旧输出并清空待播消息，音色、音量、提示音开关和自定义音频均自动保存，重启后继续沿用；保存的音色不可用时提示并回退默认。「试听」使用当前选择。
+
+在工程师旁打开「语音服务…」浮窗，可配置 ElevenLabs API Key、音色、模型和播报语言，再使用「试听」检查效果。默认模型为 Flash v2.5，也可选择 Multilingual v2 或 Eleven v3。密钥经当前 Windows 用户加密保存；在线合成会发送播报文本并消耗账户额度，可选择服务失败时回退本地语音。Windows 音色选择也收纳在该浮窗中。
 
 ## 快速开始
 
@@ -153,13 +155,15 @@ Lap analysis opens the latest valid lap by default; expand “Choose laps to com
 
 Corner comparisons require compatible route revisions, directions, sector versions and vehicle conditions. Older laps remain viewable and replayable, but missing revision or vehicle evidence prevents corner conclusions. Sparse or invalid samples and uncertain input transitions are reported explicitly. Observations describe differences, without asserting causes or promised time gains.
 
-The Estate racing page includes an optional local race engineer, disabled by default. It announces flag changes, new penalties, personal bests and important pit predictions, with priority, deduplication and cooldowns. Red flags interrupt routine speech. Volume and immediate mute controls apply to speech and the locally synthesized radio cues before and after each complete transmission. Mute clears pending messages; unmuting does not replay them. Pit advice explicitly remains an estimate.
+The Estate racing page includes an optional race engineer, disabled by default. It announces flag changes, new penalties, personal bests and important pit predictions, with priority, deduplication and cooldowns. Red flags interrupt routine speech. Volume and immediate mute controls apply to speech and the locally synthesized radio cues before and after each complete transmission. Mute clears pending messages; unmuting does not replay them. Pit advice explicitly remains an estimate.
 
-Speech uses an installed Windows SAPI voice for the selected language, without a network service. Original radio connect/disconnect cues combine short pulses, subtle frequency sweeps and brief squelch tails. The radio opens only once speech is ready; muting or interrupting stops the transmission. Missing voices or audio failures disable speech without affecting the race. After installing a compatible voice, disable and enable the engineer to retry. Synthesis and playback have separate interfaces; Windows local speech remains the built-in provider. See the [speech integration guide](docs/RACE_ENGINEER_SPEECH.md).
+Speech defaults to an installed Windows SAPI voice for the selected language, without a network service. Original radio connect/disconnect cues combine short pulses, subtle frequency sweeps and brief squelch tails. The radio opens only once speech is ready; muting or interrupting stops the transmission. Missing voices or audio failures disable speech without affecting the race. After installing a compatible voice, disable and enable the engineer to retry. Synthesis and playback have separate interfaces; Windows speech remains the default; ElevenLabs is an optional provider. See the [speech integration guide](docs/RACE_ENGINEER_SPEECH.md).
 
 Speech starts 180 ms after the connect cue; the disconnect cue follows speech after 220 ms. Expand “Custom connect/disconnect sounds” to import WAV, MP3, M4A or FLAC clips (up to 5 seconds and 10 MB each, subject to installed Windows codecs), or reset either cue. An audio copy is saved independently of the source file. “Preview” plays a random race sample with the current volume and cues, even offline with automatic speech disabled. Mute and zero volume block previews; live race messages take priority. Click again to stop.
 
 Current source supports independent connect/disconnect switches. Disabling a cue skips its adjacent pause and keeps the imported clip. “Windows voice” lists installed Chinese/English SAPI voices; the default follows the interface language, while an English voice uses English race messages. Switching stops the old output and clears pending speech. Voice and cue settings survive restarts; unavailable saved voices fall back to the default with a notice. Preview uses the current selection.
+
+Open “Speech service…” next to the engineer to configure an ElevenLabs API key, voice, model and language, or choose a Windows voice. Flash v2.5 is the default online model; Multilingual v2 and Eleven v3 are also available. The key is encrypted for the current Windows user. Online synthesis sends speech text and uses account credits; optional Windows fallback keeps speech available during service failures. Preview uses the selected service.
 
 ### Quick start
 

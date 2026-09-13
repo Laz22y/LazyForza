@@ -2,11 +2,27 @@
 
 ## 当前装配
 
-工程师默认关闭。App 的 `LocalRaceSpeech` 将 `WindowsSapiSpeechProvider` 和 `WindowsPcmAudioPlayer` 装配到 `RadioSpeechOutput`，继续使用已安装的中文／英文 Windows SAPI 语音；没有在线服务、模型下载或联网回退。原有 AppSettings 开关、静音与音量无需迁移。
+工程师默认关闭，默认来源为无需联网的 Windows SAPI。地产赛事页的「语音服务…」打开独立浮窗，可选择 Windows 本地音色或 ElevenLabs；主页面保留当前服务摘要、音量、试听和立即静音。原有 AppSettings 开关、静音与音量无需迁移。
+
+## ElevenLabs
+
+在「语音服务…」选择 ElevenLabs，填写自己的 API Key 和 Voice ID，也可点击「获取音色」读取账户音色列表。模型可选 Flash v2.5（默认）、Multilingual v2 和 Eleven v3；播报语言可跟随界面或固定中文／英文。保存后使用工程师旁的「试听」，它和比赛播报走同一合成、缓存、音量与无线电提示音流程。取消浮窗不应用草稿；切换服务会取消旧输出和待播队列。
+
+仅在用户选择并保存 ElevenLabs 后，播报／试听才发送文本到官方 `api.elevenlabs.io`。不上传原始遥测、录音或自定义提示音。合成会消耗 ElevenLabs 账户额度；读取音色也需要相应 API 权限。密钥通过 `xi-api-key` 请求头发送，不放在 URL、播报文本或错误详情中，不内置共享密钥。HTTP 重定向被禁用。
+
+密钥使用 Windows DPAPI 当前用户保护后，与服务、模型、语言及音色选择一起写入单个 `raceEngineer.speechService.v1` AppSettings 值。备份只包含密文；换电脑／Windows 用户后通常需要重新填写密钥。旧应用忽略新设置，继续使用自己的 Windows 配置；新应用在没有新设置时读取原 `raceEngineer.voiceId`。没有数据库或地产协议变更。
+
+可启用「服务不可用时使用 Windows 本地语音」（默认勾选）。在线合成限时 6 秒；认证、额度限制、网络及无效响应失败后可用同语言的 Windows 默认音色播报，并在主页面提示。普通失败暂停在线尝试至少 60 秒，认证／配置失败至少 5 分钟；遇到 `Retry-After` 延长等待，最多 1 小时。不会自动重试同一次付费 POST；冷却后由下一次播报尝试在线服务。回退声音不进入在线声音缓存。关闭回退时，故障只停用语音输出；重新保存服务设置或关闭再启用工程师可重试。主动静音、赛事切换和退出只取消请求，不触发回退。
+
+适配器调用 `POST /v1/text-to-speech/{voice_id}?output_format=pcm_24000`，使用 24 kHz、单声道 PCM16，读取过程中限制为 30 秒音频。模型和声音随输出实例固定；原有 32 条／4 MiB 内存缓存继续生效，不持久保存合成音频。`GET /v2/voices` 使用 `has_more` 和 `next_page_token` 分页，每页最多读取 1 MiB，最多 20 页；浮窗关闭会取消读取。
+
+实现参考：[语音合成](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)、[账户音色](https://elevenlabs.io/docs/api-reference/voices/search)、[API 认证](https://elevenlabs.io/docs/api-reference/authentication)、[模型](https://elevenlabs.io/docs/overview/models)。
+
+## 本地音色与原有设置
 
 音色、音量、接通音／断开音的独立开关和自定义音频都自动保存到当前数据目录，重启后继续沿用已保存的设置。恢复默认提示音只在用户主动点击对应按钮时执行；关闭提示音开关不会删除已导入的音频。
 
-「Windows 音色」异步枚举本机 SAPI 可用的中英文音色，并以声音 ID 保存到 `raceEngineer.voiceId`。默认项跟随界面语言；显式选择英文音色时，赛事播报和试听均使用英文。切换先取消并释放旧输出及待播队列，再建立新输出，避免音色缓存或播放重叠。保存的音色不存在时提示并回退默认；枚举失败不影响比赛。系统设置中可见的语音不一定全部向 SAPI 开放，列表以实际枚举为准。
+「Windows 音色」异步枚举本机 SAPI 可用的中英文音色，并以声音 ID 保存到语音服务设置（兼容旧 `raceEngineer.voiceId`）。默认项跟随界面语言；显式选择英文音色时，赛事播报和试听均使用英文。切换先取消并释放旧输出及待播队列，再建立新输出，避免音色缓存或播放重叠。保存的音色不存在时提示并回退默认；枚举失败不影响比赛。系统设置中可见的语音不一定全部向 SAPI 开放，列表以实际枚举为准。
 
 `RaceEngineerObserver` 只读取已有旗语、处罚、个人最快圈和进站预测。预测措辞继续保留不确定性。`RaceEngineer` 负责优先级、事件去重、分类冷却、过期、16 条队列及赛事阶段隔离，不识别服务商。输出故障会停用本次启用周期的播报；比赛逻辑继续运行，关闭再启用工程师可重试。
 

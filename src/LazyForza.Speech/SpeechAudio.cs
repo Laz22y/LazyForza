@@ -9,10 +9,11 @@ public sealed class SpeechAudio
     private readonly byte[] samples;
     public int SampleRate { get; }
     public int Channels { get; }
+    public bool Cacheable { get; }
     public ReadOnlyMemory<byte> Samples => samples;
     public TimeSpan Duration => TimeSpan.FromSeconds((double)samples.Length / (SampleRate * Channels * 2));
 
-    public SpeechAudio(ReadOnlySpan<byte> pcm16, int sampleRate, int channels = 1)
+    public SpeechAudio(ReadOnlySpan<byte> pcm16, int sampleRate, int channels = 1, bool cacheable = true)
     {
         if (sampleRate is < 8000 or > 48000) throw new ArgumentOutOfRangeException(nameof(sampleRate));
         if (channels is < 1 or > 2) throw new ArgumentOutOfRangeException(nameof(channels));
@@ -21,6 +22,7 @@ public sealed class SpeechAudio
             throw new ArgumentException("Speech PCM is empty, misaligned or longer than 30 seconds.", nameof(pcm16));
         SampleRate = sampleRate;
         Channels = channels;
+        Cacheable = cacheable;
         samples = pcm16.ToArray();
     }
 

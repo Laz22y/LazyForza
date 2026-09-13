@@ -2,7 +2,7 @@ using LazyForza.Speech;
 
 namespace LazyForza.App;
 
-/// <summary>The default composition remains local; future providers share the radio/player pipeline.</summary>
+/// <summary>Windows default composition; online speech shares the same radio/player pipeline.</summary>
 internal sealed class LocalRaceSpeech(bool english, Func<RadioTransmission>? transmissionSettings = null,
     WindowsSpeechVoice? voice = null) : ISpeechOutput
 {

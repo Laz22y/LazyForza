@@ -84,7 +84,7 @@ public sealed class RadioSpeechOutput : ISpeechOutput
                         cacheBytes -= cache[oldest].Samples.Length;
                         cache.Remove(oldest);
                     }
-                    if (audio.Samples.Length <= MaximumCacheBytes)
+                    if (audio.Cacheable && audio.Samples.Length <= MaximumCacheBytes)
                     {
                         cache.Add(text, audio);
                         cacheOrder.Enqueue(text);

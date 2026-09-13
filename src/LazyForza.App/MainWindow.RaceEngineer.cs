@@ -25,16 +25,22 @@ internal sealed partial class MainWindow
     private bool engineerConnectEnabled = true, engineerDisconnectEnabled = true;
     private IReadOnlyList<WindowsSpeechVoice> engineerVoices = [];
     private WindowsSpeechVoice? engineerVoice;
-    private ComboBox? engineerVoiceSelector;
+    private EngineerSpeechSettings engineerSpeechSettings = new();
+    private FallbackSpeechProvider? engineerFallback;
+    private TextBlock? engineerServiceSummary;
+    private Button? engineerServiceButton;
     private bool engineerVoiceChanging;
     private bool engineerVoicesLoaded;
-    private bool EngineerSpeechEnglish => engineerVoice?.Language.StartsWith("en", StringComparison.OrdinalIgnoreCase) ?? EngineerEnglish;
+    private bool EngineerSpeechEnglish => engineerSpeechSettings.UseElevenLabs
+        ? engineerSpeechSettings.Language == "en-US" || engineerSpeechSettings.Language != "zh-CN" && EngineerEnglish
+        : engineerVoice?.Language.StartsWith("en", StringComparison.OrdinalIgnoreCase) ?? EngineerEnglish;
 
     private bool EngineerEnglish => AppLocalization.CurrentLanguage.StartsWith("en", StringComparison.OrdinalIgnoreCase);
     private string EngineerText(string chinese, string english) => EngineerEnglish ? english : chinese;
 
     private void InitializeRaceEngineer()
     {
+        engineerSpeechSettings = EngineerSpeechSettings.Load(store.GetAppSetting(EngineerSpeechSettings.StoreKey));
         engineerEnabled = bool.TryParse(store.GetAppSetting("raceEngineer.enabled"), out var enabled) && enabled;
         if (int.TryParse(store.GetAppSetting("raceEngineer.volume"), out var volume)) engineerVolume = Math.Clamp(volume, 0, 100);
         // Persist immediate mute across restarts; enabling speech remains an explicit local choice.
@@ -44,8 +50,8 @@ internal sealed partial class MainWindow
         engineerConnectEnabled = !bool.TryParse(store.GetAppSetting("raceEngineer.connectEnabled"), out var connect) || connect;
         engineerDisconnectEnabled = !bool.TryParse(store.GetAppSetting("raceEngineer.disconnectEnabled"), out var disconnect) || disconnect;
         ApplyEngineerCues();
-        raceEngineer = new RaceEngineer(new LocalRaceSpeech(EngineerEnglish, () => Volatile.Read(ref engineerTransmission)));
-        engineerObserver = new RaceEngineerObserver(raceEngineer, EngineerEnglish);
+        raceEngineer = new RaceEngineer(CreateEngineerSpeech());
+        engineerObserver = new RaceEngineerObserver(raceEngineer, EngineerSpeechEnglish);
         raceEngineer.Configure(engineerEnabled, engineerMuted, engineerVolume);
         _ = LoadEngineerVoicesAsync();
     }
@@ -57,7 +63,7 @@ internal sealed partial class MainWindow
         {
             engineerVoices = await WindowsSpeechVoices.LoadAsync();
             if (token.IsCancellationRequested) return;
-            var saved = store.GetAppSetting("raceEngineer.voiceId");
+            var saved = engineerSpeechSettings.WindowsVoiceId ?? store.GetAppSetting("raceEngineer.voiceId");
             var selected = engineerVoices.FirstOrDefault(voice => voice.Id == saved);
             if (!string.IsNullOrEmpty(saved) && selected is null)
                 engineerCueNotice = EngineerText("保存的音色已不可用，已改用默认音色。", "Saved voice is unavailable; using the default.");
@@ -69,7 +75,6 @@ internal sealed partial class MainWindow
         }
         if (token.IsCancellationRequested) return;
         engineerVoicesLoaded = true;
-        RefreshEngineerVoiceSelector();
         UpdateRaceEngineer();
     }
 
@@ -78,19 +83,16 @@ internal sealed partial class MainWindow
         var token = lifetimeCancellation.Token;
         if (engineerVoiceChanging) return;
         engineerVoiceChanging = true;
-        if (engineerVoiceSelector is not null) engineerVoiceSelector.IsEnabled = false;
         UpdateRaceEngineer();
         try
         {
-            if (save) store.SetAppSetting("raceEngineer.voiceId", voice?.Id ?? "");
             var old = raceEngineer;
             engineerObserver = null;
             old?.Dispose();
             if (old is not null) await old.Completion;
             if (token.IsCancellationRequested) return;
             engineerVoice = voice;
-            raceEngineer = new RaceEngineer(new LocalRaceSpeech(EngineerSpeechEnglish,
-                () => Volatile.Read(ref engineerTransmission), voice));
+            raceEngineer = new RaceEngineer(CreateEngineerSpeech());
             engineerObserver = new RaceEngineerObserver(raceEngineer, EngineerSpeechEnglish);
             raceEngineer.Configure(engineerEnabled, engineerMuted, engineerVolume);
             if (save) engineerCueNotice = null;
@@ -102,26 +104,36 @@ internal sealed partial class MainWindow
         finally
         {
             engineerVoiceChanging = false;
-            if (!token.IsCancellationRequested) { RefreshEngineerVoiceSelector(); UpdateRaceEngineer(); }
+            if (!token.IsCancellationRequested) UpdateRaceEngineer();
         }
     }
 
-    private void RefreshEngineerVoiceSelector()
+    private ISpeechOutput CreateEngineerSpeech()
     {
-        if (engineerVoiceSelector is null) return;
-        engineerVoiceSelector.SelectionChanged -= EngineerVoiceSelectionChanged;
-        engineerVoiceSelector.Items.Clear();
-        engineerVoiceSelector.Items.Add(EngineerText("默认音色（跟随界面语言）", "Default voice (interface language)"));
-        foreach (var voice in engineerVoices) engineerVoiceSelector.Items.Add(voice);
-        engineerVoiceSelector.SelectedItem = (object?)engineerVoice ?? engineerVoiceSelector.Items[0];
-        engineerVoiceSelector.IsEnabled = engineerVoicesLoaded && !engineerVoiceChanging;
-        engineerVoiceSelector.SelectionChanged += EngineerVoiceSelectionChanged;
+        engineerFallback = null;
+        if (!engineerSpeechSettings.UseElevenLabs)
+            return new LocalRaceSpeech(EngineerSpeechEnglish, () => Volatile.Read(ref engineerTransmission), engineerVoice);
+        if (!EngineerCredentialProtection.TryUnprotect(engineerSpeechSettings.ProtectedApiKey, out var apiKey))
+            engineerCueNotice = EngineerText("ElevenLabs 密钥无法解密，请在语音服务中重新填写。", "Re-enter your ElevenLabs key in Speech service; the saved key cannot be decrypted.");
+        ISpeechSynthesisProvider provider = new ElevenLabsSpeechProvider(apiKey, engineerSpeechSettings.ModelId);
+        if (engineerSpeechSettings.FallbackToWindows)
+            provider = engineerFallback = new FallbackSpeechProvider(provider, new WindowsSapiSpeechProvider());
+        return new RadioSpeechOutput(provider, new WindowsPcmAudioPlayer(),
+            EngineerSpeechEnglish ? "en-US" : "zh-CN", engineerSpeechSettings.VoiceId,
+            transmissionSettings: () => Volatile.Read(ref engineerTransmission));
     }
 
-    private async void EngineerVoiceSelectionChanged(object sender, SelectionChangedEventArgs args)
+    private void OpenEngineerSpeechSettings()
     {
-        if (engineerVoiceChanging || !engineerVoicesLoaded) return;
-        await ChangeEngineerVoiceAsync(((ComboBox)sender).SelectedItem as WindowsSpeechVoice);
+        if (engineerVoiceChanging) return;
+        var dialog = new EngineerSpeechSettingsWindow(engineerSpeechSettings, engineerVoices, engineerVoice, EngineerEnglish,
+            async (settings, voice) =>
+            {
+                store.SetAppSetting(EngineerSpeechSettings.StoreKey, settings.Serialize());
+                engineerSpeechSettings = settings;
+                await ChangeEngineerVoiceAsync(voice);
+            }) { Owner = this };
+        dialog.ShowDialog();
     }
 
     private void UpdateRaceEngineer()
@@ -129,10 +141,17 @@ internal sealed partial class MainWindow
         if (engineerVoicesLoaded && !engineerVoiceChanging &&
             moduleManager.Modules.OfType<EstateRaceModule>().FirstOrDefault() is { } module)
             engineerObserver?.Observe(module.State);
+        if (engineerServiceSummary is not null)
+            engineerServiceSummary.Text = engineerSpeechSettings.UseElevenLabs ? "ElevenLabs · " + (engineerSpeechSettings.ModelId switch
+                { "eleven_multilingual_v2" => "Multilingual v2", "eleven_v3" => "Eleven v3", _ => "Flash v2.5" })
+                : EngineerText("Windows 本地语音", "Windows local speech") + " · " + (engineerVoice?.Name ?? EngineerText("默认音色", "Default voice"));
+        if (engineerServiceButton is not null) engineerServiceButton.IsEnabled = engineerVoicesLoaded && !engineerVoiceChanging;
         if (engineerStatus is not null)
             engineerStatus.Text = raceEngineer?.Error is not null
-                ? EngineerText("本地语音不可用。请检查 Windows 语音与音频设备，再关闭并重新启用。", "Local speech unavailable. Check Windows voices and audio devices, then disable and enable again.")
-                : engineerCueNotice ?? EngineerText("仅播报重要变化；进站建议为预测。语音和提示音均在本机播放。", "Important changes only. Pit advice is a prediction. All audio plays locally.");
+                ? EngineerText("语音不可用。请检查语音服务和音频设备，再关闭并重新启用。", "Speech unavailable. Check Speech service and audio devices, then disable and enable again.")
+                : engineerFallback?.LastFailure is { } failure
+                    ? EngineerSpeechSettingsWindow.FailureText(failure, EngineerEnglish) + EngineerText(" 已暂时使用 Windows 本地语音。", " Temporarily using Windows speech.")
+                    : engineerCueNotice ?? EngineerText("仅播报重要变化；进站建议为预测。", "Important changes only; pit advice remains a prediction.");
         if (engineerPreviewButton is not null)
         {
             engineerPreviewButton.Content = raceEngineer?.IsPreviewing == true
@@ -183,7 +202,7 @@ internal sealed partial class MainWindow
     private UIElement BuildRaceEngineerControls()
     {
         var panel = new StackPanel();
-        panel.Children.Add(Label(EngineerText("本地语音比赛工程师", "Local race engineer"), 17, FontWeights.SemiBold));
+        panel.Children.Add(Label(EngineerText("语音比赛工程师", "Race engineer"), 17, FontWeights.SemiBold));
         var controls = new WrapPanel { Margin = new Thickness(0, 8, 0, 8) };
         var enabled = new CheckBox { Content = EngineerText("启用语音", "Enable speech"), IsChecked = engineerEnabled, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 18, 0) };
         var mute = new Button { Content = EngineerText(engineerMuted ? "恢复声音" : "立即静音", engineerMuted ? "Unmute" : "Mute now"), Padding = new Thickness(12, 5, 12, 5) };
@@ -220,19 +239,20 @@ internal sealed partial class MainWindow
         volume.ValueChanged += (_, _) => { engineerVolume = (int)volume.Value; value.Text = $"{engineerVolume}%"; Apply(); };
         panel.Children.Add(controls);
         var voiceRow = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
-        var voiceLabel = Label(EngineerText("Windows 音色", "Windows voice"), 12);
-        voiceLabel.VerticalAlignment = VerticalAlignment.Center;
-        voiceLabel.Margin = new Thickness(0, 0, 12, 0);
-        voiceRow.Children.Add(voiceLabel);
-        engineerVoiceSelector = new ComboBox
+        engineerServiceButton = new Button
         {
-            MinWidth = 240,
-            ToolTip = EngineerText("仅显示 Windows SAPI 可用的中英文音色。选择英文音色时使用英文播报。", "Installed Chinese/English SAPI voices. English voices use English race messages.")
+            Content = EngineerText("语音服务…", "Speech service…"), Padding = new Thickness(12, 5, 12, 5),
+            Margin = new Thickness(12, 0, 0, 0)
         };
-        RefreshEngineerVoiceSelector();
-        voiceRow.Children.Add(engineerVoiceSelector);
+        engineerServiceButton.Click += (_, _) => OpenEngineerSpeechSettings();
+        DockPanel.SetDock(engineerServiceButton, Dock.Right);
+        voiceRow.Children.Add(engineerServiceButton);
+        engineerServiceSummary = Label("", 12, FontWeights.Normal, "MutedBrush");
+        engineerServiceSummary.VerticalAlignment = VerticalAlignment.Center;
+        engineerServiceSummary.TextTrimming = TextTrimming.CharacterEllipsis;
+        voiceRow.Children.Add(engineerServiceSummary);
         panel.Children.Add(voiceRow);
-        engineerPreviewText = Label(EngineerText("试听随机示例，无需连接赛事；使用当前音量和提示音。", "Preview a random sample offline with your current volume and radio cues."), 12, FontWeights.Normal, "MutedBrush");
+        engineerPreviewText = Label(EngineerText("试听随机示例，无需连接赛事；使用当前语音服务、音量和提示音。", "Preview a random sample with the selected service, volume and cues. No race connection required."), 12, FontWeights.Normal, "MutedBrush");
         engineerPreviewText.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(engineerPreviewText);
         var cueSettings = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
