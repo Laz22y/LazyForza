@@ -114,16 +114,13 @@ internal sealed partial class MainWindow
         engineerFallback = null;
         if (!engineerSpeechSettings.IsOnline)
             return new LocalRaceSpeech(EngineerSpeechEnglish, () => Volatile.Read(ref engineerTransmission), engineerVoice);
-        var azure = engineerSpeechSettings.ActiveProvider == EngineerSpeechSettings.Azure;
-        if (!EngineerCredentialProtection.TryUnprotect(azure ? engineerSpeechSettings.AzureProtectedApiKey : engineerSpeechSettings.ProtectedApiKey, out var apiKey))
+        var (provider, readable) = EngineerSpeechProviderFactory.CreateOnline(engineerSpeechSettings);
+        if (!readable)
             engineerCueNotice = EngineerText("保存的服务密钥无法解密，请在语音服务中重新填写。", "The saved service key cannot be decrypted. Re-enter it in Speech service.");
-        ISpeechSynthesisProvider provider = azure
-            ? new AzureSpeechProvider(apiKey, engineerSpeechSettings.AzureRegion)
-            : new ElevenLabsSpeechProvider(apiKey, engineerSpeechSettings.ModelId);
         if (engineerSpeechSettings.FallbackToWindows)
             provider = engineerFallback = new FallbackSpeechProvider(provider, new WindowsSapiSpeechProvider());
         return new RadioSpeechOutput(provider, new WindowsPcmAudioPlayer(),
-            EngineerSpeechEnglish ? "en-US" : "zh-CN", azure ? engineerSpeechSettings.AzureVoiceId : engineerSpeechSettings.VoiceId,
+            EngineerSpeechEnglish ? "en-US" : "zh-CN", engineerSpeechSettings.ActiveVoiceId,
             transmissionSettings: () => Volatile.Read(ref engineerTransmission));
     }
 
@@ -150,6 +147,7 @@ internal sealed partial class MainWindow
                 ? "Azure Speech · " + engineerSpeechSettings.AzureVoiceId
                 : engineerSpeechSettings.ActiveProvider == EngineerSpeechSettings.ElevenLabs ? "ElevenLabs · " + (engineerSpeechSettings.ModelId switch
                 { "eleven_multilingual_v2" => "Multilingual v2", "eleven_v3" => "Eleven v3", _ => "Flash v2.5" })
+                : engineerSpeechSettings.IsOnline ? engineerSpeechSettings.ServiceName + " · " + engineerSpeechSettings.ActiveVoiceId
                 : EngineerText("Windows 本地语音", "Windows local speech") + " · " + (engineerVoice?.Name ?? EngineerText("默认音色", "Default voice"));
         if (engineerServiceButton is not null) engineerServiceButton.IsEnabled = engineerVoicesLoaded && !engineerVoiceChanging;
         if (engineerStatus is not null)

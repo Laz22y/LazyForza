@@ -6,7 +6,7 @@ using LazyForza.Speech;
 namespace LazyForza.App;
 
 /// <summary>Owned settings window; draft changes and API requests end when the window closes.</summary>
-internal sealed class EngineerSpeechSettingsWindow : Window
+internal sealed partial class EngineerSpeechSettingsWindow : Window
 {
     private readonly bool english;
     private readonly CancellationTokenSource lifetime = new();
@@ -55,8 +55,11 @@ internal sealed class EngineerSpeechSettingsWindow : Window
         service.Items.Add(T("Windows 本地语音", "Windows local speech"));
         service.Items.Add("ElevenLabs");
         service.Items.Add("Azure Speech");
-        service.SelectedIndex = settings.ActiveProvider == EngineerSpeechSettings.Azure ? 2
-            : settings.ActiveProvider == EngineerSpeechSettings.ElevenLabs ? 1 : 0;
+        service.Items.Add(T("腾讯云", "Tencent Cloud"));
+        service.Items.Add(T("阿里云 · 智能语音交互", "Alibaba Cloud · NLS"));
+        service.Items.Add(T("千问 AI 平台", "Qianwen AI"));
+        service.Items.Add("MiniMax");
+        service.SelectedIndex = Array.IndexOf(ServiceIds, settings.ActiveProvider);
         body.Children.Add(Field(T("语音来源", "Provider"), service));
         windowsVoice.Items.Add(T("默认音色（跟随界面语言）", "Default voice (interface language)"));
         foreach (var voice in installed) windowsVoice.Items.Add(voice);
@@ -129,6 +132,7 @@ internal sealed class EngineerSpeechSettingsWindow : Window
         azureLanguage.SelectedIndex = settings.AzureLanguage == "en-US" ? 2 : settings.AzureLanguage == "zh-CN" ? 1 : 0;
         azurePanel.Children.Add(Field(T("播报语言", "Language"), azureLanguage));
         onlinePanel.Children.Add(azurePanel);
+        BuildCloudPanels(settings);
         fallback.Content = new TextBlock { Text = T("服务不可用时使用 Windows 本地语音", "Use Windows speech when the service is unavailable"), TextWrapping = TextWrapping.Wrap };
         fallback.IsChecked = settings.FallbackToWindows; fallback.Margin = new Thickness(0, 0, 0, 10);
         onlinePanel.Children.Add(fallback);
@@ -138,7 +142,7 @@ internal sealed class EngineerSpeechSettingsWindow : Window
         Grid.SetRow(scroll, 1); root.Children.Add(scroll);
         var footer = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
         status.Foreground = Brush("MutedBrush"); status.FontSize = 12; status.TextWrapping = TextWrapping.Wrap;
-        status.Text = (service.SelectedIndex == 2 ? azureReadable : readable) ? T("保存后，使用工程师旁的「试听」检查实际效果。", "Save, then use the engineer's Preview button to hear the result.")
+        status.Text = (cloudDrafts.TryGetValue(service.SelectedIndex, out var activeDraft) ? activeDraft.Readable : service.SelectedIndex == 2 ? azureReadable : readable) ? T("保存后，使用工程师旁的「试听」检查实际效果。", "Save, then use the engineer's Preview button to hear the result.")
             : T("保存的密钥无法解密，请重新填写。", "The saved key cannot be decrypted. Please enter it again.");
         footer.Children.Add(status);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
@@ -150,7 +154,11 @@ internal sealed class EngineerSpeechSettingsWindow : Window
         Content = root;
         service.SelectionChanged += (_, _) => UpdateVisibility();
         UpdateVisibility();
-        Closed += (_, _) => { lifetime.Cancel(); key.Clear(); azureKey.Clear(); };
+        Closed += (_, _) =>
+        {
+            lifetime.Cancel(); key.Clear(); azureKey.Clear();
+            foreach (var draft in cloudDrafts.Values) foreach (var secretField in draft.Secrets.Values) secretField.Input.Clear();
+        };
     }
 
     private void UpdateVisibility()
@@ -158,8 +166,9 @@ internal sealed class EngineerSpeechSettingsWindow : Window
         onlinePanel.Visibility = service.SelectedIndex != 0 ? Visibility.Visible : Visibility.Collapsed;
         elevenPanel.Visibility = service.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
         azurePanel.Visibility = service.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var (index, draft) in cloudDrafts) draft.Panel.Visibility = service.SelectedIndex == index ? Visibility.Visible : Visibility.Collapsed;
         localPanel.Visibility = service.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
-        var providerName = service.SelectedIndex == 2 ? "Azure Speech" : "ElevenLabs";
+        var providerName = service.SelectedItem?.ToString() ?? "";
         serviceNotice.Text = T($"播报文本将发送至 {providerName}；合成与试听会消耗账户额度。", $"Speech text is sent to {providerName}. Synthesis and previews use account credits.");
         Height = Math.Min(service.SelectedIndex != 0 ? 740 : 460, MaxHeight);
     }
@@ -208,6 +217,12 @@ internal sealed class EngineerSpeechSettingsWindow : Window
         if (azure && (string.IsNullOrWhiteSpace(azureKey.Password) || !AzureSpeechProvider.IsValidVoiceId(azureVoiceId.Text.Trim()) ||
             !AzureSpeechProvider.IsValidRegion(azureRegion.Text.Trim().ToLowerInvariant())))
         { status.Text = T("请填写资源密钥、全球资源区域和有效的音色 ID。", "Enter a resource key, a global resource region and a valid Voice ID."); return; }
+        if (cloudDrafts.TryGetValue(service.SelectedIndex, out var draft) && !ValidCloudDraft(draft))
+        {
+            status.Text = T("请填写该服务的凭据和有效的音色 ID。", "Enter this provider's credentials and a valid Voice ID.") +
+                (draft.Id == EngineerSpeechSettings.Qwen ? T(" 千问 TTS 不能使用 Token Plan 密钥。", " Token Plan keys cannot be used for Qianwen TTS.") : "");
+            return;
+        }
         SetBusy(true);
         try
         {
@@ -217,10 +232,11 @@ internal sealed class EngineerSpeechSettingsWindow : Window
                 voiceId.Text.Trim(), ((ModelChoice)model.SelectedItem).Id,
                 language.SelectedIndex == 2 ? "en-US" : language.SelectedIndex == 1 ? "zh-CN" : "auto", fallback.IsChecked == true,
                 (windowsVoice.SelectedItem as WindowsSpeechVoice)?.Id ?? "",
-                azure ? EngineerSpeechSettings.Azure : eleven ? EngineerSpeechSettings.ElevenLabs : EngineerSpeechSettings.Windows,
+                ServiceIds[service.SelectedIndex],
                 azureKey.Password == originalAzureKey ? original.AzureProtectedApiKey : EngineerCredentialProtection.Protect(azureKey.Password.Trim()),
                 azureRegion.Text.Trim().ToLowerInvariant(), azureVoiceId.Text.Trim(),
                 azureLanguage.SelectedIndex == 2 ? "en-US" : azureLanguage.SelectedIndex == 1 ? "zh-CN" : "auto");
+            settings = WithCloudSettings(settings);
             await apply(settings, windowsVoice.SelectedItem as WindowsSpeechVoice);
             if (!lifetime.IsCancellationRequested) DialogResult = true;
         }

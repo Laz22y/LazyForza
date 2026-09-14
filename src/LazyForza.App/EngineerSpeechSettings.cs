@@ -19,21 +19,39 @@ internal sealed record EngineerSpeechSettings(
     string AzureProtectedApiKey = "",
     string AzureRegion = "eastasia",
     string AzureVoiceId = "",
-    string AzureLanguage = "auto")
+    string AzureLanguage = "auto",
+    TencentEngineerSpeechSettings? TencentSettings = null,
+    AlibabaEngineerSpeechSettings? AlibabaSettings = null,
+    QwenEngineerSpeechSettings? QwenSettings = null,
+    MiniMaxEngineerSpeechSettings? MiniMaxSettings = null)
 {
-    public const string Windows = "windows", ElevenLabs = "elevenlabs", Azure = "azure";
+    public const string Windows = "windows", ElevenLabs = "elevenlabs", Azure = "azure",
+        Tencent = "tencent", Alibaba = "alibaba", Qwen = "qwen", MiniMax = "minimax";
     public const string StoreKey = "raceEngineer.speechService.v1";
     [JsonIgnore]
     public string ActiveProvider => ProviderId is null ? (UseElevenLabs ? ElevenLabs : Windows)
-        : ProviderId is ElevenLabs or Azure ? ProviderId : Windows;
+        : ProviderId is ElevenLabs or Azure or Tencent or Alibaba or Qwen or MiniMax ? ProviderId : Windows;
     [JsonIgnore]
     public bool IsOnline => ActiveProvider != Windows;
     [JsonIgnore]
-    public string ServiceName => ActiveProvider == Azure ? "Azure Speech" : ActiveProvider == ElevenLabs ? "ElevenLabs" : "Windows";
+    public string ServiceName => ActiveProvider switch
+    {
+        Azure => "Azure Speech", ElevenLabs => "ElevenLabs", Tencent => "Tencent Cloud",
+        Alibaba => "Alibaba Cloud NLS", Qwen => "Qianwen AI", MiniMax => "MiniMax", _ => "Windows"
+    };
     [JsonIgnore]
-    public string SpeechLanguage => (ActiveProvider == Azure
-        ? AzureLanguage == "auto" ? AzureSpeechProvider.VoiceLocale(AzureVoiceId) ?? "auto" : AzureLanguage
-        : Language) ?? "auto";
+    public string SpeechLanguage => (ActiveProvider switch
+    {
+        Azure => AzureLanguage == "auto" ? AzureSpeechProvider.VoiceLocale(AzureVoiceId) ?? "auto" : AzureLanguage,
+        Tencent => TencentSettings?.Language, Alibaba => AlibabaSettings?.Language,
+        Qwen => QwenSettings?.Language, MiniMax => MiniMaxSettings?.Language, _ => Language
+    }) ?? "auto";
+    [JsonIgnore]
+    public string ActiveVoiceId => ActiveProvider switch
+    {
+        Azure => AzureVoiceId, Tencent => (TencentSettings ?? new()).VoiceId, Alibaba => (AlibabaSettings ?? new()).VoiceId,
+        Qwen => (QwenSettings ?? new()).VoiceId, MiniMax => (MiniMaxSettings ?? new()).VoiceId, _ => VoiceId
+    };
     public static EngineerSpeechSettings Load(string? json)
     {
         try { return (string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<EngineerSpeechSettings>(json)) ?? new(); }
@@ -41,6 +59,55 @@ internal sealed record EngineerSpeechSettings(
     }
     public string Serialize() => JsonSerializer.Serialize(this);
     public override string ToString() => ServiceName;
+}
+
+internal sealed record TencentEngineerSpeechSettings(string ProtectedSecretId = "", string ProtectedSecretKey = "",
+    string VoiceId = TencentSpeechProvider.DefaultVoice, string Language = "auto")
+{ public override string ToString() => "Tencent Cloud"; }
+internal sealed record AlibabaEngineerSpeechSettings(string ProtectedAppKey = "", string ProtectedAccessKeyId = "",
+    string ProtectedAccessKeySecret = "", string VoiceId = "xiaoyun", string Language = "auto")
+{ public override string ToString() => "Alibaba Cloud NLS"; }
+internal sealed record QwenEngineerSpeechSettings(string ProtectedApiKey = "", string VoiceId = "Cherry",
+    string ModelId = QwenSpeechProvider.DefaultModel, string Language = "auto")
+{ public override string ToString() => "Qianwen AI"; }
+internal sealed record MiniMaxEngineerSpeechSettings(string ProtectedApiKey = "", string VoiceId = "male-qn-qingse",
+    string ModelId = MiniMaxSpeechProvider.DefaultModel, string Endpoint = "china", string Language = "auto")
+{ public override string ToString() => "MiniMax"; }
+
+internal static class EngineerSpeechProviderFactory
+{
+    public static (ISpeechSynthesisProvider Provider, bool CredentialsReadable) CreateOnline(EngineerSpeechSettings settings)
+    {
+        var readable = true;
+        string Secret(string cipher)
+        {
+            var success = EngineerCredentialProtection.TryUnprotect(cipher, out var value);
+            readable &= success;
+            return value;
+        }
+        ISpeechSynthesisProvider provider;
+        switch (settings.ActiveProvider)
+        {
+            case EngineerSpeechSettings.ElevenLabs:
+                provider = new ElevenLabsSpeechProvider(Secret(settings.ProtectedApiKey), settings.ModelId); break;
+            case EngineerSpeechSettings.Azure:
+                provider = new AzureSpeechProvider(Secret(settings.AzureProtectedApiKey), settings.AzureRegion); break;
+            case EngineerSpeechSettings.Tencent:
+                var tencent = settings.TencentSettings ?? new();
+                provider = new TencentSpeechProvider(Secret(tencent.ProtectedSecretId), Secret(tencent.ProtectedSecretKey)); break;
+            case EngineerSpeechSettings.Alibaba:
+                var alibaba = settings.AlibabaSettings ?? new();
+                provider = new AlibabaSpeechProvider(Secret(alibaba.ProtectedAppKey), Secret(alibaba.ProtectedAccessKeyId), Secret(alibaba.ProtectedAccessKeySecret)); break;
+            case EngineerSpeechSettings.Qwen:
+                var qwen = settings.QwenSettings ?? new();
+                provider = new QwenSpeechProvider(Secret(qwen.ProtectedApiKey), qwen.ModelId); break;
+            case EngineerSpeechSettings.MiniMax:
+                var minimax = settings.MiniMaxSettings ?? new();
+                provider = new MiniMaxSpeechProvider(Secret(minimax.ProtectedApiKey), minimax.ModelId, minimax.Endpoint); break;
+            default: throw new InvalidOperationException("No online speech provider selected.");
+        }
+        return (provider, readable);
+    }
 }
 
 /// <summary>User-supplied credentials are protected with Windows DPAPI for this user, not stored as plaintext.</summary>

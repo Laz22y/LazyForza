@@ -2,7 +2,7 @@
 
 ## 当前装配
 
-工程师默认关闭，默认来源为无需联网的 Windows SAPI。地产赛事页的「语音服务…」打开独立浮窗，可选择 Windows 本地音色、ElevenLabs 或 Azure Speech；主页面保留当前服务摘要、音量、试听和立即静音。原有 AppSettings 开关、静音与音量无需迁移。
+工程师默认关闭，默认来源为无需联网的 Windows SAPI。地产赛事页的「语音服务…」打开独立浮窗，可选择 Windows 本地音色、ElevenLabs、Azure Speech、腾讯云、阿里云智能语音交互、千问 AI 平台或 MiniMax；主页面保留当前服务摘要、音量、试听和立即静音。原有 AppSettings 开关、静音与音量无需迁移。
 
 ## ElevenLabs
 
@@ -24,17 +24,53 @@
 
 实现参考：[Azure Text to speech REST API](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech)、[SSML 文档结构](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure)、[主权云与端点区别](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/sovereign-clouds)。
 
+## 腾讯云
+
+填写开通语音合成权限的 SecretId、SecretKey 和数字音色 ID。默认音色为智瑜 `101001`，浮窗提供智瑜、智云、智瑞和英文 WeJack 预设，也可通过官方音色列表查找其他音色。当前接入基础语音合成 `TextToVoice`（API `2019-08-23`），向 `https://tts.tencentcloudapi.com/` 发送 TC3-HMAC-SHA256 签名请求，使用 16 kHz 单声道 PCM。SecretKey 不发送给服务端；签名覆盖实际 UTF-8 请求体。响应必须匹配本次 SessionId。
+
+这是短句播报接口：中文／混合文本保守限制为 150 字符，纯 ASCII 文本为 500 字符；超长内容报配置错误，不截断。当前不配置 STS 临时凭据或需要 FastVoiceType 的一句话复刻音色，不创建或训练声音。
+
+参考：[基础语音合成](https://cloud.tencent.com/document/api/1073/37995)、[TC3 签名](https://cloud.tencent.com/document/api/213/30654)、[音色列表](https://cloud.tencent.com/document/product/1073/92668)。
+
+## 阿里云智能语音交互（NLS）
+
+这里接入的是上海地域的**智能语音交互**，使用项目 AppKey，以及拥有相关权限的 RAM AccessKey ID / AccessKey Secret。三项凭据分别加密保存。默认音色 `xiaoyun`，浮窗提供少量常用音色和官方目录入口。它与千问模型服务是不同产品，不能交换凭据或音色 ID。
+
+适配器通过 HTTPS POST 调用 `nls-meta.cn-shanghai.aliyuncs.com` 的 `CreateToken`，采用 POP HMAC-SHA1 签名；Token 只在内存缓存，按返回的 ExpireTime 在到期前一分钟更新，并发请求共用一次刷新。随后使用 `X-NLS-Token` 请求 `nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/tts`，输出 16 kHz PCM。令牌获取与合成共用一次 6 秒期限。Token 被拒绝时只标记缓存失效，不重试已经提交的合成。
+
+单句最多 300 字符，超过限制明确失败，不接受服务端静默截断。当前不配置其他地域、STS 或用户手填的短期 Token。
+
+参考：[NLS RESTful API](https://help.aliyun.com/zh/isi/developer-reference/restful-api-3)、[获取 Token](https://help.aliyun.com/zh/isi/getting-started/use-http-or-https-to-obtain-an-access-token)、[音色及错误码](https://help.aliyun.com/zh/isi/developer-reference/overview-of-speech-synthesis)。
+
+## 千问 AI 平台
+
+使用千问 AI 平台北京地域的按量 API Key，当前支持 `qwen3-tts-flash`（默认）和 `qwen3-tts-instruct-flash`。默认音色 `Cherry`；可从常用音色选择，也可填写该模型支持的音色名称。此入口不使用 NLS AppKey、AccessKey 或 NLS Token，也不接受 `sk-sp-` 开头的 Token Plan 密钥。北京端点与相应 API Key 配套使用；不是任意 OpenAI 兼容地址。
+
+按照千问平台文档，调用 `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`，以 Bearer 鉴权，并通过 `X-DashScope-SSE: enable` 接收 Base64 PCM 片段。完整结束后才交给现有无线电播放流程，采样率为 24 kHz；不会跟随响应中的音频 URL。缺少完成标志、数据中断或中途错误会丢弃整段音频，避免播放半句。
+
+当前不接入 CosyVoice、Qwen-Audio-TTS、Realtime、声音创建或指令控制参数；这些模型系列的调用形状不同，不能只替换模型名称。
+
+参考：[千问平台语音指南](https://platform.qianwenai.com/docs/developer-guides/speech/tts)、[Qwen-TTS API](https://platform.qianwenai.com/docs/api-reference/speech-synthesis/qwen-tts)、[Qwen-TTS 音色](https://platform.qianwenai.com/docs/developer-guides/speech/voice-list/qwen-tts)。
+
+## MiniMax
+
+选择密钥对应的中国站或国际站，填写 MiniMax API Key；通过「获取音色」读取系统、复刻及已生成的账户音色，也可填写 ID。带空格和括号的官方音色 ID 可正常使用。默认 `speech-2.8-turbo`，也提供 2.8 HD、2.6 Turbo / HD、02 Turbo / HD；模型和账户站点分别保存。这里直连 MiniMax，不经千问或阿里云模型转售接口。
+
+中国站为 `https://api.minimax.cn`，国际站为 `https://api.minimax.io`。`POST /v1/t2a_v2` 使用 Bearer 鉴权，非流式请求返回 hex 编码的 24 kHz 单声道 PCM；校验业务状态码、完整状态和音频元数据后解码。`POST /v1/get_voice` 只读取音色目录，不合成；关闭浮窗会取消读取。不调用声音创建或训练接口，复刻音色的授权及首次使用费用以平台规则为准。
+
+参考：[中国站同步合成](https://platform.minimax.cn/docs/api-reference/speech-t2a-http)、[国际站同步合成](https://platform.minimax.io/docs/api-reference/speech-t2a-http)、[音色查询](https://platform.minimax.cn/docs/api-reference/voice-management-get)、[业务错误码](https://platform.minimax.cn/docs/api-reference/errorcode)。
+
 ## 在线服务共同行为与兼容
 
-密钥使用 Windows DPAPI 当前用户保护后，与服务、模型、语言及音色选择一起写入单个 `raceEngineer.speechService.v1` AppSettings 值。两家在线服务分别保存密钥、音色和语言，切换服务不会覆盖另一家的配置。备份只包含密文；换电脑／Windows 用户后通常需要重新填写密钥。浮窗保持草稿，只有保存才更换输出；取消或关闭不应用修改。
+凭据使用 Windows DPAPI 当前用户保护后，与服务、模型、语言及音色选择一起写入单个 `raceEngineer.speechService.v1` AppSettings 值。六家在线服务分别保存配置，切换服务不会覆盖另一家的配置。备份只包含凭据密文；换电脑／Windows 用户后通常需要重新填写。浮窗保持草稿，只有保存才更换输出；取消或关闭不应用修改。
 
-新增可选 `ProviderId` 和 Azure 专用字段；缺少 `ProviderId` 时沿用旧 `UseElevenLabs`，未知来源回到 Windows。保存 Azure 时旧布尔值为 false，因此只支持 ElevenLabs 的旧应用会使用 Windows，不会将 Azure 密钥发给 ElevenLabs；旧应用重新保存设置可能丢弃不认识的 Azure 字段。更早的应用忽略整个服务设置；新应用仍兼容原 `raceEngineer.voiceId`。没有数据库或地产协议变更。
+保留旧 ElevenLabs / Azure 字段，新服务使用各自可选的嵌套设置。缺少 `ProviderId` 时沿用旧 `UseElevenLabs`，未知来源回到 Windows。选用其他服务时旧布尔值为 false，因此旧应用会安全回到 Windows，不会将别家的凭据发送到 ElevenLabs；旧应用重新保存可能丢弃不认识的新字段。更早的应用忽略整个服务设置；新应用仍兼容原 `raceEngineer.voiceId`。没有数据库结构或地产协议变更。
 
 可启用「服务不可用时使用 Windows 本地语音」（默认勾选）。在线合成限时 6 秒；认证、额度限制、网络及无效响应失败后可用同语言的 Windows 默认音色播报，并在主页面提示。普通失败暂停在线尝试至少 60 秒，认证／配置失败至少 5 分钟；遇到 `Retry-After` 延长等待，最多 1 小时。不会自动重试同一次付费 POST；冷却后由下一次播报尝试在线服务。回退声音不进入在线声音缓存。关闭回退时，故障只停用语音输出；重新保存服务设置或关闭再启用工程师可重试。主动静音、赛事切换和退出只取消请求，不触发回退。
 
-两个适配器共用有界 HTTP 传输，禁止重定向，错误仅暴露分类和重试时间，不显示服务端原文。音频为 24 kHz、单声道 PCM16，读取过程中限制为 30 秒，即使响应不带 `Content-Length` 也会检查大小。模型、区域和声音随输出实例固定；原有 32 条／4 MiB 内存缓存继续生效，不持久保存合成音频。
+适配器共用有界 HTTP 传输，禁止重定向，错误仅暴露分类和重试时间，不显示服务端原文。不上传原始遥测、录音或自定义提示音。最终音频为 16 或 24 kHz 单声道 PCM16，最多 30 秒；同时限制 HTTP 响应和解码后的大小，即使响应不带 `Content-Length` 也会检查。HTTP 200 中的业务错误和 JSON 不能作为 PCM 播放。模型、区域和声音随输出实例固定；原有 32 条／4 MiB 内存缓存继续生效，不持久保存合成音频。
 
-`AzureSpeechTests`、`ElevenLabsSpeechTests` 覆盖官方请求格式、SSML 转义、认证和错误脱敏、无付费重试、音色目录、区域边界、流式响应上限、取消／释放、回退冷却以及设置兼容。`EngineerSpeechSettingsWindowTests` 检查两家服务的中英文浮窗、窄宽度布局和草稿隔离。测试使用 HTTP 替身，不消耗账户额度；真实区域、密钥权限、音色可用性和听感仍需使用用户自己的资源试听确认。
+`AzureSpeechTests`、`ElevenLabsSpeechTests`、`CloudSpeechProviderTests` 覆盖官方请求格式、签名、Token 缓存和续期、认证与错误脱敏、无付费重试、音色目录、区域边界、流式响应及解码上限、取消／释放、回退冷却和设置兼容。`EngineerSpeechSettingsWindowTests` 检查六家服务的中英文浮窗、窄宽度布局、草稿隔离、持久化和不可解密凭据的保留。测试使用 HTTP 替身，不消耗账户额度；真实区域、密钥权限、音色可用性和听感仍需使用用户自己的资源试听确认。
 
 ## 本地音色与原有设置
 
