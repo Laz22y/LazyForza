@@ -11,8 +11,7 @@ internal sealed partial class HudSurface
     // refer only to the stable ID; visibility, geometry and animation stay shared.
     private static readonly ThemeRegistration[] RaceThemes =
     [
-        new(new(EstateRaceHudThemeIds.Classic, "经典", "保留现有赛事 HUD 样式"), new ClassicThemeRenderer()),
-        new(new(EstateRaceHudThemeIds.Broadcast, "转播", "高对比数字与紧凑的赛事转播排版"), new BroadcastThemeRenderer())
+        new(new(EstateRaceHudThemeIds.Classic, "经典", "保留现有赛事 HUD 样式"), new ClassicThemeRenderer())
     ];
 
     internal static readonly IReadOnlyList<EstateRaceHudThemeDefinition> ThemeDefinitions =
@@ -32,28 +31,6 @@ internal sealed partial class HudSurface
     private sealed class ClassicThemeRenderer : IRaceThemeRenderer
     {
         public void Draw(HudSurface surface, DrawingContext dc, RaceWidgetContent? content, Action<DrawingContext> classic) => classic(dc);
-    }
-
-    private sealed class BroadcastThemeRenderer : IRaceThemeRenderer
-    {
-        public void Draw(HudSurface s, DrawingContext dc, RaceWidgetContent? content, Action<DrawingContext> classic)
-        {
-            switch (content)
-            {
-                case LeaderboardContent c: s.DrawBroadcastLeaderboard(dc, c); break;
-                case MapContent c: s.DrawBroadcastMap(dc, c); break;
-                case GripContent c: s.DrawBroadcastGrip(dc, c.State); break;
-                case BannerContent c: s.DrawBroadcastBanner(dc, c.Banner); break;
-                case StartLightsContent c: s.DrawBroadcastStartLights(dc, c.Session); break;
-                case PitStopContent c: s.DrawBroadcastPitStop(dc, c.Snapshot); break;
-                case LimiterContent c: s.DrawBroadcastLimiter(dc, c.Pit); break;
-                case PenaltyContent c: s.DrawBroadcastPenalty(dc, c.Participant); break;
-                case PracticeContent c: s.DrawBroadcastPractice(dc, c.Item); break;
-                case PitWindowContent c: s.DrawBroadcastPitWindow(dc, c.Snapshot); break;
-                case StrategyContent c: s.DrawBroadcastStrategy(dc, c.Snapshot); break;
-                default: classic(dc); break;
-            }
-        }
     }
 
     private abstract record RaceWidgetContent;

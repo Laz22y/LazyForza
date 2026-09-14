@@ -17,7 +17,7 @@ public sealed class EstateHudRenderingTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
-    public void BroadcastReviewSceneUsesRealWidgetRenderersAndMixedScriptNames(bool mixedNames) => Sta(() =>
+    public void ClassicReviewSceneUsesRealWidgetRenderersAndMixedScriptNames(bool mixedNames) => Sta(() =>
     {
         var now = DateTimeOffset.UtcNow;
         var state = OverlayLayoutPreviewState.EstateRace(now);
@@ -43,14 +43,14 @@ public sealed class EstateHudRenderingTests
         };
         var widgets = EstateRaceHudLayoutSettings.Default;
         foreach (var kind in Enum.GetValues<EstateRaceHudWidgetKind>())
-            widgets = widgets.Set(kind, new(false, 0, 0, ThemeId: EstateRaceHudThemeIds.Broadcast));
+            widgets = widgets.Set(kind, new(false, 0, 0, ThemeId: EstateRaceHudThemeIds.Classic));
         widgets = widgets
-            .Set(EstateRaceHudWidgetKind.Leaderboard, new(true, 0.028, 0.15, 1.10, ThemeId: EstateRaceHudThemeIds.Broadcast))
-            .Set(EstateRaceHudWidgetKind.Banner, new(true, 0.32, 0.15, 1.29, ThemeId: EstateRaceHudThemeIds.Broadcast))
-            .Set(EstateRaceHudWidgetKind.PitStopInfo, new(true, 0.32, 0.35, 1.55, ThemeId: EstateRaceHudThemeIds.Broadcast))
-            .Set(EstateRaceHudWidgetKind.PenaltyStatus, new(true, 0.68, 0.35, 1.05, ThemeId: EstateRaceHudThemeIds.Broadcast))
-            .Set(EstateRaceHudWidgetKind.GripStatus, new(true, 0.68, 0.51, 1.4, ThemeId: EstateRaceHudThemeIds.Broadcast))
-            .Set(EstateRaceHudWidgetKind.TrackMap, new(true, 0.32, 0.69, 0.8, ThemeId: EstateRaceHudThemeIds.Broadcast));
+            .Set(EstateRaceHudWidgetKind.Leaderboard, new(true, 0.028, 0.15, 1.10, ThemeId: EstateRaceHudThemeIds.Classic))
+            .Set(EstateRaceHudWidgetKind.Banner, new(true, 0.32, 0.15, 1.29, ThemeId: EstateRaceHudThemeIds.Classic))
+            .Set(EstateRaceHudWidgetKind.PitStopInfo, new(true, 0.32, 0.35, 1.55, ThemeId: EstateRaceHudThemeIds.Classic))
+            .Set(EstateRaceHudWidgetKind.PenaltyStatus, new(true, 0.68, 0.35, 1.05, ThemeId: EstateRaceHudThemeIds.Classic))
+            .Set(EstateRaceHudWidgetKind.GripStatus, new(true, 0.68, 0.51, 1.4, ThemeId: EstateRaceHudThemeIds.Classic))
+            .Set(EstateRaceHudWidgetKind.TrackMap, new(true, 0.32, 0.69, 0.8, ThemeId: EstateRaceHudThemeIds.Classic));
         var layout = new OverlayLayout(ReduceMotion: true, EstateRaceWidgets: widgets);
         var contribution = new Contribution(() => state);
         var surface = new HudSurface(() => [contribution], () => layout, HudSurfaceKind.EstateRace)
@@ -61,14 +61,14 @@ public sealed class EstateHudRenderingTests
         {
             dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(26, 41, 54)), null, new Rect(0, 0, 1440, 900));
             dc.DrawImage(rendered, new Rect(0, 0, 1440, 900));
-            HudTypography.Draw(dc, "转播主题 · 实际组件渲染", new Rect(40, 20, 1000, 40), 52, 24, Brushes.White, strong: true);
+            HudTypography.Draw(dc, "经典主题 · 实际组件渲染", new Rect(40, 20, 1000, 40), 52, 24, Brushes.White, strong: true);
             HudTypography.Draw(dc, "示例赛事数据 / 自定义组件布局", new Rect(40, 65, 1000, 26), 83, 13, Brushes.LightSlateGray);
             HudTypography.Draw(dc, mixedNames ? "中文与英文混排 · 车队名称省略测试" : "无车队副标题 · 核心状态预览",
                 new Rect(40, 854, 1200, 26), 873, 13, Brushes.LightSlateGray);
         }
         var bitmap = new RenderTargetBitmap(1440, 900, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(sheet);
-        SaveQa(bitmap, mixedNames ? "broadcast-review-mixed.png" : "broadcast-review.png");
+        SaveQa(bitmap, mixedNames ? "classic-review-mixed.png" : "classic-review.png");
         Assert.IsTrue(Pixel(rendered, 60, 145).A > 200, "The review sheet must contain the production leaderboard.");
     });
 
@@ -78,16 +78,31 @@ public sealed class EstateHudRenderingTests
         var legacy = JsonSerializer.Deserialize<EstateRaceHudWidgetPlacement>("{\"IsVisible\":true,\"Left\":0.2,\"Top\":0.3}")!;
         Assert.AreEqual(EstateRaceHudThemeIds.Classic, legacy.ThemeId);
         var mixed = EstateRaceHudLayoutSettings.Default
-            .Set(EstateRaceHudWidgetKind.Leaderboard, legacy with { ThemeId = EstateRaceHudThemeIds.Broadcast, Scale = 0.75, Opacity = 0.6 })
+            .Set(EstateRaceHudWidgetKind.Leaderboard, legacy with { ThemeId = "future-timing-theme", Scale = 0.75, Opacity = 0.6 })
             .Set(EstateRaceHudWidgetKind.Banner, legacy with { ThemeId = "future-theme" });
         var restored = EstateRaceHudLayoutSettings.Normalize(JsonSerializer.Deserialize<EstateRaceHudLayout>(JsonSerializer.Serialize(mixed)));
         Assert.AreEqual(mixed, restored);
         Assert.AreEqual(EstateRaceHudThemeIds.Classic, restored.Get(EstateRaceHudWidgetKind.TrackMap).ThemeId);
         Assert.AreEqual("future-theme", restored.Get(EstateRaceHudWidgetKind.Banner).ThemeId, "A temporarily unavailable theme must survive saving settings.");
         Assert.AreEqual(EstateRaceHudThemeIds.Classic, EstateRaceHudThemes.Resolve(restored.Get(EstateRaceHudWidgetKind.Banner).ThemeId).Id);
-        Assert.AreEqual(EstateRaceHudThemeIds.Broadcast, EstateRaceHudThemes.Resolve("BROADCAST").Id);
+        Assert.AreEqual(EstateRaceHudThemeIds.Classic, EstateRaceHudThemes.Resolve("BROADCAST").Id);
+        Assert.IsFalse(EstateRaceHudThemes.Definitions.Any(theme => string.Equals(theme.Id, "broadcast", StringComparison.OrdinalIgnoreCase)));
         Assert.AreEqual(EstateRaceHudThemes.Definitions.Count,
             EstateRaceHudThemes.Definitions.Select(theme => theme.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [TestMethod]
+    [DataRow("broadcast")]
+    [DataRow(" BROADCAST ")]
+    public void RetiredThemeRestoresClassicWithoutChangingAnyWidgetPlacement(string retiredId)
+    {
+        var saved = EstateRaceHudLayoutSettings.Default;
+        foreach (var kind in Enum.GetValues<EstateRaceHudWidgetKind>())
+            saved = saved.Set(kind, new((int)kind % 2 == 0, 0.22, 0.31, 1.13, 0.65, retiredId));
+        var restored = EstateRaceHudLayoutSettings.Normalize(JsonSerializer.Deserialize<EstateRaceHudLayout>(JsonSerializer.Serialize(saved)));
+        foreach (var kind in Enum.GetValues<EstateRaceHudWidgetKind>())
+            Assert.AreEqual(saved.Get(kind) with { ThemeId = EstateRaceHudThemeIds.Classic }, restored.Get(kind));
+        Assert.AreEqual(restored, EstateRaceHudLayoutSettings.Normalize(JsonSerializer.Deserialize<EstateRaceHudLayout>(JsonSerializer.Serialize(restored))));
     }
 
     [TestMethod]
@@ -123,7 +138,7 @@ public sealed class EstateHudRenderingTests
     });
 
     [TestMethod]
-    public void MixedThemeSwitchDoesNotKeepOldContentAndUnknownThemeMatchesClassic() => Sta(() =>
+    public void RetiredAndUnknownThemeRenderExactlyLikeClassic() => Sta(() =>
     {
         var seconds = 0d;
         var layout = BannerLayout() with { ReduceMotion = true };
@@ -136,15 +151,47 @@ public sealed class EstateHudRenderingTests
             return bytes;
         }
         var classic = Pixels();
-        layout = layout with { EstateRaceWidgets = layout.EstateRaceWidgets!.Set(EstateRaceHudWidgetKind.Banner,
-            new(true, 0, 0, ThemeId: EstateRaceHudThemeIds.Broadcast)) };
-        seconds = 0.01;
-        var broadcast = Pixels();
-        Assert.IsFalse(classic.SequenceEqual(broadcast), "Broadcast must be a distinct visual theme.");
-        layout = layout with { EstateRaceWidgets = layout.EstateRaceWidgets!.Set(EstateRaceHudWidgetKind.Banner,
-            new(true, 0, 0, ThemeId: "uninstalled-theme")) };
-        seconds = 0.02;
-        CollectionAssert.AreEqual(classic, Pixels(), "Switching themes must discard retained drawings of the previous theme.");
+        foreach (var id in new[] { "broadcast", "BROADCAST", "uninstalled-theme" })
+        {
+            layout = layout with { EstateRaceWidgets = layout.EstateRaceWidgets!.Set(EstateRaceHudWidgetKind.Banner,
+                new(true, 0, 0, ThemeId: id)) };
+            seconds += 0.01;
+            CollectionAssert.AreEqual(classic, Pixels(), $"{id} must use the classic renderer.");
+        }
+    });
+
+    [TestMethod]
+    [DataRow("PitStop")]
+    [DataRow("PitWindow")]
+    [DataRow("Penalty")]
+    public void SavedTimingPanelsStillRenderWithoutRegisteringATheme(string panel) => Sta(() =>
+    {
+        var now = DateTimeOffset.UtcNow;
+        var state = OverlayLayoutPreviewState.EstateRace(now);
+        var surface = new HudSurface(() => [], () => new OverlayLayout(ReduceMotion: true), HudSurfaceKind.EstateRace,
+            layoutPreview: true) { Width = 1920, Height = 1080 };
+        Render(surface);
+        object? Call(string method, params object?[] arguments) => typeof(HudSurface)
+            .GetMethod(method, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(surface, arguments);
+        object content = panel switch
+        {
+            "PitStop" => Call("UpdatePitHud", state.Session, state.LocalParticipantId, state.PitService, now, now)!,
+            "PitWindow" => new PitWindowHudSnapshot(true, 7, 9, 2, false, 0.38, now.AddSeconds(10)),
+            _ => state.Session!.Participants.First() with { PendingTimePenaltySeconds = 5 }
+        };
+        var layers = EstateRaceDrawingLayers.Record(dc => Call("DrawTimingPanel" + panel, dc, content));
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen()) layers.Draw(dc, 1);
+        var bitmap = new RenderTargetBitmap(560, 400, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        Assert.IsTrue(Pixel(bitmap, 15, 15).A > 200, "The retained panel must still render its original backdrop.");
+        var pixels = new byte[560 * 400 * 4];
+        bitmap.CopyPixels(pixels, 560 * 4, 0);
+        Assert.IsTrue(Enumerable.Range(0, 560 * 400).Any(i => pixels[i * 4 + 3] > 0 && pixels[i * 4] > 180),
+            "The retained style must render text and indicators, not just an empty panel.");
+        SaveQa(bitmap, $"saved-{panel}.png");
+        Assert.IsTrue(EstateRaceHudThemes.Definitions.All(theme => theme.Id == EstateRaceHudThemeIds.Classic));
     });
 
     [TestMethod]

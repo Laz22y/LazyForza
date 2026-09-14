@@ -93,7 +93,15 @@ public sealed record EstateRaceHudWidgetPlacement(
 public static class EstateRaceHudThemeIds
 {
     public const string Classic = "classic";
-    public const string Broadcast = "broadcast";
+
+    public static string Normalize(string? id)
+    {
+        var value = id?.Trim();
+        // Retired IDs must not be reused for a different design. Preserve other
+        // unknown IDs so older clients can round-trip newer theme settings.
+        return string.IsNullOrEmpty(value) || string.Equals(value, "broadcast", StringComparison.OrdinalIgnoreCase)
+            ? Classic : value;
+    }
 }
 
 public sealed record EstateRaceHudLayout(
@@ -192,9 +200,7 @@ public static class EstateRaceHudLayoutSettings
             Top = Finite(value.Top, 0),
             Scale = NormalizeScale(kind, value.Scale),
             Opacity = double.IsFinite(value.Opacity) ? Math.Clamp(value.Opacity, 0.15, 1) : 1,
-            // Keep unknown IDs intact so an older client can display its fallback
-            // without discarding a theme saved by a newer client.
-            ThemeId = string.IsNullOrWhiteSpace(value.ThemeId) ? EstateRaceHudThemeIds.Classic : value.ThemeId.Trim()
+            ThemeId = EstateRaceHudThemeIds.Normalize(value.ThemeId)
         };
 
     private static double Finite(double value, double fallback) =>

@@ -399,17 +399,10 @@ internal sealed partial class HudSurface
     private void DrawRaceTrackMap(
         DrawingContext dc,
         EstateRaceHudState state,
-        EstateRaceSession session,
-        bool broadcast = false)
+        EstateRaceSession session)
     {
         var size = Math.Min(ActualWidth * 0.19, ActualHeight * 0.28);
-        if (broadcast)
-        {
-            BroadcastPanel(dc, size, size);
-            BroadcastText(dc, "TRACK MAP", new Rect(size * 0.08, 0, size * 0.84, size * 0.12),
-                size * 0.045, BroadcastMuted);
-        }
-        else EstateRaceDrawingLayers.Panel(dc,
+        EstateRaceDrawingLayers.Panel(dc,
             BrushOf(0x08, 0x0B, 0x11, 0.91),
             new Pen(BrushOf(0x8B, 0x9A, 0xAA, 0.32), 1),
             new Rect(0, 0, size, size),

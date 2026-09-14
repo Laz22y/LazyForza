@@ -267,8 +267,11 @@ internal sealed partial class MainWindow
         var estateRaceToggles = new Dictionary<EstateRaceHudWidgetKind, ToggleButton>();
         var estateRaceOpacitySliders = new Dictionary<EstateRaceHudWidgetKind, Slider>();
         var estateRaceThemes = new Dictionary<EstateRaceHudWidgetKind, ComboBox>();
+        var showThemeChoices = EstateRaceHudThemes.Definitions.Count > 1 || estateRaceWidgetKinds.Any(kind =>
+            !string.Equals(currentEstateRaceWidgets.Get(kind).ThemeId, EstateRaceHudThemeIds.Classic, StringComparison.OrdinalIgnoreCase));
         var themeControls = new StackPanel();
-        var presets = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
+        var presets = new WrapPanel { Margin = new Thickness(0, 0, 0, 12),
+            Visibility = showThemeChoices ? Visibility.Visible : Visibility.Collapsed };
         foreach (var theme in EstateRaceHudThemes.Definitions)
         {
             var preset = new Button
@@ -288,7 +291,7 @@ internal sealed partial class MainWindow
         {
             var row = new Grid { Margin = new Thickness(0, 4, 0, 4) };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.7, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.25, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = showThemeChoices ? new GridLength(1.25, GridUnitType.Star) : new GridLength(0) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
             return row;
@@ -299,6 +302,7 @@ internal sealed partial class MainWindow
         {
             var label = Label(titles[column], 11, FontWeights.Normal, "MutedBrush");
             label.Margin = new Thickness(4, 0, 0, 4);
+            if (column == 1 && !showThemeChoices) label.Visibility = Visibility.Collapsed;
             Grid.SetColumn(label, column);
             tableHeader.Children.Add(label);
         }
@@ -326,6 +330,7 @@ internal sealed partial class MainWindow
                 FontSize = 12, MinWidth = 0, MinHeight = 34, Padding = new Thickness(10, 0, 10, 0),
                 Margin = new Thickness(0, 0, 10, 0),
                 VerticalContentAlignment = VerticalAlignment.Center,
+                Visibility = showThemeChoices ? Visibility.Visible : Visibility.Collapsed,
                 ToolTip = AppLocalization.Literal("只改变样式，保留组件的位置、缩放和透明度。")
             };
             AutomationProperties.SetName(selector, AppLocalization.Literal(name) + " · " + AppLocalization.Literal("主题"));
@@ -366,7 +371,8 @@ internal sealed partial class MainWindow
             row.Children.Add(opacityCell);
             themeControls.Children.Add(row);
         }
-        var themeNote = Label("每个组件可独立混搭经典与转播主题。应用后立即生效，重启后保留。", 12, FontWeights.Normal, "MutedBrush");
+        var themeNote = Label("每个组件可独立选择主题。应用后立即生效，重启后保留。", 12, FontWeights.Normal, "MutedBrush");
+        themeNote.Visibility = showThemeChoices ? Visibility.Visible : Visibility.Collapsed;
         themeNote.Margin = new Thickness(0, 0, 0, 14);
         themeControls.Children.Insert(0, themeNote);
         hudOpacity.Children.Add(themeControls);
@@ -400,10 +406,10 @@ internal sealed partial class MainWindow
             hudComponentsExpanded,
             expanded => hudComponentsExpanded = expanded));
         controls.Children.Add(SettingsSectionExpander(
-            AppLocalization.Text("settings.hud.themes", "赛事主题与组件"),
-            AppLocalization.Text(
-                "settings.hud.themesDetail",
-                "逐项选择主题、显示开关和不透明度。"),
+            showThemeChoices ? AppLocalization.Text("settings.hud.themes", "赛事主题与组件")
+                : AppLocalization.Text("settings.hud.raceWidgets", "赛事组件"),
+            showThemeChoices ? AppLocalization.Text("settings.hud.themesDetail", "逐项选择主题、显示开关和不透明度。")
+                : AppLocalization.Text("settings.hud.raceWidgetsDetail", "逐项调整显示开关和不透明度。"),
             hudOpacity,
             hudOpacityExpanded,
             expanded => hudOpacityExpanded = expanded));
