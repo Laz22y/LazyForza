@@ -9,7 +9,7 @@ using System.Windows.Threading;
 
 namespace LazyForza.App;
 
-/// <summary>One fixed-baseline line under the logo; no layout animation and no background timer while paused.</summary>
+/// <summary>One fixed-baseline brand line; no layout animation and no background timer while paused.</summary>
 internal sealed class ReleaseBrandLine : Control
 {
     private readonly ReleaseLabelMotion motion;

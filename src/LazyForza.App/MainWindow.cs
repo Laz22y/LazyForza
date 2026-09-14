@@ -59,6 +59,7 @@ internal sealed partial class MainWindow : Window
     private readonly ContentControl content = new();
     private readonly ListBox navigation = new();
     private ReleaseBrandLine? releaseBrandLine;
+    private BrandWindowFrame? brandWindowFrame;
     private readonly DispatcherTimer refreshTimer;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly HashSet<Guid> selectedLapIds = [];
@@ -337,6 +338,19 @@ internal sealed partial class MainWindow : Window
                 ReleaseLabelMode = releaseBrandLine?.DisplayMode.ToString(),
                 ReleaseAnimationScheduled = releaseBrandLine?.IsAnimationScheduled
             }, new JsonSerializerOptions { WriteIndented = true }));
+        // Verify the real maximized client area as well as fixed QA layouts.
+        WindowState = WindowState.Maximized;
+        await Task.Delay(180);
+        UpdateLayout();
+        CaptureVisual(this, Path.Combine(directory, "overview-maximized.png"));
+        File.WriteAllText(Path.Combine(directory, "maximized-layout.json"), JsonSerializer.Serialize(new
+        {
+            WindowState = WindowState.ToString(), ActualWidth, ActualHeight,
+            HeaderTopLeft = brandWindowFrame!.TitleBar.PointToScreen(new Point(0, 0)),
+            HeaderBottomRight = brandWindowFrame.TitleBar.PointToScreen(new Point(brandWindowFrame.TitleBar.ActualWidth, BrandWindowFrame.TitleHeight)),
+            SystemParameters.WorkArea
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        WindowState = WindowState.Normal;
         var englishHanAudit = new SortedSet<string>(StringComparer.Ordinal);
         EnsureEstateQaTrack();
         WindowState = WindowState.Normal;
@@ -584,36 +598,25 @@ internal sealed partial class MainWindow : Window
     private UIElement BuildShell()
     {
         var root = new Grid { Background = Brush("WindowBrush") };
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(BrandWindowFrame.TitleHeight) });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(208) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var sidebar = new Border { Background = Brush("SidebarBrush"), BorderBrush = Brush("BorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
-        var sideStack = new DockPanel { Margin = new Thickness(12, 25, 12, 14) };
-        var brand = new StackPanel { Margin = new Thickness(14, 0, 0, 18) };
-        brand.Children.Add(new Image
-        {
-            Source = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForzaWordmark.png", UriKind.Absolute)),
-            Width = 154,
-            Height = 28,
-            Stretch = Stretch.Uniform,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            SnapsToDevicePixels = true
-        });
-        releaseBrandLine = new ReleaseBrandLine($"v{ApplicationVersionInfo.Display}", ApplicationVersionInfo.ReleaseName)
-        {
-            // Match the wordmark's visible left edge inside its transparent image padding.
-            Margin = new Thickness(2, 8, 0, 0)
-        };
+        releaseBrandLine = new ReleaseBrandLine($"v{ApplicationVersionInfo.Display}", ApplicationVersionInfo.ReleaseName);
         releaseBrandLine.SetResourceReference(ForegroundProperty, "MutedBrush");
         releaseBrandLine.SetReduceMotion(overlay.TimingLayout.ReduceMotion || !SystemParameters.ClientAreaAnimation);
-        brand.Children.Add(releaseBrandLine);
-        DockPanel.SetDock(brand, Dock.Top);
-        sideStack.Children.Add(brand);
+        brandWindowFrame = new BrandWindowFrame(this, releaseBrandLine);
+        Grid.SetColumnSpan(brandWindowFrame.TitleBar, 2);
+        root.Children.Add(brandWindowFrame.TitleBar);
+        var sidebar = new Border { Background = Brush("SidebarBrush"), BorderBrush = Brush("BorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
+        var sideStack = new DockPanel { Margin = new Thickness(12, 16, 12, 14) };
         navigation.ItemContainerStyle = (Style)FindResource("SidebarNavigationItem");
         ScrollViewer.SetHorizontalScrollBarVisibility(navigation, ScrollBarVisibility.Disabled);
         PopulateNavigation();
         sideStack.Children.Add(navigation);
         sidebar.Child = sideStack;
         Grid.SetColumn(sidebar, 0);
+        Grid.SetRow(sidebar, 1);
         root.Children.Add(sidebar);
 
         var main = new Grid { Margin = new Thickness(32, 25, 24, 26), Background = Brush("WindowBrush") };
@@ -639,6 +642,7 @@ internal sealed partial class MainWindow : Window
                 sourceChip.Visibility = args.VerticalOffset < 24 ? Visibility.Visible : Visibility.Collapsed;
         }));
         Grid.SetColumn(main, 1);
+        Grid.SetRow(main, 1);
         root.Children.Add(main);
         return root;
     }

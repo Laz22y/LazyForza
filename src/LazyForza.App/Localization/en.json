@@ -1,4 +1,8 @@
 {
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.restore": "Restore",
+  "window.close": "Close",
   "overview.unit.laps": "laps",
   "overview.unit.tracks": "tracks",
   "overview.unit.packets": "packets",

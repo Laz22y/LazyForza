@@ -1,6 +1,8 @@
-# 侧栏版本信息
+# 顶部品牌栏与版本信息
 
-Logo 下方由 `ReleaseBrandLine` 绘制固定高度 20 DIP 的灰色版本信息行，所有文字使用统一基线。`ApplicationVersionInfo.Display` 提供真实构建版本，不省略本地预览的版本后缀。更新名从 App 项目中的 `ReleaseNameZh`、`ReleaseNameEn` 构建属性写入程序集元数据，当前中英文均为 `Radio Check`。每次更新名称只需修改这两个属性，预览打包沿用它们；名称不参与版本比较，也不写入用户数据库。
+顶部品牌栏由 `BrandWindowFrame` 提供，高度 48 DIP，横跨侧栏与页面。原 Logo 保留在左侧，旁边由 `ReleaseBrandLine` 绘制固定高度 20 DIP 的灰色版本信息行，所有文字使用统一基线。`ApplicationVersionInfo.Display` 提供真实构建版本，不省略本地预览的版本后缀。更新名从 App 项目中的 `ReleaseNameZh`、`ReleaseNameEn` 构建属性写入程序集元数据，当前中英文均为 `Radio Check`。每次更新名称只需修改这两个属性，预览打包沿用它们；名称不参与版本比较，也不写入用户数据库。
+
+窗口使用 WPF `WindowChrome` 保留系统拖动、双击最大化、边缘缩放和系统菜单，主窗口不使用逐像素透明。右上角三个 46 DIP 宽的按钮支持键盘与自动化访问；关闭走现有 Closing 流程，继续遵守退出／托盘设置。最大化区域返回 `HTMAXBUTTON` 以支持 Windows 11 分屏菜单；最小尺寸仍为原有 960×640 DIP（小屏时按工作区约束），因此不保证适合所有窄分屏区域。Windows 11 圆角由 DWM 提供，Windows 10 忽略该圆角请求。其他浮窗和无焦点 HUD 的窗口行为不变。
 
 `ReleaseLabelMotion` 根据 WPF 实际测得的文字宽度选择展示方式：
 

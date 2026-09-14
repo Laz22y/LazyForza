@@ -68,7 +68,7 @@ HUD 设置中的“地产赛事底板不透明度”只调整面板底色，文�
 
 主窗口默认以 1440×900 的逻辑尺寸居中打开；按所在屏幕的缩放和工作区自动收敛，给桌面留出边距。小屏幕或手动缩小窗口时仍可滚动查看完整内容。概览集中显示当前赛事、赛道预览、遥测状态和最近圈记录，可直接进入圈速分析或回放工作台；没有赛事或圈记录时显示等待状态。
 
-Logo 下方以灰色小字显示当前版本号与更新名：宽度足够时同排，空间不足时淡入淡出轮换，仅超长项缓慢滚动。鼠标悬停暂停并显示完整信息，窗口失焦或最小化时暂停动画；HUD 设置中的“减少动态”及 Windows 动画开关均可使其改为静态省略显示。更新名配置与时序见[侧栏版本信息说明](docs/RELEASE_BRAND_LABEL.md)。
+主窗口使用无系统标题栏的顶部品牌栏：原 Logo、灰色版本号与更新名同排，右侧保留最小化、最大化／还原和关闭按钮。顶部空白可拖动、双击最大化，边缘可缩放，关闭仍遵守退出／托盘设置。版本信息宽度足够时同排，空间不足时淡入淡出轮换，仅超长项缓慢滚动；鼠标悬停暂停并显示完整信息，窗口失焦或最小化时暂停动画。“减少动态”及 Windows 动画开关可使其改为静态省略显示。详见[品牌栏版本信息说明](docs/RELEASE_BRAND_LABEL.md)。
 
 ```powershell
 LazyForza.App.exe --data-dir "D:\LazyForza_Data"
@@ -183,7 +183,7 @@ Race widgets lets you adjust visibility and opacity independently for all 11 wid
 
 The main window opens centered at a preferred size of 1440×900 device-independent units, constrained to its screen's scale and work area with a small desktop margin. Scrolling remains available on smaller screens or when the window is resized. Overview brings the current session, track preview, telemetry status and recent laps together, with direct access to lap analysis and replay. It shows an explicit waiting state when no session or lap records are available.
 
-Muted text below the logo shows the current version and release name together when they fit. Otherwise, they alternate with a short fade; only an oversized item scrolls. Hover to pause and read the full information in a tooltip. Animation pauses when the window is inactive or minimized. HUD Reduce motion and the Windows animation preference switch the label to static text with an ellipsis. See the [release label configuration and timing notes](docs/RELEASE_BRAND_LABEL.md).
+The main window uses a branded top bar with the original logo, muted version and release name, and minimize, maximize/restore and close buttons. Drag or double-click the blank header to move or maximize; edges remain resizable and closing respects your exit/tray preference. Version and release name stay together when they fit; otherwise they alternate with a short fade and only oversized text scrolls. Hover to pause and read the full text. Inactive or minimized windows pause animation; Reduce motion and the Windows animation preference use static text with an ellipsis. See the [brand label configuration and timing notes](docs/RELEASE_BRAND_LABEL.md).
 
 Use an explicit data directory from the command line when needed:
 
