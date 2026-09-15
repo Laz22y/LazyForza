@@ -60,11 +60,13 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 安装版默认安装到 `C:\Program Files\LazyForza`，创建开始菜单入口；桌面快捷方式和 `.lfztelemetry`、`.lfzlap`、`.lfzestate` 文件关联可在安装时选择。便携版不写入这些系统项。每个便携版目录独立保存初始化状态；安装版卸载时保留数据库，并在重新安装后再次显示初始化指引。正式安装版默认启动检查更新，正式便携版默认关闭，两者都可在设置中修改。预览版使用独立初始化状态和 GitCode/GitHub 预发布更新通道，每次启动强制检查并自动安装更高预览版；正式版不参与该通道，预览包不会自动转为正式版。发行说明同时提供中文和英文，程序按当前界面语言显示对应内容。所有包都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。需要通过命令行固定目录时可使用：
 
-设置页提供默认蓝、暗夜紫、清新绿、鲜艳红、纯粹白和低调灰六种 UI 强调色；切换只影响界面高亮与选中状态，不改变 HUD、图表语义色或其他界面样式。
+设置页修改后自动保存并应用，无需点击应用按钮。语言、HUD、录制选项和有效的遥测监听地址／端口可直接生效；切换数据目录后提示重启，由用户选择时机，原目录数据保留在原处。UI 强调色提供默认蓝、暗夜紫、清新绿、鲜艳红、纯粹白和低调灰六种选择。
+
+侧栏底部显示遥测状态与当前 UDP 端口，模拟／回放模式显示对应来源。设置 → 常规 → 快速设置可选择显示语音工程师静音、语音音量和减少动态，默认只显示静音；选择和状态在重启后保留。较短窗口将多个快速入口合并为图标行，设置入口固定在底部。
 
 HUD 设置中的“地产赛事底板不透明度”只调整面板底色，文字、旗语与状态标识保持清晰；“整体不透明度”仍同时影响所有 HUD，并与各赛事部件的不透明度叠加。设置保存后在重启时保留。开启“减少动态”可立即显示赛事状态，关闭淡入、位移和闪动效果。
 
-“赛事组件”可独立调整 11 个组件的显示开关与不透明度，点击“应用 HUD 设置”后立即生效并持久保存。当前使用经典主题；此前保存的转播主题自动回到经典，组件位置、缩放与不透明度保留。主题扩展与逐组件配置接口继续保留，仅有经典主题时收起主题选择控件。
+“赛事组件”可独立调整 11 个组件的显示开关与不透明度，修改后自动生效并保存。当前使用经典主题；此前保存的转播主题自动回到经典，组件位置、缩放与不透明度保留。主题扩展与逐组件配置接口继续保留，仅有经典主题时收起主题选择控件。
 
 主窗口默认以 1440×900 的逻辑尺寸居中打开；按所在屏幕的缩放和工作区自动收敛，给桌面留出边距。小屏幕或手动缩小窗口时仍可滚动查看完整内容。概览集中显示当前赛事、赛道预览、遥测状态和最近圈记录，可直接进入圈速分析或回放工作台；没有赛事或圈记录时显示等待状态。
 
@@ -175,11 +177,13 @@ Open “Speech service…” next to the engineer to configure an ElevenLabs API
 
 The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu entry, and can optionally create a desktop shortcut and associate `.lfztelemetry`, `.lfzlap` and `.lfzestate` files. The portable build does not write those system entries. Stable installed builds check for updates by default; stable portable builds do not, and both settings can be changed later. Preview builds use separate initialization state and GitCode/GitHub prerelease channels; they check on every startup and install only newer previews automatically. Stable releases never enter the preview channel, so a preview build does not automatically become stable. Every package includes the .NET runtime.
 
-Settings provides six UI accent colors: Default Blue, Midnight Purple, Fresh Green, Vivid Red, Pure White and Subtle Gray. The selection changes interface highlights and selected states without recoloring HUDs, chart semantics or other interface styling.
+Settings saves and applies changes automatically. Language, HUD, recording options and valid live UDP endpoints take effect directly. Changing data folders prompts for a restart at a time of your choice; existing data stays in its original folder. Six UI accent colors are available: Default Blue, Midnight Purple, Fresh Green, Vivid Red, Pure White and Subtle Gray.
+
+The sidebar footer shows telemetry status and the active UDP port, or the simulation/replay source. Settings → General → Quick settings lets you choose race engineer mute, speech volume and reduce motion; mute is shown by default. Choices and states persist across restarts. Short windows combine multiple quick actions into an icon row while keeping Settings at the bottom.
 
 In HUD settings, Estate race panel opacity changes panel backgrounds while keeping text, flags and status indicators clear. Overall opacity still affects all HUD content and combines with individual race widget opacity. Saved settings persist across restarts. Reduce motion shows race states immediately without fades, movement or pulsing.
 
-Race widgets lets you adjust visibility and opacity independently for all 11 widgets. Apply HUD settings takes effect immediately and saves your choices across restarts. Classic is the current theme; saved Broadcast selections return to Classic while retaining position, scale and opacity. Theme extension and per-widget configuration remain supported; theme selectors are hidden when only Classic is available.
+Race widgets lets you adjust visibility and opacity independently for all 11 widgets. Changes apply and save automatically. Classic is the current theme; saved Broadcast selections return to Classic while retaining position, scale and opacity. Theme extension and per-widget configuration remain supported; theme selectors are hidden when only Classic is available.
 
 The main window opens centered at a preferred size of 1440×900 device-independent units, constrained to its screen's scale and work area with a small desktop margin. Scrolling remains available on smaller screens or when the window is resized. Overview brings the current session, track preview, telemetry status and recent laps together, with direct access to lap analysis and replay. It shows an explicit waiting state when no session or lap records are available.
 

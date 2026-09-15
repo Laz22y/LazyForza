@@ -59,7 +59,7 @@ internal sealed partial class MainWindow
             Content = "导出单圈 .lfztelemetry",
             Padding = new Thickness(13, 7, 13, 7),
             IsEnabled = false,
-            ToolTip = "导出当前工作台单圈；不会伪造缺失的原始 FH6 UDP 字段"
+            ToolTip = "导出当前工作台单圈，包含已记录的遥测字段。"
         };
         foreach (var track in tracks)
         {

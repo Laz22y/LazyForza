@@ -57,9 +57,10 @@ internal sealed partial class MainWindow : Window
     private readonly StartupProfileStore startupProfileStore;
     private readonly MainWindowPageRefreshState pageRefresh = new();
     private readonly ContentControl content = new();
-    private readonly ListBox navigation = new();
+    private readonly SidebarNavigation navigation = new();
     private ReleaseBrandLine? releaseBrandLine;
     private BrandWindowFrame? brandWindowFrame;
+    private Border? sourceChip;
     private readonly DispatcherTimer refreshTimer;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly HashSet<Guid> selectedLapIds = [];
@@ -138,11 +139,14 @@ internal sealed partial class MainWindow : Window
             var lapModule = moduleManager.Modules.OfType<LapAnalysisModule>().FirstOrDefault();
             if (lapModule is not null) diagnosticCapture.UpdateTrackMatch(lapModule.MatchDiagnostics);
             if (!IsVisible || WindowState == WindowState.Minimized) return;
+            RefreshSidebar();
             refreshVisiblePage?.Invoke();
         }, Dispatcher);
         refreshTimer.Start();
+        Closing += (_, _) => { foreach (var application in settingApplications.ToArray()) _ = application.FlushAsync(); };
         Closed += (_, _) =>
         {
+            foreach (var application in settingApplications.ToArray()) application.Dispose();
             raceEngineer?.Dispose();
             refreshTimer.Stop();
             lifetimeCancellation.Cancel();
@@ -480,6 +484,7 @@ internal sealed partial class MainWindow : Window
             CollectHanText(this, $"page {pageIndex + 1}", englishHanAudit);
         }
         File.WriteAllLines(Path.Combine(directory, "english-han-audit.txt"), englishHanAudit);
+        await CaptureSidebarSettingsQaAsync(directory);
     }
 
     private static void CollectHanText(DependencyObject node, string scope, ISet<string> output)
@@ -609,12 +614,9 @@ internal sealed partial class MainWindow : Window
         Grid.SetColumnSpan(brandWindowFrame.TitleBar, 2);
         root.Children.Add(brandWindowFrame.TitleBar);
         var sidebar = new Border { Background = Brush("SidebarBrush"), BorderBrush = Brush("BorderBrush"), BorderThickness = new Thickness(0, 0, 1, 0) };
-        var sideStack = new DockPanel { Margin = new Thickness(12, 16, 12, 14) };
-        navigation.ItemContainerStyle = (Style)FindResource("SidebarNavigationItem");
-        ScrollViewer.SetHorizontalScrollBarVisibility(navigation, ScrollBarVisibility.Disabled);
         PopulateNavigation();
-        sideStack.Children.Add(navigation);
-        sidebar.Child = sideStack;
+        InitializeSidebar();
+        sidebar.Child = navigation;
         Grid.SetColumn(sidebar, 0);
         Grid.SetRow(sidebar, 1);
         root.Children.Add(sidebar);
@@ -623,7 +625,7 @@ internal sealed partial class MainWindow : Window
         content.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         content.VerticalContentAlignment = VerticalAlignment.Stretch;
         main.Children.Add(content);
-        var sourceChip = new Border
+        sourceChip = new Border
         {
             Background = Brush("CardBrush"),
             CornerRadius = new CornerRadius(14),
@@ -649,24 +651,32 @@ internal sealed partial class MainWindow : Window
 
     private void PopulateNavigation()
     {
-        navigation.Items.Clear();
-        foreach (var page in PrimaryPages)
+        navigation.ClearPages();
+        for (var index = 0; index < PrimaryPages.Length; index++)
         {
+            var page = PrimaryPages[index];
             var entry = NavigationEntry(page.IconData, AppLocalization.Text(page.Key, page.Title));
-            navigation.Items.Add(new ListBoxItem { Content = entry,
-                Margin = new Thickness(0, page.Key is "nav.lapAnalysis" or "nav.settings" ? 19 : 3, 0, 3) });
+            navigation.AddPage(index, entry, page.Key == "nav.settings");
         }
         if (showDiagnosticsNavigation)
-            navigation.Items.Add(NavigationEntry(
+            navigation.AddPage(PrimaryPages.Length, NavigationEntry(
                 DiagnosticsPageEntry.IconData,
                 AppLocalization.Text(DiagnosticsPageEntry.Key, DiagnosticsPageEntry.Title)));
     }
 
-    private void RenderSelectedPage(bool preserveScroll = false)
+    private int pageRenderRevision;
+    private async void RenderSelectedPage(bool preserveScroll = false)
     {
         if (changingModule || navigation.SelectedIndex < 0) return;
+        var revision = ++pageRenderRevision;
+        await FlushSettingsAsync();
+        if (revision != pageRenderRevision || lifetimeCancellation.IsCancellationRequested) return;
+        foreach (var application in settingApplications) application.Dispose();
+        settingApplications.Clear();
         var previousOffset = preserveScroll && content.Content is ScrollViewer currentScroll ? currentScroll.VerticalOffset : 0;
         refreshVisiblePage = null;
+        refreshEngineerControls = null;
+        syncHudMotionPreference = null;
         var page = navigation.SelectedIndex switch
         {
             0 => OverviewPage(),
@@ -684,7 +694,7 @@ internal sealed partial class MainWindow : Window
         content.Content = page;
         if (preserveScroll && page is ScrollViewer newScroll)
         {
-            Dispatcher.BeginInvoke(() => newScroll.ScrollToVerticalOffset(previousOffset), DispatcherPriority.Loaded);
+            _ = Dispatcher.BeginInvoke(() => newScroll.ScrollToVerticalOffset(previousOffset), DispatcherPriority.Loaded);
         }
     }
 
@@ -1785,7 +1795,7 @@ internal sealed partial class MainWindow : Window
                 "analysis.corner.referenceFooter",
                 "参考情况：{0}。{1}",
                 ReferenceMatchText(selectedLap.Vehicle, referenceLap.Vehicle),
-                AppLocalization.Literal("LazyForza 只能提供轻度范围内的分析，仅供参考。"));
+                AppLocalization.Literal("差异说明基于已记录遥测，可结合曲线回看驾驶过程。"));
             return comparisons
                 .OrderByDescending(corner => corner.TimeLossSeconds)
                 .Take(8)
@@ -1801,7 +1811,7 @@ internal sealed partial class MainWindow : Window
             ? AppLocalization.Literal("同等级个人最快 · 轻度跑法分析")
             : AppLocalization.Literal("暂无同等级参考圈 · 仅分析明显驾驶节奏");
         var footerText = AppLocalization.Literal(
-            "依据已保存的速度、输入、位置与动态遥测；旧圈可能不含轮胎滑移。LazyForza 只能提供轻度范围内的分析，仅供参考。");
+            "分析依据已保存的速度、驾驶输入、位置与动态遥测；旧圈可能缺少轮胎滑移样本。");
         return CornerDrivingAnalyzer.AnalyzePersonalBest(selectedLap)
             .OrderByDescending(corner => corner.OpportunityScore)
             .Take(8)
@@ -2596,7 +2606,7 @@ internal sealed partial class MainWindow : Window
                         target.Confidence,
                         target.UsedLimiterFallback ? AppLocalization.Literal(" · 转速限制推算") : string.Empty), 13));
                 }
-                if (learning.Targets.Count == 0) targets.Children.Add(Label("数据不足：不会伪造最佳换挡点。", 13, FontWeights.Normal, "MutedBrush"));
+                if (learning.Targets.Count == 0) targets.Children.Add(Label("样本不足，继续驾驶以学习换挡点。", 13, FontWeights.Normal, "MutedBrush"));
             }
             var rejected = string.Join(" · ", learning.RejectedSamples.OrderByDescending(item => item.Value).Take(8).Select(item => $"{AppLocalization.Literal(item.Key)} {item.Value}"));
             rejectedLabel.Text = AppLocalization.Format(
@@ -3263,14 +3273,29 @@ internal sealed partial class MainWindow : Window
 
     private UIElement SettingsPage()
     {
-        var stack = PageStack(
-            "设置",
-            SettingsCategoryDescription(selectedSettingsCategory));
+        var stack = PageStack("设置", SettingsCategoryDescription(selectedSettingsCategory));
         stack.Children.Add(BuildSettingsCategoryNavigation());
-        var generalSettings = new StackPanel();
-        var telemetrySettings = new StackPanel();
-        var hudSettings = new StackPanel();
-        var maintenanceSettings = new StackPanel();
+        stack.Children.Add(selectedSettingsCategory switch
+        {
+            SettingsCategory.Telemetry => BuildTelemetrySettings(),
+            SettingsCategory.Hud => BuildHudSettings(),
+            SettingsCategory.Maintenance => BuildMaintenanceSettings(),
+            _ => BuildGeneralSettings()
+        });
+        return Scroll(stack);
+    }
+
+    private UIElement BuildTelemetrySettings()
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(BuildTelemetryListenerSettings());
+        panel.Children.Add(BuildRecordingSettingsCard());
+        return panel;
+    }
+
+    private UIElement BuildGeneralSettings()
+    {
+        var panel = new StackPanel();
         var identity = new Grid();
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
@@ -3278,7 +3303,7 @@ internal sealed partial class MainWindow : Window
         var identityText = new StackPanel();
         identityText.Children.Add(Label("玩家代号", 17, FontWeights.SemiBold));
         identityText.Children.Add(Label(
-            "用于新录制和圈速分享；首次加入地产赛事时作为代表名默认值。可留空，不覆盖上次参赛代表名。",
+            "用于录制、圈速分享和首次参赛的默认代表名。留空时不标注。",
             11,
             FontWeights.Normal,
             "MutedBrush"));
@@ -3298,66 +3323,28 @@ internal sealed partial class MainWindow : Window
         };
         Grid.SetColumn(playerCode, 1);
         identity.Children.Add(playerCode);
-        var saveIdentity = new Button
-        {
-            Content = "保存",
-            Padding = new Thickness(16, 7, 16, 7),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        saveIdentity.Click += (_, _) =>
+        var identityStatus = AutoApplyStatus();
+        identityText.Children.Add(identityStatus);
+        var identityApplication = AutoApplySettings(identity, () =>
         {
             var normalized = PlayerIdentitySettings.Normalize(playerCode.Text);
-            playerCode.Text = normalized;
             store.SetAppSetting(PlayerIdentitySettings.PlayerCodeSettingKey, normalized);
-            saveIdentity.Content = AppLocalization.Literal("已保存");
-        };
-        playerCode.TextChanged += (_, _) => saveIdentity.Content = AppLocalization.Literal("保存");
-        Grid.SetColumn(saveIdentity, 2);
-        identity.Children.Add(saveIdentity);
-        generalSettings.Children.Add(Card(identity));
+            identityStatus.Visibility = Visibility.Collapsed;
+            return Task.CompletedTask;
+        }, identityStatus, 400);
+        playerCode.TextChanged += (_, _) => identityApplication.Request();
+        playerCode.LostKeyboardFocus += (_, _) => _ = identityApplication.FlushAsync();
+        panel.Children.Add(Card(identity));
 
-        generalSettings.Children.Add(BuildStartupSettingsCard());
+        panel.Children.Add(BuildStartupSettingsCard());
+        panel.Children.Add(BuildQuickSettingsCard());
 
-        var network = new Grid();
-        network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
-        network.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
-        var address = new TextBox { Text = store.GetAppSetting("telemetry.listenAddress") ?? LazyForzaDefaults.TelemetryListenAddress, Padding = new Thickness(8) };
-        var port = new TextBox { Text = store.GetAppSetting("telemetry.port") ?? LazyForzaDefaults.TelemetryPort.ToString(System.Globalization.CultureInfo.InvariantCulture), Padding = new Thickness(8) };
-        AddSettingRow("监听地址", address, 0);
-        AddSettingRow("UDP 端口", port, 1);
-        network.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var networkNote = Label("默认仅监听本机；端口范围 1–65535，请避开 5200–5300。胎温显示为 °C。", 12, FontWeights.Normal, "MutedBrush");
-        networkNote.Margin = new Thickness(0, 8, 0, 8);
-        Grid.SetRow(networkNote, 2);
-        Grid.SetColumnSpan(networkNote, 2);
-        network.Children.Add(networkNote);
-        var saveNetwork = new Button { Content = "保存监听设置", HorizontalAlignment = HorizontalAlignment.Left };
-        saveNetwork.Click += (_, _) =>
-        {
-            if (!IPAddress.TryParse(address.Text.Trim(), out _) ||
-                !int.TryParse(port.Text.Trim(), out var parsedPort) || parsedPort is < 1 or > 65535 || parsedPort is >= 5200 and <= 5300)
-            {
-                AppDialog.Show(
-                    AppLocalization.Literal("请输入有效 IP 地址和 1–65535 端口，并避开 5200–5300。"),
-                    AppLocalization.Literal("监听设置无效"),
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
-            store.SetAppSetting("telemetry.listenAddress", address.Text.Trim());
-            store.SetAppSetting("telemetry.port", parsedPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            AppRestartPrompt.Show(
-                this,
-                AppLocalization.Literal("监听设置已保存，重启后生效。"));
-        };
-        Grid.SetRow(saveNetwork, 3);
-        Grid.SetColumnSpan(saveNetwork, 2);
-        network.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        network.Children.Add(saveNetwork);
-        telemetrySettings.Children.Add(Card(network));
+        return panel;
+    }
 
-        hudSettings.Children.Add(BuildHudSettings());
-
+    private UIElement BuildMaintenanceSettings()
+    {
+        var panel = new StackPanel();
         var interfacePanel = new StackPanel();
         interfacePanel.Children.Add(Label("界面与诊断", 17, FontWeights.SemiBold));
         var diagnosticsNavigation = new ToggleButton
@@ -3385,40 +3372,17 @@ internal sealed partial class MainWindow : Window
         RefreshDiagnosticsNavigationText();
         interfacePanel.Children.Add(diagnosticsNavigation);
         var diagnosticsHelp = Label(
-            "默认隐藏诊断入口。开启后，侧边栏会增加“诊断”；关闭不会删除诊断记录或影响一键诊断包。",
+            "开启后，在侧栏显示“诊断”入口。",
             11,
             FontWeights.Normal,
             "MutedBrush");
         diagnosticsHelp.Margin = new Thickness(0, 8, 0, 0);
         interfacePanel.Children.Add(diagnosticsHelp);
-        maintenanceSettings.Children.Add(Card(interfacePanel));
+        panel.Children.Add(Card(interfacePanel));
 
-        telemetrySettings.Children.Add(BuildRecordingSettingsCard());
-        maintenanceSettings.Children.Add(BuildUpdateSettingsCard());
-        maintenanceSettings.Children.Add(BuildDataProtectionSettings());
-
-        stack.Children.Add(selectedSettingsCategory switch
-        {
-            SettingsCategory.Telemetry => telemetrySettings,
-            SettingsCategory.Hud => hudSettings,
-            SettingsCategory.Maintenance => maintenanceSettings,
-            _ => generalSettings
-        });
-
-        return Scroll(stack);
-
-        void AddSettingRow(string title, Control editor, int row)
-        {
-            network.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var label = Label(title, 13, FontWeights.SemiBold);
-            label.Margin = new Thickness(0, 7, 12, 7);
-            editor.Margin = new Thickness(0, 4, 0, 4);
-            Grid.SetRow(label, row);
-            Grid.SetRow(editor, row);
-            Grid.SetColumn(editor, 1);
-            network.Children.Add(label);
-            network.Children.Add(editor);
-        }
+        panel.Children.Add(BuildUpdateSettingsCard());
+        panel.Children.Add(BuildDataProtectionSettings());
+        return panel;
     }
 
     private string SettingsCategoryDescription(SettingsCategory category) => category switch

@@ -143,7 +143,7 @@ internal sealed partial class MainWindow
         stack.Children.Add(lapsHeading);
         stack.Children.Add(BuildReviewLapTable(laps, approximateTiming));
         var note = Label(
-            "稳定性只根据本机已记录的有效圈与分段计算，不代表线上排名或官方成绩。",
+            "稳定性根据本机记录的有效圈与分段计算。",
             11,
             FontWeights.Normal,
             "MutedBrush");

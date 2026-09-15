@@ -9,8 +9,8 @@ internal sealed class TrayIconService : IDisposable
     private readonly Icon icon;
 
     public TrayIconService(
-        string runtimeMode,
-        string listener,
+        Func<string> runtimeMode,
+        Func<string> listener,
         Action showMainWindow,
         Action exitApplication)
     {
@@ -19,11 +19,12 @@ internal sealed class TrayIconService : IDisposable
 
         icon = LoadApplicationIcon();
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add(new Forms.ToolStripMenuItem(
-            AppLocalization.Format("tray.status", "当前：{0} · 监听 {1}", runtimeMode, listener))
+        var statusItem = new Forms.ToolStripMenuItem(
+            AppLocalization.Format("tray.status", "当前：{0} · 监听 {1}", runtimeMode(), listener()))
         {
             Enabled = false
-        });
+        };
+        menu.Items.Add(statusItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         var showItem = new Forms.ToolStripMenuItem(
             AppLocalization.Text("tray.show", "显示主界面"));
@@ -32,6 +33,12 @@ internal sealed class TrayIconService : IDisposable
         var exitItem = new Forms.ToolStripMenuItem(AppLocalization.Text("tray.exit", "退出"));
         exitItem.Click += (_, _) => exitApplication();
         menu.Items.Add(exitItem);
+        menu.Opening += (_, _) =>
+        {
+            statusItem.Text = AppLocalization.Format("tray.status", "当前：{0} · 监听 {1}", runtimeMode(), listener());
+            showItem.Text = AppLocalization.Text("tray.show", "显示主界面");
+            exitItem.Text = AppLocalization.Text("tray.exit", "退出");
+        };
 
         notifyIcon = new Forms.NotifyIcon
         {

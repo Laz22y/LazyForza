@@ -154,7 +154,7 @@ internal sealed partial class MainWindow
                 Child = cornerPanel
             });
             var note = Label(
-                "LazyForza 只能提供轻度范围内的分析，仅供参考。",
+                "差异说明基于已记录遥测，可结合曲线回看驾驶过程。",
                 11,
                 FontWeights.Normal,
                 "MutedBrush");

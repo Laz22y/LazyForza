@@ -1,4 +1,21 @@
 {
+  "settings.auto.failed": "Could not apply: {0}",
+  "literal:端口范围 1–65535，5200–5300 为保留端口。": "Port range: 1–65535. Ports 5200–5300 are reserved.",
+  "literal:请输入有效 IP 地址和端口。保留端口：5200–5300。": "Enter a valid IP address and port. Ports 5200–5300 are reserved.",
+  "literal:已保存，使用 Live 模式时生效。": "Saved for Live mode.",
+  "literal:数据目录已保存，重启后切换到新目录。": "Data folder saved. Restart to switch to the new folder.",
+  "literal:每个组件可独立选择主题。": "Choose a theme for each widget.",
+  "literal:快速设置": "Quick settings",
+  "literal:选择在侧栏底部显示的项目。": "Choose what appears at the bottom of the sidebar.",
+  "literal:语音工程师": "Race engineer",
+  "literal:语音音量": "Speech volume",
+  "literal:减少动态": "Reduce motion",
+  "literal:模拟遥测": "Simulation",
+  "literal:遥测回放": "Replay",
+  "literal:遥测已连接": "Connected",
+  "literal:遥测已中断": "Signal lost",
+  "literal:监听失败": "Listener error",
+  "literal:等待遥测": "Waiting for data",
   "window.minimize": "Minimize",
   "window.maximize": "Maximize",
   "window.restore": "Restore",
@@ -185,7 +202,7 @@
   "settings.app.close": "When closing the window",
   "settings.app.closeDetail": "Controls what the close button in the main window does.",
   "settings.app.selectedData": "Selected: {0}",
-  "settings.app.restartNote": "Language and data folder changes apply after restart. Existing data is not moved.",
+  "settings.app.restartNote": "Restart to switch data folders. Existing data stays in its original folder.",
   "settings.app.currentData": "Currently in use: {0}\nRestart to apply a new language or data folder. Existing data is not moved automatically.",
   "settings.app.save": "Save startup settings",
   "settings.app.restartMessage": "Settings saved. Restart LazyForza to apply the language and data folder.",
@@ -399,7 +416,7 @@
   ,"literal:重命名车辆配置": "Rename car profile"
   ,"literal:管理 Live UDP、HUD、界面、录制、更新与本地数据。监听设置重启后生效。": "Manage Live UDP, HUDs, appearance, recordings, updates and local data. Listener changes apply after restart."
   ,"literal:玩家代号": "Player code"
-  ,"literal:用于新录制和圈速分享；首次加入地产赛事时作为代表名默认值。可留空，不覆盖上次参赛代表名。": "Used for new recordings and shared laps, and as the default name when first joining an estate race. Optional; does not overwrite your last race name."
+  ,"literal:用于录制、圈速分享和首次参赛的默认代表名。留空时不标注。": "Used for recordings, lap sharing and your initial race display name. Leave blank to omit."
   ,"literal:最多 20 个字符；留空表示不标注": "Up to 20 characters; leave blank to omit"
   ,"literal:保存监听设置": "Save listener settings"
   ,"literal:监听 IP": "Listen IP"
@@ -411,7 +428,7 @@
   ,"literal:设置 Overlay 布局": "Set Overlay layout"
   ,"literal:以 Forza Horizon 6 当前窗口为背景，拖动并缩放 Overlay": "Move and resize HUDs over the current Forza Horizon 6 window"
   ,"literal:重置 Overlay": "Reset Overlay"
-  ,"literal:恢复 Overlay、仪表盘部件与地产赛事部件的默认布局；不修改监听 IP 和 UDP 端口": "Restore default Overlay, dashboard and estate-race layouts without changing the listener"
+  ,"literal:恢复 HUD 的默认布局与显示设置。": "Restore the default HUD layouts and display settings."
   ,"literal:应用 HUD 设置": "Apply HUD settings"
   ,"literal:备份、迁移并恢复 LazyForza 的个人数据。": "Back up, move and restore your LazyForza data."
   ,"literal:导出备份": "Export backup"
@@ -432,7 +449,7 @@
   ,"literal:打开 .lfztelemetry": "Open .lfztelemetry"
   ,"literal:支持自动/手动原始录制，以及由工作台导出的单圈 .lfztelemetry。": "Supports automatic and manual raw recordings, plus single-lap .lfztelemetry files exported here."
   ,"literal:导出单圈 .lfztelemetry": "Export lap .lfztelemetry"
-  ,"literal:导出当前工作台单圈；不会伪造缺失的原始 FH6 UDP 字段": "Export the current lap without inventing missing FH6 UDP fields"
+  ,"literal:导出当前工作台单圈，包含已记录的遥测字段。": "Export the current lap with its recorded telemetry fields."
   ,"literal:暂无已保存圈速": "No saved laps"
   ,"literal:仍可从上方打开 .lfztelemetry 录制文件。": "You can still open an .lfztelemetry recording above."
   ,"literal:播放": "Play"
@@ -830,12 +847,12 @@
   ,"literal:每圈配速趋势": "Pace trend per lap"
   ,"literal:正数表示逐圈变慢": "Positive means slower each lap"
   ,"literal:尚无样本。": "No samples yet."
-  ,"literal:只比较继续跑与一次虚拟换胎的预计用时，不代表 FH6 真实胎况，也不包含天气、交通、对手临场策略或未执行处罚。赛道边界失控造成的异常损时不会计入轮胎衰退趋势。": "Compares staying out with one simulated tire change. It does not represent actual FH6 tire condition and excludes weather, traffic, opponent strategy and unserved penalties. Abnormal time loss from boundary incidents is excluded from the pace trend."
+  ,"literal:根据干净圈配速和预计进站损失，比较继续跑与一次虚拟换胎的用时。预测未计入天气、交通、对手策略及未执行处罚。": "Compares staying out with one simulated tire change using clean-lap pace and estimated pit loss. Predictions exclude weather, traffic, opponent strategy and unserved penalties."
   ,"literal:正赛排名": "Race classification"
   ,"literal:练习赛排名": "Practice classification"
   ,"literal:排位赛排名": "Qualifying classification"
   ,"literal:正赛最终成绩": "Final race result"
-  ,"literal:抓地提示不是轮胎磨损值。FH6 UDP 不提供轮胎磨损、车损或换胎完成字段；HUD 只根据本圈轮胎滑移样本分为略微、中度、严重、极限四档。“正在维修区服务”只代表车辆进入已录入的换胎区；本机显示“维修停留完成”也仅表示连续低速停车达到设置时长。": "Grip guidance is not tire wear. FH6 UDP provides no tire-wear, damage or tire-change completion fields. The HUD classifies this lap's tire-slip samples into four levels. Pit service means only that the car entered the recorded service zone; service complete means only that the configured low-speed stop time was reached."
+  ,"literal:抓地等级依据本圈轮胎滑移样本；维修完成依据低速停车时长。FH6 UDP 未提供轮胎磨损、车损或换胎完成数据。": "Grip levels use this lap's tire-slip samples; service completion uses low-speed stopping time. FH6 UDP does not provide tire wear, damage or tire-change completion data."
   ,"literal:尚未进入正赛。": "The race has not started."
   ,"literal:等待服务端": "Waiting for server"
   ,"literal:尚未收到策略样本。": "No strategy samples received."
@@ -869,7 +886,7 @@
   ,"literal:四驱": "AWD"
   ,"literal:驱动未知": "Unknown drivetrain"
   ,"literal: · 转速限制推算": " · limiter estimate"
-  ,"literal:数据不足：不会伪造最佳换挡点。": "Insufficient data; no shift point will be fabricated."
+  ,"literal:样本不足，继续驾驶以学习换挡点。": "More samples are needed. Continue driving to learn shift points."
   ,"literal:暂无": "None"
   ,"literal:已吸附": "Attached"
   ,"literal:独立布局": "Independent layout"
@@ -886,7 +903,7 @@
   ,"literal:Live HUD 断流隐藏": "Live HUD stale timeout"
   ,"literal:界面与诊断": "Interface and diagnostics"
   ,"literal:诊断页用于排查 UDP、赛道识别、模块与本地文件问题；日常使用可以保持隐藏。": "Diagnostics helps investigate UDP, track recognition, modules and local files. It can stay hidden for daily use."
-  ,"literal:默认隐藏诊断入口。开启后，侧边栏会增加“诊断”；关闭不会删除诊断记录或影响一键诊断包。": "Diagnostics is hidden by default. Enabling it adds Diagnostics to the sidebar; disabling it does not delete records or affect diagnostic packages."
+  ,"literal:开启后，在侧栏显示“诊断”入口。": "Show Diagnostics in the sidebar when enabled."
   ,"literal:比赛自动录制": "Automatic race recording"
   ,"literal:仅在 Live 模式生效；自动保留赛前 15 秒和赛后 10 秒，便于完整回放识别与比赛起止过程。": "Live mode only. Keeps 15 seconds before and 10 seconds after each race for complete replay and session-boundary coverage."
   ,"literal:录制容量上限": "Recording storage limit"
@@ -1158,9 +1175,9 @@
   ,"literal:未进入当前前三候选，可按官方赛事名称人工核对。": "Not in the current top three candidates. Verify it manually by official event name."
   ,"literal:漂移仪表盘（实验性功能）": "Drift dashboard (experimental)"
   ,"literal:漂移仪表盘 · 实验性功能": "Drift dashboard · Experimental"
-  ,"literal:它会用 FH6 官方 UDP 中的本车速度、侧滑、偏航和驾驶输入，优先判断 Spin 风险，并用方向箭头、换挡箭头和颜色区间提供练习辅助。控车余量与积分速度趋势均为 LazyForza 推导，不是游戏漂移分数，辅助作用有限。": "It uses vehicle speed, slip, yaw and driver inputs from official FH6 UDP data to prioritize spin risk and provide practice cues through steering arrows, shift arrows and color ranges. Control margin and score-rate trends are LazyForza estimates, not the in-game drift score."
-  ,"literal:实验性功能 · 辅助能力有限": "Experimental · Limited assistance"
-  ,"literal:Spin 风险、方向修正和换挡建议仍需结合更多真实 FH6 漂移数据持续校准，只能作为有限的练习辅助。换挡箭头用于降低失控风险，不代表车辆的最佳换挡点；请勿把当前结果视为游戏计分、裁判结论或稳定控车的保证。": "Spin risk, steering corrections and shift cues still require calibration with more real FH6 drift data. Shift arrows are intended to reduce loss-of-control risk, not mark the vehicle's optimal shift point. Treat the display as practice assistance only."
+  ,"literal:根据本车速度、侧滑、偏航和驾驶输入估计 Spin 风险，通过方向箭头、换挡箭头和色带辅助漂移练习。": "Estimates spin risk from your speed, slip, yaw and driving inputs, with steering cues, shift arrows and color bands for drift practice."
+  ,"literal:如何理解提示": "Understanding the guidance"
+  ,"literal:控车余量与积分速度趋势由 LazyForza 根据遥测估算，游戏漂移分数仍以游戏内显示为准。换挡箭头侧重降低失控风险。": "Control margin and scoring-speed trends are LazyForza telemetry estimates; read actual drift scores in the game. Shift arrows focus on reducing spin risk."
   ,"literal:先控车，再增加角度": "Control the car before adding angle"
   ,"literal:底部 SPIN 色带越靠近红色，失控风险越高；此时优先按方向和换挡图形降低风险。绿色状态下，积分速度格会随侧滑角增大而增加，但不建议为了填满格数强行扩大角度。": "As the SPIN band moves toward red, loss-of-control risk increases. Follow the steering and shift cues first. In green, the score-rate meter rises with slip angle, but do not force more angle just to fill it."
   ,"literal:建议减少信息重叠": "Reduce competing information"
@@ -1496,7 +1513,7 @@
   ,"literal:性能等级未知": "Performance class unknown"
   ,"literal:性能指数": "Performance index"
   ,"literal:一次最多比较 4 圈。": "You can compare up to four laps."
-  ,"literal:依据已保存的速度、输入、位置与动态遥测；旧圈可能不含轮胎滑移。LazyForza 只能提供轻度范围内的分析，仅供参考。": "Based on saved speed, input, position and dynamics telemetry; legacy laps may not include tire slip. LazyForza provides basic analysis for reference only."
+  ,"literal:分析依据已保存的速度、驾驶输入、位置与动态遥测；旧圈可能缺少轮胎滑移样本。": "Analysis uses saved speed, driver inputs, position and dynamics telemetry. Older laps may lack tire-slip samples."
   ,"literal:已掉线": "Disconnected"
   ,"literal:已结束": "Ended"
   ,"literal:油刹重叠偏多": "Excessive brake/throttle overlap"
@@ -1528,7 +1545,7 @@
   ,"literal:结论": "Findings"
   ,"literal:分段稳定性": "Sector consistency"
   ,"literal:有效圈摘要": "Valid-lap summary"
-  ,"literal:稳定性只根据本机已记录的有效圈与分段计算，不代表线上排名或官方成绩。": "Consistency is calculated only from valid laps and sectors recorded locally. It is not an online ranking or official result."
+  ,"literal:稳定性根据本机记录的有效圈与分段计算。": "Consistency is calculated from valid laps and sectors recorded locally."
   ,"literal:样本较少": "Limited sample"
   ,"literal:用于统计": "Included in statistics"
   ,"literal:分段": "Sector"
@@ -1542,7 +1559,7 @@
   ,"literal:LazyForza · 圈速对比": "LazyForza · Lap comparison"
   ,"literal:速度曲线": "Speed graph"
   ,"literal:弯角摘要": "Corner summary"
-  ,"literal:LazyForza 只能提供轻度范围内的分析，仅供参考。": "LazyForza provides basic analysis for reference only."
+  ,"literal:差异说明基于已记录遥测，可结合曲线回看驾驶过程。": "Differences are based on recorded telemetry. Review the charts for driving context."
   ,"literal:比赛范围": "Race group"
   ,"literal:勾选最多 4 圈，再加载图表；每个性能等级单独标记历史最快。": "Select up to four laps, then load the charts. Historical bests are marked separately by class."
   ,"literal:选择": "Select"

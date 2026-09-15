@@ -225,14 +225,17 @@ internal sealed partial class MainWindow
         };
         engineerPreviewButton.Click += async (_, _) => await PreviewEngineerAsync();
         controls.Children.Add(engineerPreviewButton);
-        void Apply()
+        var syncing = false;
+        refreshEngineerControls = () =>
         {
-            raceEngineer?.Configure(engineerEnabled, engineerMuted, engineerVolume);
-            store.SetAppSetting("raceEngineer.enabled", engineerEnabled.ToString());
-            store.SetAppSetting("raceEngineer.muted", engineerMuted.ToString());
-            store.SetAppSetting("raceEngineer.volume", engineerVolume.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            UpdateRaceEngineer();
-        }
+            syncing = true;
+            enabled.IsChecked = engineerEnabled;
+            volume.Value = engineerVolume;
+            value.Text = $"{engineerVolume}%";
+            mute.Content = EngineerText(engineerMuted ? "恢复声音" : "立即静音", engineerMuted ? "Unmute" : "Mute now");
+            syncing = false;
+        };
+        void Apply() => ApplyEngineerPreferences();
         enabled.Click += (_, _) => { engineerEnabled = enabled.IsChecked == true; Apply(); };
         mute.Click += (_, _) =>
         {
@@ -240,7 +243,7 @@ internal sealed partial class MainWindow
             Apply();
             mute.Content = EngineerText(engineerMuted ? "恢复声音" : "立即静音", engineerMuted ? "Unmute" : "Mute now");
         };
-        volume.ValueChanged += (_, _) => { engineerVolume = (int)volume.Value; value.Text = $"{engineerVolume}%"; Apply(); };
+        volume.ValueChanged += (_, _) => { if (syncing) return; engineerVolume = (int)volume.Value; Apply(); };
         panel.Children.Add(controls);
         var voiceRow = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
         engineerServiceButton = new Button

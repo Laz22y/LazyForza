@@ -372,7 +372,7 @@ internal sealed partial class MainWindow
         strategyEvidence.Margin = new Thickness(2, 10, 0, 0);
         strategyPanel.Children.Add(strategyEvidence);
         var strategyNotice = Label(
-            "只比较继续跑与一次虚拟换胎的预计用时，不代表 FH6 真实胎况，也不包含天气、交通、对手临场策略或未执行处罚。赛道边界失控造成的异常损时不会计入轮胎衰退趋势。",
+            "根据干净圈配速和预计进站损失，比较继续跑与一次虚拟换胎的用时。预测未计入天气、交通、对手策略及未执行处罚。",
             11, FontWeights.Normal, "WarningBrush");
         strategyNotice.Margin = new Thickness(2, 7, 0, 0);
         strategyPanel.Children.Add(strategyNotice);
@@ -391,7 +391,7 @@ internal sealed partial class MainWindow
         participantList.Children.Add(participantRows);
         connectedContent.Children.Add(Card(participantList));
         var gripNotice = Label(
-            "抓地提示不是轮胎磨损值。FH6 UDP 不提供轮胎磨损、车损或换胎完成字段；HUD 只根据本圈轮胎滑移样本分为略微、中度、严重、极限四档。“正在维修区服务”只代表车辆进入已录入的换胎区；本机显示“维修停留完成”也仅表示连续低速停车达到设置时长。",
+            "抓地等级依据本圈轮胎滑移样本；维修完成依据低速停车时长。FH6 UDP 未提供轮胎磨损、车损或换胎完成数据。",
             12, FontWeights.Normal, "WarningBrush");
         gripNotice.Margin = new Thickness(4, 12, 8, 8);
         connectedContent.Children.Add(gripNotice);

@@ -29,11 +29,11 @@ internal sealed class DriftDashboardIntroductionWindow : Window
             FontWeight = FontWeights.SemiBold
         });
         stack.Children.Add(Paragraph(
-            "它会用 FH6 官方 UDP 中的本车速度、侧滑、偏航和驾驶输入，优先判断 Spin 风险，并用方向箭头、换挡箭头和颜色区间提供练习辅助。控车余量与积分速度趋势均为 LazyForza 推导，不是游戏漂移分数，辅助作用有限。",
+            "根据本车速度、侧滑、偏航和驾驶输入估计 Spin 风险，通过方向箭头、换挡箭头和色带辅助漂移练习。",
             new Thickness(0, 10, 0, 0)));
         stack.Children.Add(Section(
-            "实验性功能 · 辅助能力有限",
-            "Spin 风险、方向修正和换挡建议仍需结合更多真实 FH6 漂移数据持续校准，只能作为有限的练习辅助。换挡箭头用于降低失控风险，不代表车辆的最佳换挡点；请勿把当前结果视为游戏计分、裁判结论或稳定控车的保证。"));
+            "如何理解提示",
+            "控车余量与积分速度趋势由 LazyForza 根据遥测估算，游戏漂移分数仍以游戏内显示为准。换挡箭头侧重降低失控风险。"));
 
         stack.Children.Add(Section(
             "先控车，再增加角度",

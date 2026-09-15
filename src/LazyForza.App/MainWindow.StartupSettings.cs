@@ -112,7 +112,7 @@ internal sealed partial class MainWindow
             DisplayMemberPath = nameof(DataDirectoryChoice.Name),
             SelectedItem = storageChoices.First(choice =>
                 choice.Path is not null && PathsEqual(choice.Path, profile.DataDirectory)) ?? storageChoices[^1],
-            MinWidth = 300,
+            MinWidth = 160,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         var selectedDataDirectory = profile.DataDirectory;
@@ -140,7 +140,10 @@ internal sealed partial class MainWindow
         {
             if (storage.SelectedItem is not DataDirectoryChoice choice) return;
             if (choice.Path is not null)
+            {
                 selectedDataDirectory = choice.Path;
+                SaveDirectory();
+            }
             UpdateStoragePath();
         };
         chooseFolder.Click += (_, _) =>
@@ -192,54 +195,53 @@ internal sealed partial class MainWindow
             AppLocalization.Text("settings.app.closeDetail", "决定主窗口右上角关闭按钮的行为。"),
             closeBehavior));
 
-        var footer = new Grid { Margin = new Thickness(2, 3, 0, 0) };
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var note = Label(
             AppLocalization.Text(
                 "settings.app.restartNote",
-                "语言和数据目录在重启后生效；切换目录不会搬移现有数据。"),
+                "切换数据目录需重启；原目录的数据保留在原处。"),
             10,
             FontWeights.Normal,
             "MutedBrush");
         note.VerticalAlignment = VerticalAlignment.Center;
         note.Margin = new Thickness(0, 0, 18, 0);
-        footer.Children.Add(note);
-        var save = new Button
+        panel.Children.Add(note);
+        language.SelectionChanged += (_, _) =>
         {
-            Content = AppLocalization.Text("settings.app.save", "保存启动设置"),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Padding = new Thickness(16, 8, 16, 8)
-        };
-        save.Click += (_, _) =>
-        {
-            var selectedLanguage = ((AppLanguageOption)language.SelectedItem).Code;
-            var selectedCloseBehavior = ((CloseBehaviorChoice)closeBehavior.SelectedItem).Value;
-            var normalizedDataDirectory = Path.GetFullPath(selectedDataDirectory);
-            var updatedProfile = profile with
+            if (language.SelectedItem is not AppLanguageOption selected) return;
+            profile = startupProfileStore.Load() with { Language = selected.Code };
+            startupProfileStore.Save(profile);
+            Dispatcher.BeginInvoke(() =>
             {
-                Language = selectedLanguage,
-                DataDirectory = normalizedDataDirectory,
-                CloseBehavior = selectedCloseBehavior,
-                AccentColor = selectedAccentColor
-            };
-            startupProfileStore.Save(updatedProfile);
-            var restartRequired =
-                !selectedLanguage.Equals(profile.Language, StringComparison.OrdinalIgnoreCase) ||
-                !PathsEqual(normalizedDataDirectory, directories.Root);
-            save.Content = AppLocalization.Text("literal:已保存", "已保存");
-            if (restartRequired)
-                AppRestartPrompt.Show(
-                    this,
-                    AppLocalization.Text(
-                        "settings.app.restartMessage",
-                        "设置已保存，重启 LazyForza 后应用语言和数据目录。"));
-            profile = updatedProfile;
+                AppLocalization.UseLanguage(selected.Code);
+                _ = ChangeEngineerVoiceAsync(engineerVoice, save: false);
+                var pageIndex = navigation.SelectedIndex;
+                PopulateNavigation(); BuildSidebarQuickSettings();
+                brandWindowFrame?.RefreshLabels();
+                if (sourceChip is not null)
+                {
+                    sourceChip.Child = Label(sourceKind == LazyForza.Domain.TelemetrySourceKind.Live ? "LIVE UDP" : AppLocalization.Literal("模拟 / 回放"), 12, FontWeights.SemiBold);
+                    sourceChip.ToolTip = sourceKind == LazyForza.Domain.TelemetrySourceKind.Live ? ConfiguredLiveEndpoint() : AppLocalization.Literal("模拟 / 回放");
+                }
+                navigation.SelectedIndex = pageIndex;
+                RefreshSidebar();
+            });
         };
-        Grid.SetColumn(save, 1);
-        footer.Children.Add(save);
-        panel.Children.Add(footer);
+        closeBehavior.SelectionChanged += (_, _) =>
+        {
+            if (closeBehavior.SelectedItem is not CloseBehaviorChoice selected) return;
+            profile = startupProfileStore.Load() with { CloseBehavior = selected.Value };
+            startupProfileStore.Save(profile);
+        };
         return Card(panel);
+
+        void SaveDirectory()
+        {
+            var path = Path.GetFullPath(selectedDataDirectory);
+            if (PathsEqual(profile.DataDirectory, path)) return;
+            profile = startupProfileStore.Load() with { DataDirectory = path };
+            startupProfileStore.Save(profile);
+            AppRestartPrompt.Show(this, AppLocalization.Literal("数据目录已保存，重启后切换到新目录。"));
+        }
 
         void UpdateStoragePath()
         {

@@ -47,10 +47,11 @@ internal sealed partial class MainWindow
 
         var choices = new Grid { Margin = new Thickness(0, 16, 0, 8) };
         choices.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(170) });
-        choices.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) });
+        choices.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         choices.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
         choices.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(170) });
-        choices.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) });
+        choices.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        choices.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         choices.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var capacityLabel = Label("录制容量上限", 12, FontWeights.SemiBold);
@@ -85,6 +86,16 @@ internal sealed partial class MainWindow
         if (reserve.SelectedIndex < 0) reserve.SelectedValue = 5L;
         Grid.SetColumn(reserve, 4);
         choices.Children.Add(reserve);
+        choices.SizeChanged += (_, _) =>
+        {
+            var compact = choices.ActualWidth < 740;
+            choices.ColumnDefinitions[2].Width = new GridLength(compact ? 0 : 24);
+            choices.ColumnDefinitions[3].Width = new GridLength(compact ? 0 : 170);
+            choices.ColumnDefinitions[4].Width = compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(reserveLabel, compact ? 0 : 3); Grid.SetRow(reserveLabel, compact ? 1 : 0);
+            Grid.SetColumn(reserve, compact ? 1 : 4); Grid.SetRow(reserve, compact ? 1 : 0);
+            reserveLabel.Margin = reserve.Margin = new Thickness(0, compact ? 10 : 0, 0, 0);
+        };
         panel.Children.Add(choices);
 
         var rotate = new CheckBox
@@ -116,16 +127,10 @@ internal sealed partial class MainWindow
         panel.Children.Add(status);
 
         var actions = new WrapPanel();
-        var save = new Button
+        var applyStatus = AutoApplyStatus();
+        panel.Children.Add(applyStatus);
+        var automatic = AutoApplySettings(panel, async () =>
         {
-            Content = "应用录制设置",
-            Padding = new Thickness(16, 8, 16, 8)
-        };
-        save.Click += async (_, _) =>
-        {
-            save.IsEnabled = false;
-            try
-            {
                 var maximumGiB = capacity.SelectedValue is long selectedMaximum ? selectedMaximum : 5;
                 var reserveGiB = reserve.SelectedValue is long selectedReserve ? selectedReserve : 5;
                 await recorder.SetAutomaticOptionsAsync(
@@ -137,18 +142,18 @@ internal sealed partial class MainWindow
                         15,
                         10),
                     CancellationToken.None);
-                RenderSelectedPage();
-            }
-            finally
-            {
-                save.IsEnabled = true;
-            }
-        };
-        actions.Children.Add(save);
+                status.Text = AppLocalization.Format("settings.recording.status", "{0}\n当前录制占用 {1} · 目录 {2}",
+                    AppLocalization.Literal(recorder.AutomaticStatus), FormatBytes(recorder.RecordingBytes), directories.RecordingsPath);
+                applyStatus.Visibility = Visibility.Collapsed;
+        }, applyStatus);
+        enabled.Click += (_, _) => automatic.Request();
+        rotate.Click += (_, _) => automatic.Request();
+        capacity.SelectionChanged += (_, _) => automatic.Request();
+        reserve.SelectionChanged += (_, _) => automatic.Request();
         var openFolder = new Button
         {
             Content = "打开录制目录",
-            Margin = new Thickness(10, 0, 0, 0),
+            Margin = new Thickness(0),
             Padding = new Thickness(14, 8, 14, 8)
         };
         openFolder.Click += (_, _) =>

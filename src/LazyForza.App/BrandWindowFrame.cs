@@ -118,6 +118,7 @@ internal sealed class BrandWindowFrame
     }
 
     private void EnabledChanged(object sender, DependencyPropertyChangedEventArgs args) => UpdateState(sender, EventArgs.Empty);
+    internal void RefreshLabels() => UpdateState(window, EventArgs.Empty);
 
     private IntPtr WndProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {

@@ -97,7 +97,7 @@ internal sealed partial class MainWindow
             Content = "重置 Overlay",
             Margin = new Thickness(12, 0, 0, 0),
             Padding = new Thickness(12, 7, 12, 7),
-            ToolTip = "恢复 Overlay、仪表盘部件与地产赛事部件的默认布局；不修改监听 IP 和 UDP 端口"
+            ToolTip = "恢复 HUD 的默认布局与显示设置。"
         };
         resetDefaults.Click += async (_, _) =>
         {
@@ -205,6 +205,11 @@ internal sealed partial class MainWindow
             RefreshInteractionControls();
         };
         RefreshInteractionControls();
+        syncHudMotionPreference = () =>
+        {
+            reduceMotion.IsChecked = overlay.TimingLayout.ReduceMotion;
+            RefreshInteractionControls();
+        };
         interaction.Children.Add(opacityControls);
         var interactionGroup = SettingGroup(
             "透明度与动态",
@@ -371,7 +376,7 @@ internal sealed partial class MainWindow
             row.Children.Add(opacityCell);
             themeControls.Children.Add(row);
         }
-        var themeNote = Label("每个组件可独立选择主题。应用后立即生效，重启后保留。", 12, FontWeights.Normal, "MutedBrush");
+        var themeNote = Label("每个组件可独立选择主题。", 12, FontWeights.Normal, "MutedBrush");
         themeNote.Visibility = showThemeChoices ? Visibility.Visible : Visibility.Collapsed;
         themeNote.Margin = new Thickness(0, 0, 0, 14);
         themeControls.Children.Insert(0, themeNote);
@@ -422,19 +427,9 @@ internal sealed partial class MainWindow
             hudTimingExpanded,
             expanded => hudTimingExpanded = expanded));
 
-        var footer = new Grid();
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var saveHint = Label("点击应用后立即生效。", 11, FontWeights.Normal, "MutedBrush");
-        saveHint.VerticalAlignment = VerticalAlignment.Center;
-        footer.Children.Add(saveHint);
-        var saveOverlay = new Button
-        {
-            Content = "应用 HUD 设置",
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Padding = new Thickness(16, 7, 16, 7)
-        };
-        saveOverlay.Click += async (_, _) =>
+        var applyStatus = AutoApplyStatus();
+        controls.Children.Insert(0, applyStatus);
+        var automatic = AutoApplySettings(controls, async () =>
         {
             var dashboardWidgets = DashboardWidgetLayoutSettings.Normalize(
                 overlay.CurrentLayout.DashboardWidgets);
@@ -489,26 +484,22 @@ internal sealed partial class MainWindow
                 next,
                 OverlayHudKind.Drift,
                 driftScale.Value);
-            if (current.LapHudAttachedToDashboard &&
+            if (overlay.CurrentLayout.LapHudAttachedToDashboard &&
                 Math.Abs(dashboardScale.Value - lapScale.Value) <
                 OverlayScaleSettings.Step / 2)
                 next = OverlayLayoutGeometry.AttachLapToDashboard(next);
             store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
             await overlay.SetLayoutAsync(next, CancellationToken.None);
-            RenderSelectedPage();
-        };
-        Grid.SetColumn(saveOverlay, 1);
-        footer.Children.Add(saveOverlay);
-        controls.Children.Insert(0, new Border
+            applyStatus.Visibility = Visibility.Collapsed;
+            RefreshSidebar();
+        }, applyStatus);
+        controls.AddHandler(Slider.ValueChangedEvent, new RoutedPropertyChangedEventHandler<double>((_, _) => automatic.Request()));
+        foreach (var toggle in componentToggles.Values.Concat(estateRaceToggles.Values).Append(reduceMotion).Append(dashboardMotion))
         {
-            Background = Brush("PanelBrush"),
-            BorderBrush = Brush("BorderBrush"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(12, 7, 12, 7),
-            Margin = new Thickness(0, 0, 10, 8),
-            Child = footer
-        });
+            toggle.Checked += (_, _) => automatic.Request();
+            toggle.Unchecked += (_, _) => automatic.Request();
+        }
+        foreach (var theme in estateRaceThemes.Values) theme.SelectionChanged += (_, _) => automatic.Request();
         return controls;
 
         Slider AddValueSlider(

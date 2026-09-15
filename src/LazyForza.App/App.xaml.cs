@@ -34,6 +34,7 @@ public partial class App : Application
     private StartupProfile startupProfile = StartupProfile.CreateDefault();
     private string[] startupArguments = [];
     private bool exitRequested;
+    private bool exitPending;
     private bool minimizedNoticeShown;
     private static bool localizationHandlerRegistered;
 
@@ -220,6 +221,12 @@ public partial class App : Application
                 lapAnalysis,
                 message => log.Write(message));
             await recorder.InitializeAsync(CancellationToken.None);
+            var windowProfileStore = startupProfileStore;
+            if (captureDirectory is not null)
+            {
+                windowProfileStore = new StartupProfileStore(Path.Combine(captureDirectory, "qa-startup-profile.json"));
+                windowProfileStore.Save(startupProfile with { Language = AppLocalization.CurrentLanguage, DataDirectory = directories.Root });
+            }
             MainWindow = new MainWindow(
                 moduleManager,
                 telemetry,
@@ -231,7 +238,7 @@ public partial class App : Application
                 updateManager,
                 diagnosticCapture,
                 moduleActivation,
-                startupProfileStore);
+                windowProfileStore);
             MainWindow.Closing += OnMainWindowClosing;
             MainWindow.Show();
             if (associatedFilePath is not null)
@@ -240,8 +247,8 @@ public partial class App : Application
                         _ = ((MainWindow)MainWindow).OpenAssociatedFileAsync(associatedFilePath)),
                     System.Windows.Threading.DispatcherPriority.Background);
             trayIcon = new TrayIconService(
-                SourceModeText(source.Kind),
-                $"{listenAddress}:{port}",
+                () => SourceModeText(source.Kind),
+                () => telemetry.Diagnostics.ListenAddress,
                 ShowMainWindow,
                 () => ExitApplication());
             if (captureDirectory is null && recordSeconds is null)
@@ -306,6 +313,7 @@ public partial class App : Application
     private void OnMainWindowClosing(object? sender, CancelEventArgs e)
     {
         if (exitRequested) return;
+        if (exitPending) { e.Cancel = true; return; }
         if ((startupProfileStore?.Load() ?? startupProfile).CloseBehavior ==
             MainWindowCloseBehavior.ExitApplication)
         {
@@ -342,9 +350,15 @@ public partial class App : Application
             _ = mainWindow.OpenAssociatedFileAsync(associatedFilePath);
     }
 
-    private void ExitApplication(int exitCode = 0)
+    private async void ExitApplication(int exitCode = 0)
     {
-        if (exitRequested) return;
+        if (exitRequested || exitPending) return;
+        exitPending = true;
+        if (MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.IsEnabled = false;
+            await mainWindow.FlushSettingsAsync();
+        }
         exitRequested = true;
         Shutdown(exitCode);
     }
