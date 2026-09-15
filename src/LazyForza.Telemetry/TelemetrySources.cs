@@ -49,18 +49,31 @@ public sealed class UdpTelemetrySource(TelemetryOptions options) : ITelemetrySou
     public TelemetrySourceKind Kind => TelemetrySourceKind.Live;
     public string Description => $"{options.ListenAddress}:{options.Port}";
 
-    public async Task RunAsync(Func<TelemetryFrame, ValueTask> publish, Action<string> onInvalid, CancellationToken cancellationToken)
+    internal void PrepareListener()
     {
+        if (client is not null) return;
         if (!IPAddress.TryParse(options.ListenAddress, out var address))
         {
             throw new ArgumentException("ListenAddress must be an IP literal.", nameof(options));
         }
 
-        client = new UdpClient(new IPEndPoint(address, options.Port));
+        var next = new UdpClient(address.AddressFamily);
+        try
+        {
+            next.ExclusiveAddressUse = true;
+            next.Client.Bind(new IPEndPoint(address, options.Port));
+            client = next;
+        }
+        catch { next.Dispose(); throw; }
+    }
+
+    public async Task RunAsync(Func<TelemetryFrame, ValueTask> publish, Action<string> onInvalid, CancellationToken cancellationToken)
+    {
+        PrepareListener();
         long sequence = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
-            var result = await client.ReceiveAsync(cancellationToken).ConfigureAwait(false);
+            var result = await client!.ReceiveAsync(cancellationToken).ConfigureAwait(false);
             if (parser.TryParse(result.Buffer, sequence++, DateTimeOffset.UtcNow, Kind, out var frame, out var error))
             {
                 await publish(frame!).ConfigureAwait(false);

@@ -35,6 +35,11 @@ public interface ITelemetrySubscription : IAsyncDisposable
     ChannelReader<TelemetryFrame> Frames { get; }
 }
 
+public interface ILiveTelemetryConfiguration
+{
+    ValueTask ChangeListenerAsync(string address, int port, CancellationToken cancellationToken);
+}
+
 public interface ITelemetryFeed : IAsyncDisposable
 {
     TelemetryFrame? Latest { get; }

@@ -5,11 +5,11 @@ using LazyForza.Modules.Abstractions;
 
 namespace LazyForza.Telemetry;
 
-public sealed class TelemetryHub : ITelemetryFeed
+public sealed class TelemetryHub : ITelemetryFeed, ILiveTelemetryConfiguration
 {
-    private readonly ITelemetrySource source;
-    private readonly TelemetryOptions options;
-    private readonly StreamStatistics statistics = new();
+    private ITelemetrySource source;
+    private TelemetryOptions options;
+    private StreamStatistics statistics = new();
     private readonly ConcurrentDictionary<Guid, Channel<TelemetryFrame>> subscribers = new();
     private readonly object subscriberSync = new();
     private readonly SemaphoreSlim lifecycleLock = new(1, 1);
@@ -18,6 +18,7 @@ public sealed class TelemetryHub : ITelemetryFeed
     private Task? sourceTask;
     private TelemetryFrame? latest;
     private string? lastError;
+    private bool sourceFailed;
     private bool disposed;
 
     public TelemetryHub(ITelemetrySource source, TelemetryOptions options)
@@ -27,6 +28,68 @@ public sealed class TelemetryHub : ITelemetryFeed
     }
 
     public TelemetryFrame? Latest => Volatile.Read(ref latest);
+
+    public async ValueTask ChangeListenerAsync(string address, int port, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (!System.Net.IPAddress.TryParse(address, out var parsedAddress) || port is < 1 or > 65535)
+            throw new ArgumentException("Invalid UDP endpoint.");
+        await lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (source is not UdpTelemetrySource) throw new InvalidOperationException("The current source is not live UDP.");
+            var nextOptions = options with { ListenAddress = parsedAddress.ToString(), Port = port };
+            if (nextOptions == options && !sourceFailed) return;
+            var previousOptions = options;
+            var candidate = new UdpTelemetrySource(nextOptions);
+            var releasedPrevious = false;
+            try
+            {
+                // Changing the bind address on the same port may require releasing our own socket first.
+                if (port == options.Port)
+                {
+                    await StopListenerAsync().ConfigureAwait(false);
+                    releasedPrevious = true;
+                }
+                candidate.PrepareListener(); // A busy new port leaves the existing feed untouched.
+                if (!releasedPrevious) await StopListenerAsync().ConfigureAwait(false);
+                source = candidate;
+                options = nextOptions;
+                statistics = new StreamStatistics();
+                Volatile.Write(ref latest, null);
+                lastError = null; sourceFailed = false;
+                StartListener();
+            }
+            catch
+            {
+                await candidate.DisposeAsync().ConfigureAwait(false);
+                if (releasedPrevious)
+                {
+                    source = new UdpTelemetrySource(previousOptions);
+                    StartListener();
+                }
+                throw;
+            }
+        }
+        finally { lifecycleLock.Release(); }
+    }
+
+    private void StartListener()
+    {
+        lastError = null; sourceFailed = false;
+        sourceCancellation = new CancellationTokenSource();
+        var token = sourceCancellation.Token;
+        sourceTask = Task.Run(() => RunSourceAsync(token), CancellationToken.None);
+    }
+
+    private async Task StopListenerAsync()
+    {
+        sourceCancellation?.Cancel();
+        if (sourceTask is not null) await sourceTask.ConfigureAwait(false);
+        await source.DisposeAsync().ConfigureAwait(false);
+        sourceCancellation?.Dispose(); sourceCancellation = null; sourceTask = null;
+    }
 
     public TelemetryDiagnostics Diagnostics
     {
@@ -73,8 +136,7 @@ public sealed class TelemetryHub : ITelemetryFeed
         {
             if (sourceTask is null)
             {
-                sourceCancellation = new CancellationTokenSource();
-                sourceTask = Task.Run(() => RunSourceAsync(sourceCancellation.Token), CancellationToken.None);
+                StartListener();
             }
         }
         finally
@@ -102,10 +164,10 @@ public sealed class TelemetryHub : ITelemetryFeed
         catch (Exception ex)
         {
             lastError = ex.Message;
-            foreach (var subscriber in Volatile.Read(ref subscriberSnapshot))
-            {
-                subscriber.Writer.TryComplete(ex);
-            }
+            sourceFailed = true;
+            // Keep subscribers available so a corrected live endpoint can resume the same modules.
+            if (source.Kind != TelemetrySourceKind.Live)
+                foreach (var subscriber in Volatile.Read(ref subscriberSnapshot)) subscriber.Writer.TryComplete(ex);
         }
     }
 
@@ -129,7 +191,7 @@ public sealed class TelemetryHub : ITelemetryFeed
 
     private TelemetryStreamState SourceState(DateTimeOffset? lastPacket)
     {
-        if (lastError is not null && sourceTask?.IsFaulted == true)
+        if (sourceFailed)
         {
             return TelemetryStreamState.Faulted;
         }
@@ -178,18 +240,7 @@ public sealed class TelemetryHub : ITelemetryFeed
                 return;
             }
 
-            sourceCancellation?.Cancel();
-            try
-            {
-                await sourceTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-
-            sourceCancellation?.Dispose();
-            sourceCancellation = null;
-            sourceTask = null;
+            await StopListenerAsync().ConfigureAwait(false);
         }
         finally
         {
