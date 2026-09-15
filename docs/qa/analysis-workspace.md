@@ -18,4 +18,4 @@ $qaRun = Join-Path $PWD ('artifacts/analysis-qa-' + (Get-Date -Format 'yyyyMMdd-
 dotnet test tests/LazyForza.IntegrationTests/LazyForza.IntegrationTests.csproj --no-restore -c Debug --filter 'FullyQualifiedName~ManualCornerPanelTests|FullyQualifiedName~StartupProfileTests'
 ```
 
-截图用于检查文字溢出、布局密度、滚动范围和中英文呈现。确定性数据与自动交互不代表真实 FH6 验证；触控、多 DPI、真实鼠标拖动和屏幕阅读器仍需人工检查。
+截图使用确定性数据检查文字溢出、布局密度、滚动范围和中英文呈现。触控、多 DPI、鼠标拖动和屏幕阅读器另行人工检查。

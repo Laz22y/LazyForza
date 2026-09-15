@@ -44,7 +44,7 @@
 
 ## 千问 AI 平台
 
-使用千问 AI 平台北京地域的按量 API Key，当前支持 `qwen3-tts-flash`（默认）和 `qwen3-tts-instruct-flash`。默认音色 `Cherry`；可从常用音色选择，也可填写该模型支持的音色名称。此入口不使用 NLS AppKey、AccessKey 或 NLS Token，也不接受 `sk-sp-` 开头的 Token Plan 密钥。北京端点与相应 API Key 配套使用；不是任意 OpenAI 兼容地址。
+使用千问 AI 平台北京地域的按量 API Key，当前支持 `qwen3-tts-flash`（默认）和 `qwen3-tts-instruct-flash`。默认音色 `Cherry`；可从常用音色选择，也可填写该模型支持的音色名称。此入口不使用 NLS AppKey、AccessKey 或 NLS Token，也不接受 `sk-sp-` 开头的 Token Plan 密钥。北京端点与相应 API Key 配套使用。
 
 按照千问平台文档，调用 `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`，以 Bearer 鉴权，并通过 `X-DashScope-SSE: enable` 接收 Base64 PCM 片段。完整结束后才交给现有无线电播放流程，采样率为 24 kHz；不会跟随响应中的音频 URL。缺少完成标志、数据中断或中途错误会丢弃整段音频，避免播放半句。
 
@@ -54,7 +54,7 @@
 
 ## MiniMax
 
-选择密钥对应的中国站或国际站，填写 MiniMax API Key；通过「获取音色」读取系统、复刻及已生成的账户音色，也可填写 ID。带空格和括号的官方音色 ID 可正常使用。默认 `speech-2.8-turbo`，也提供 2.8 HD、2.6 Turbo / HD、02 Turbo / HD；模型和账户站点分别保存。这里直连 MiniMax，不经千问或阿里云模型转售接口。
+选择密钥对应的中国站或国际站，填写 MiniMax API Key；通过「获取音色」读取系统、复刻及已生成的账户音色，也可填写 ID。带空格和括号的官方音色 ID 可正常使用。默认 `speech-2.8-turbo`，也提供 2.8 HD、2.6 Turbo / HD、02 Turbo / HD；模型和账户站点分别保存。此配置连接所选站点的 MiniMax 官方 API。
 
 中国站为 `https://api.minimax.cn`，国际站为 `https://api.minimax.io`。`POST /v1/t2a_v2` 使用 Bearer 鉴权，非流式请求返回 hex 编码的 24 kHz 单声道 PCM；校验业务状态码、完整状态和音频元数据后解码。`POST /v1/get_voice` 只读取音色目录，不合成；关闭浮窗会取消读取。不调用声音创建或训练接口，复刻音色的授权及首次使用费用以平台规则为准。
 
@@ -121,4 +121,4 @@ Windows 实现使用 SAPI 内存流合成 24 kHz 单声道 PCM；每个请求的
 
 `RadioCues` 通过确定性算法合成约 205 ms 接通音和 155 ms 断开音：不等长双脉冲、轻微扫频、少量谐波和短促电台噪声尾音，边缘平滑淡入淡出。未使用电视转播录音或第三方提示音素材。
 
-`RaceEngineerTests`、`SpeechPipelineTests` 和 `CustomRadioCueTests` 覆盖重复事件、冷却、紧急插队、静音、赛事切换、合成迟到、超时、停顿取消、队列与缓存上限、过期、资源释放、离线试听及示例选择、PCM／提示音边界和自定义音频的设置重启恢复。自动测试使用可控合成器和播放器，不要求安装特定语音或音频设备。Windows 文件解码、SAPI 声音、实际音频设备及主观听感需在目标机器检查；这些验证不等同于 FH6 实机验证。
+`RaceEngineerTests`、`SpeechPipelineTests` 和 `CustomRadioCueTests` 覆盖重复事件、冷却、紧急插队、静音、赛事切换、合成迟到、超时、停顿取消、队列与缓存上限、过期、资源释放、离线试听及示例选择、PCM／提示音边界和自定义音频的设置重启恢复。自动测试使用可控合成器和播放器，不要求安装特定语音或音频设备。Windows 文件解码、SAPI 声音、音频设备及听感在目标机器检查。

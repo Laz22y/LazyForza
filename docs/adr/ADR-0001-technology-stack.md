@@ -28,7 +28,7 @@ LazyForza 是只消费 FH6 官方单向 UDP Data Out 的 Windows 桌面工具。
 
 SQLite 通过 Windows 自带的 `winsqlite3.dll` 薄封装使用，避免给每帧绑定 ORM；原始高频包写入版本化 `.lfztelemetry` 文件，SQLite 只保存设置、元数据和派生结果。
 
-## Overlay Spike 验证口径
+## Overlay Spike 检查范围
 
 实现位于 `LazyForza.Overlay`：
 

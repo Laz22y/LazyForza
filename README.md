@@ -8,7 +8,7 @@
 
 ## 简体中文
 
-预览版：[`1.5.3-alpha-2`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-2)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-2)），推荐搭配 RaceServer `0.6.0-alpha-1`。使用独立预发布更新通道，协议保持 v2；正式版下载入口保持 `1.5.2`。
+预览版：[`1.5.3-alpha-3 · Radio Check`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-3)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-3)），推荐搭配 RaceServer `0.6.0-alpha-1`。预览版使用独立更新通道和协议 v2。当前正式版为 `1.5.2`。
 
 <p align="center">
   <a href="https://laz22y.github.io/LazyForza/">官网</a> ·
@@ -32,7 +32,9 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 | 地产赛事 | 可暂存和局部修订的环道录入、维修区轨迹校验、路线收益切弯证据、赛事 HUD 与弱网提醒，并可连接独立 RaceServer |
 | 数据与更新 | 本地数据库、备份、诊断；GitCode/GitHub 更新回退及双层完整性校验 |
 
-实验性漂移 HUD 默认关闭。它只根据本车 UDP 推导侧滑和控车趋势，不复刻游戏评分，也不代替玩家判断。
+实验性漂移 HUD 默认关闭，根据本车 UDP 遥测显示侧滑角、控车趋势和失控风险提示。
+
+### 1.5.3 预览版
 
 赛道识别支持后排发车位置；歌利亚与传奇岛径道赛等共用路段会等待分流证据再确认。比赛计时刚重置，且车辆低速出现在远离上一场的另一个已知起跑区时，即使上一场没有圈速记录，也可建立新的比赛会话。普通菜单暂停和倒带仍保留当前会话。
 
@@ -40,7 +42,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 圈速分析默认打开最近有效圈，通过「选择对比圈」切换最多四圈。「曲线」「走线」「弯道」使用统一页签；实时分段、记录管理和导入导出按需展开。回放的播放、时间轴与读数集中显示；弯道编辑收起后保留草稿，切换视图仍保持距离游标联动。
 
-弯道比较要求路线修订、方向、分段版本及车辆条件兼容。旧圈缺少路线修订或完整车辆信息时仍可查看和回放，但不生成弯道结论。区间采样缺失、间隔过大或输入事件证据不足时会明确提示；差异说明不把相关性当成提速原因，也不代替对调校、天气等条件的核对。
+弯道比较要求路线修订、方向、分段版本及车辆条件兼容。旧圈缺少路线修订或完整车辆信息时仍可查看和回放；样本充分的区间提供差异说明，其余位置显示缺失原因。说明描述已记录的操作与耗时差异；判断原因还需结合调校、天气等条件。
 
 地产赛事页提供默认关闭的「语音比赛工程师」，播报旗语变化、新处罚、个人最快圈和关键进站预测。可调整音量或立即静音；静音会停止当前语音及提示音并清空待播消息，恢复后不补播。红旗优先打断普通播报，重复事件与频繁预测会被去重和冷却。进站建议保留「预计」「可能」等不确定性表述。
 
@@ -48,7 +50,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 接通音后留出 180 毫秒，语音结束后留出 220 毫秒再播放断开音。展开「自定义接通/断开音」可分别导入 WAV、MP3、M4A 或 FLAC（每段最多 5 秒、10 MB，需系统支持解码），也可分别恢复默认；导入后保存音频副本，不依赖原文件路径。「试听」随机选择一句比赛示例，使用当前音量和提示音，无需连接赛事或开启自动播报；静音和零音量时不可试听，真实赛事消息优先。再次点击可停止试听。
 
-当前源码支持独立开关接通音和断开音，关闭时跳过对应停顿并保留自定义音频。「Windows 音色」列出本机 SAPI 可用的中英文声音，默认跟随界面语言；选择英文音色时使用英文播报。切换会停止旧输出并清空待播消息，音色、音量、提示音开关和自定义音频均自动保存，重启后继续沿用；保存的音色不可用时提示并回退默认。「试听」使用当前选择。
+`1.5.3-alpha-3` 支持独立开关接通音和断开音，关闭时跳过对应停顿并保留自定义音频。「Windows 音色」列出本机 SAPI 可用的中英文声音，默认跟随界面语言；选择英文音色时使用英文播报。切换会停止旧输出并清空待播消息，音色、音量、提示音开关和自定义音频均自动保存，重启后继续沿用；保存的音色不可用时提示并回退默认。「试听」使用当前选择。
 
 在工程师旁打开「语音服务…」浮窗，可配置 ElevenLabs API Key、音色、模型和播报语言，或 Azure Speech 资源密钥、全球资源区域和中英文音色，再使用「试听」检查效果。ElevenLabs 默认模型为 Flash v2.5，也可选择 Multilingual v2 或 Eleven v3；Azure 默认跟随音色语言。浮窗还支持腾讯云签名凭据、阿里云 NLS AppKey 与自动续期 Token、千问 Qwen-TTS 平台 API Key，以及 MiniMax 中国站／国际站。阿里云智能语音交互与千问模型服务分别接入，凭据和音色不能混用。各家配置分别保存，凭据经当前 Windows 用户加密；在线合成会发送播报文本并消耗账户额度，可选择服务失败时回退本地语音。Windows 音色选择也收纳在该浮窗中。
 
@@ -58,7 +60,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 2. 启动 LazyForza，按首次启动指引选择语言、玩家代号、数据目录和关闭方式；
 3. 在指引中按提示开启 FH6 Data Out。收到有效遥测后会自动进入主窗口，也可暂时跳过连接。
 
-安装版默认安装到 `C:\Program Files\LazyForza`，创建开始菜单入口；桌面快捷方式和 `.lfztelemetry`、`.lfzlap`、`.lfzestate` 文件关联可在安装时选择。便携版不写入这些系统项。每个便携版目录独立保存初始化状态；安装版卸载时保留数据库，并在重新安装后再次显示初始化指引。正式安装版默认启动检查更新，正式便携版默认关闭，两者都可在设置中修改。预览版使用独立初始化状态和 GitCode/GitHub 预发布更新通道，每次启动强制检查并自动安装更高预览版；正式版不参与该通道，预览包不会自动转为正式版。发行说明同时提供中文和英文，程序按当前界面语言显示对应内容。所有包都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。需要通过命令行固定目录时可使用：
+安装版默认安装到 `C:\Program Files\LazyForza`，创建开始菜单入口；桌面快捷方式和 `.lfztelemetry`、`.lfzlap`、`.lfzestate` 文件关联可在安装时选择。便携版不写入这些系统项。每个便携版目录独立保存初始化状态；安装版卸载时保留数据库，并在重新安装后再次显示初始化指引。正式安装版默认启动检查更新，正式便携版默认关闭，两者都可在设置中修改。预览版使用独立初始化状态和 GitCode/GitHub 预发布更新通道，每次启动强制检查并自动安装更高预览版；正式版不参与该通道，预览包不会自动转为正式版。发行说明同时提供中文和英文，程序按当前界面语言显示对应内容。所有包都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。
 
 设置页修改后自动保存并应用，无需点击应用按钮。语言、HUD、录制选项和有效的遥测监听地址／端口可直接生效；切换数据目录后提示重启，由用户选择时机，原目录数据保留在原处。UI 强调色提供默认蓝、暗夜紫、清新绿、鲜艳红、纯粹白和低调灰六种选择。
 
@@ -71,6 +73,8 @@ HUD 设置中的“地产赛事底板不透明度”只调整面板底色，文�
 主窗口默认以 1440×900 的逻辑尺寸居中打开；按所在屏幕的缩放和工作区自动收敛，给桌面留出边距。小屏幕或手动缩小窗口时仍可滚动查看完整内容。概览集中显示当前赛事、赛道预览、遥测状态和最近圈记录，可直接进入圈速分析或回放工作台；没有赛事或圈记录时显示等待状态。
 
 主窗口使用无系统标题栏的顶部品牌栏：原 Logo、灰色版本号与更新名同排，右侧保留最小化、最大化／还原和关闭按钮。顶部空白可拖动、双击最大化，边缘可缩放，关闭仍遵守退出／托盘设置。版本信息宽度足够时同排，空间不足时淡入淡出轮换，仅超长项缓慢滚动；鼠标悬停暂停并显示完整信息，窗口失焦或最小化时暂停动画。“减少动态”及 Windows 动画开关可使其改为静态省略显示。详见[品牌栏版本信息说明](docs/RELEASE_BRAND_LABEL.md)。
+
+需要通过命令行固定目录时可使用：
 
 ```powershell
 LazyForza.App.exe --data-dir "D:\LazyForza_Data"
@@ -93,7 +97,7 @@ LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 
 只使用实时 HUD 和圈速分析时不需要部署服务端。部署前阅读[赛事服务端指引](https://laz22y.github.io/LazyForza/docs/#race-server)。
 
-当前源码的总控将项目、规则与赛程、赛果记录分开管理。一项目对应一场赛事，准备新一场保留旧赛果并释放离线占位；客户端主动退出房间需收到服务端确认后才清除恢复身份。协议仍为 v2，旧服务端不支持立即释放时会保留恢复令牌。部署与兼容规则见 [RaceServer 说明](https://github.com/Laz22y/LazyForza.RaceServer#长期房间与赛事管理当前源码尚未发行)。
+RaceServer 后续开发版的总控将项目、规则与赛程、赛果记录分开管理。一项目对应一场赛事，准备新一场保留旧赛果并释放离线占位；客户端主动退出房间需收到服务端确认后才清除恢复身份。协议仍为 v2，旧服务端不支持立即释放时会保留恢复令牌。部署与兼容规则见 [RaceServer 说明](https://github.com/Laz22y/LazyForza.RaceServer#长期房间与赛事管理当前源码尚未发行)。
 
 ## 本地构建
 
@@ -132,7 +136,7 @@ FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与
 
 ## English
 
-Preview: [`1.5.3-alpha-2`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-2) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-2)), recommended with RaceServer `0.6.0-alpha-1`. It uses the separate preview update channel and protocol v2; stable downloads remain on `1.5.2`.
+Preview: [`1.5.3-alpha-3 · Radio Check`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-3) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-3)), recommended with RaceServer `0.6.0-alpha-1`. Previews use their own update channel and protocol v2. The current stable version is `1.5.2`.
 
 LazyForza is a local telemetry, driving-analysis and estate-racing tool for Forza Horizon 6. It uses only official FH6 UDP Data Out: no game-memory access, DLL injection or game-process modification. Settings, laps, vehicle learning and recordings stay on your PC by default.
 
@@ -149,7 +153,9 @@ Version 1.5.2 fixes the dashboard not hiding as expected after entering the gara
 | Estate racing | Pausable circuit capture, component-level revision, pit-route checks, shortcut evidence, race HUD and network warnings |
 | Data and updates | Local database, backup and diagnostics, plus verified GitCode/GitHub update fallback |
 
-The experimental drift HUD is disabled by default. It estimates slip and control trends from local UDP data; it does not reproduce the game's scoring system.
+The experimental drift HUD is disabled by default and uses local UDP telemetry to show slip angle, control trends and spin-risk guidance.
+
+### 1.5.3 preview
 
 Track identification accommodates rear grid positions and waits for route divergence when events such as Goliath and Legend Island share an opening corridor. A newly reset race clock and a low vehicle speed at a different known grid far from the previous event can open a new competition session even without a saved result. Ordinary menu pauses and rewinds preserve the current session.
 
@@ -157,7 +163,7 @@ Lap comparison, post-race review and the replay workbench support manually marke
 
 Lap analysis opens the latest valid lap by default; expand “Choose laps to compare” to compare up to four. Charts, racing lines and corners share a consistent tab layout, with live sectors, record management and file exchange available on demand. Replay groups playback controls, the timeline and readouts together. Collapsing the corner editor preserves its draft, and switching views keeps the distance cursor linked.
 
-Corner comparisons require compatible route revisions, directions, sector versions and vehicle conditions. Older laps remain viewable and replayable, but missing revision or vehicle evidence prevents corner conclusions. Sparse or invalid samples and uncertain input transitions are reported explicitly. Observations describe differences, without asserting causes or promised time gains.
+Corner comparisons require compatible route revisions, directions, sector versions and vehicle conditions. Older laps remain viewable and replayable. Intervals with sufficient samples provide observations; other intervals explain the missing evidence. Observations describe recorded inputs and time differences; interpreting causes also requires considering tune, weather and other conditions.
 
 The Estate racing page includes an optional race engineer, disabled by default. It announces flag changes, new penalties, personal bests and important pit predictions, with priority, deduplication and cooldowns. Red flags interrupt routine speech. Volume and immediate mute controls apply to speech and the locally synthesized radio cues before and after each complete transmission. Mute clears pending messages; unmuting does not replay them. Pit advice explicitly remains an estimate.
 
@@ -165,7 +171,7 @@ Speech defaults to an installed Windows SAPI voice for the selected language, wi
 
 Speech starts 180 ms after the connect cue; the disconnect cue follows speech after 220 ms. Expand “Custom connect/disconnect sounds” to import WAV, MP3, M4A or FLAC clips (up to 5 seconds and 10 MB each, subject to installed Windows codecs), or reset either cue. An audio copy is saved independently of the source file. “Preview” plays a random race sample with the current volume and cues, even offline with automatic speech disabled. Mute and zero volume block previews; live race messages take priority. Click again to stop.
 
-Current source supports independent connect/disconnect switches. Disabling a cue skips its adjacent pause and keeps the imported clip. “Windows voice” lists installed Chinese/English SAPI voices; the default follows the interface language, while an English voice uses English race messages. Switching stops the old output and clears pending speech. Voice and cue settings survive restarts; unavailable saved voices fall back to the default with a notice. Preview uses the current selection.
+`1.5.3-alpha-3` supports independent connect/disconnect switches. Disabling a cue skips its adjacent pause and keeps the imported clip. “Windows voice” lists installed Chinese/English SAPI voices; the default follows the interface language, while an English voice uses English race messages. Switching stops the old output and clears pending speech. Voice and cue settings survive restarts; unavailable saved voices fall back to the default with a notice. Preview uses the current selection.
 
 Open “Speech service…” next to the engineer to configure an ElevenLabs API key, voice, model and language, an Azure Speech resource key, global resource region and Chinese/English voice, or a Windows voice. ElevenLabs defaults to Flash v2.5; Multilingual v2 and Eleven v3 are also available. Azure defaults to the voice's language. The same window also supports Tencent Cloud signing credentials, Alibaba NLS AppKey and automatic token renewal, Qianwen Qwen-TTS API keys, and MiniMax China or International accounts. Alibaba NLS and Qianwen model services use separate credentials and voices. Provider settings are saved separately, with credentials encrypted for the current Windows user. Online synthesis sends speech text and uses account credits; optional Windows fallback keeps speech available during service failures. Preview uses the selected service.
 
