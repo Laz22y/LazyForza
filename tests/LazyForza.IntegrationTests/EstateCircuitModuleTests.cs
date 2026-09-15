@@ -430,9 +430,11 @@ public sealed class EstateCircuitModuleTests
     }
 
     [TestMethod]
-    [DataRow(15d)]
-    [DataRow(0.3d)]
-    public async Task LegalPitLaneFinishCrossingCompletesOneValidLapWithoutMainGateHit(double crossingSpeed)
+    [DataRow(15d, 118d)]
+    [DataRow(0.3d, 118d)]
+    [DataRow(0.3d, 132d)]
+    [DataRow(15d, 132d)]
+    public async Task LegalPitLaneFinishCrossingCompletesOneValidLapWithoutMainGateHit(double crossingSpeed, double crossingX)
     {
         var path = Path.Combine(Path.GetTempPath(), $"lazyforza-estate-pit-lap-{Guid.NewGuid():N}.db");
         try
@@ -468,12 +470,12 @@ public sealed class EstateCircuitModuleTests
                     new EstateGatePoint(118, 2, 10),
                     new EstateGatePoint(118, 2, 22)
                 ],
-                new EstateGatePoint(118, 2, 8),
+                new EstateGatePoint(132, 2, 0),
                 3,
                 80,
                 3,
                 4,
-                null,
+                [new(126, 2, -10), new(138, 2, -10), new(138, 2, 10), new(126, 2, 10)],
                 pitGate);
             var definition = new EstateTrackDefinition(
                 track.Id, track.Name, "test", "pit-lap", "1", mainGate,
@@ -498,8 +500,8 @@ public sealed class EstateCircuitModuleTests
                 }
                 PublishPosition(feed, 89_000, 118, 2, -22, 15);
                 PublishPosition(feed, 89_250, 118, 2, -18, 15);
-                PublishPosition(feed, 90_000, 118, 2, -0.01, crossingSpeed);
-                PublishPosition(feed, 90_100, 118, 2, 0.01, crossingSpeed);
+                PublishPosition(feed, 90_000, crossingX, 2, -0.01, crossingSpeed);
+                PublishPosition(feed, 90_100, crossingX, 2, 0.01, crossingSpeed);
 
                 await WaitUntilAsync(
                     () => module.State.CompletedLaps == 1,
@@ -513,8 +515,8 @@ public sealed class EstateCircuitModuleTests
 
                 // Reversing then creeping across the same pit gate again after
                 // 15 seconds must not count another lap within the same visit.
-                PublishPosition(feed, 108_000, 118, 2, -0.01, 0.3);
-                PublishPosition(feed, 108_100, 118, 2, 0.01, 0.3);
+                PublishPosition(feed, 108_000, crossingX, 2, -0.01, 0.3);
+                PublishPosition(feed, 108_100, crossingX, 2, 0.01, 0.3);
                 await WaitUntilAsync(() => module.State.CurrentLapSeconds >= 18, TimeSpan.FromSeconds(5), () => module.State.ToString());
                 Assert.AreEqual(1, module.State.CompletedLaps);
 

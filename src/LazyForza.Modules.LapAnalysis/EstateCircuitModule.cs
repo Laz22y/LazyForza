@@ -207,11 +207,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private double? liveCumulativeHistoricalDeltaSeconds;
     private DateTimeOffset liveCumulativeHistoricalDeltaUntil;
     private int liveCumulativeHistoricalDeltaSector = -1;
-    private bool pitTransitActive;
-    private bool pitFinishConsumed;
-    private PitRouteProjection? previousPitRouteProjection;
-    private double? activePitEntryProgressMeters;
-    private double? activePitExitProgressMeters;
+    private readonly EstatePitTimingTracker pitTiming = new();
     private bool invalidateCurrentLapOnDriverIntervention = true;
     private bool telemetryInterruptionActive;
     private DateTimeOffset? invalidProjectionStartedAt;
@@ -1027,7 +1023,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             completedLaps = 0;
             lastLapSeconds = null;
             previousPosition = null;
-            previousPitRouteProjection = null;
+            pitTiming.BreakContinuity();
             timestampUnwrapper.Reset();
             ArmAfterLatestTelemetryFrame();
             SetState(EstateCircuitPhase.WaitingForTimingStart, "地产环道计时已启用。",
@@ -1055,7 +1051,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         {
             if (activeTrack is null || activeDefinition is null || !state.IsTimingActive) return;
             ResetLapTracking();
-            pitTransitActive = false;
+            pitTiming.Reset();
             completedLaps = 0;
             lastLapSeconds = null;
             previousPosition = null;
@@ -1117,7 +1113,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                 }
             }
             previousPosition = null;
-            previousPitRouteProjection = null;
+            pitTiming.BreakContinuity();
             return;
         }
 
@@ -1134,7 +1130,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                     ResynchronizeLapAfterDriverIntervention("收到无效位置遥测", resetTimestamp: false);
             }
             previousPosition = null;
-            previousPitRouteProjection = null;
+            pitTiming.BreakContinuity();
             return;
         }
         telemetryInterruptionActive = false;
@@ -1159,7 +1155,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             frame.Raw.Position.Z,
             frame.Raw.Speed,
             timestamp);
-        if (previousPosition is null) previousPitRouteProjection = null;
+        if (previousPosition is null) pitTiming.BreakContinuity();
         ObservePitEnrollment(frame, position);
         if (previousPosition is EstateTimedPosition previous &&
             IsLapInProgress() &&
@@ -1212,6 +1208,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         if (state.Phase == EstateCircuitPhase.WaitingForReferenceStart && crossed)
         {
             lastCrossingTimestamp = crossing.TimestampMilliseconds;
+            pitTiming.AcceptFinishCrossing();
             BeginLap(crossing.TimestampMilliseconds, frame.ArrivalTime);
             if (activeTrack is null)
             {
@@ -1231,6 +1228,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         if (state.Phase == EstateCircuitPhase.WaitingForTimingStart && crossed)
         {
             lastCrossingTimestamp = crossing.TimestampMilliseconds;
+            pitTiming.AcceptFinishCrossing();
             BeginLap(crossing.TimestampMilliseconds, frame.ArrivalTime);
             SetState(EstateCircuitPhase.TimingLap, "地产圈速计时中。", "依次通过检查点后返回终点线。", timingActive: true);
             return;
@@ -1244,6 +1242,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             if (crossed && elapsed >= 15 && routeCapture.Count >= 40)
             {
                 lastCrossingTimestamp = crossing.TimestampMilliseconds;
+                pitTiming.AcceptFinishCrossing();
                 FinishReferenceLap(frame, crossing);
             }
             return;
@@ -1257,6 +1256,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             if (crossed && elapsed >= 15)
             {
                 lastCrossingTimestamp = crossing.TimestampMilliseconds;
+                pitTiming.AcceptFinishCrossing();
                 if (state.Phase == EstateCircuitPhase.ValidatingLap)
                     FinishValidationLap(frame, crossing);
                 else
@@ -1408,7 +1408,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         // projected onto the racing line: doing that would falsely look like a
         // route deviation and invalidate every pit lap. Timing still advances,
         // and the pit finish gate may end/start a lap while the car is in lane.
-        if (pitTransitActive) return true;
+        if (pitTiming.IsActive) return true;
         var projection = TrackAlgorithms.ProjectConstrained(
             activeTrack.Points, position.X, position.Y, position.Z, projectionIndex);
         if (!IsProjectionValid(activeTrack, projection))
@@ -1486,153 +1486,26 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         EstateTimedPosition current,
         out EstateGateCrossing crossing)
     {
-        var pit = activeDefinition?.Pit;
-        var pitWasActiveAtFinish = ObservePitTransit(pit, previous, current);
-        var crossedMain = EstateTrackAlgorithms.TryDetectForwardCrossing(
-            mainGate,
-            previous,
-            current,
-            out var mainCrossing);
-        EstateGateCrossing pitCrossing = default;
-        var crossedPit = pitWasActiveAtFinish && !pitFinishConsumed && pit?.StartFinishGate is EstateTimingGate pitGate &&
-                         EstateTrackAlgorithms.TryDetectForwardCrossing(
-                             pitGate,
-                             previous,
-                             current,
-                             out pitCrossing,
-                             minimumSpeedMetersPerSecond: 0);
-        // A service box can straddle the timing line. Creeping through it is a
-        // legal passage; only one pit finish is allowed for the entire visit.
-        if (crossedPit) pitFinishConsumed = true;
-
-        if (!crossedMain && !crossedPit)
+        var crossedPit = pitTiming.Observe(previous, current, out var pitCrossing);
+        if (pitTiming.Entered) LogIfInitialized("Estate pit transit entered.");
+        if (pitTiming.Exited)
         {
-            crossing = default;
-            return false;
-        }
-
-        crossing = crossedMain && crossedPit
-            ? (mainCrossing.TimestampMilliseconds <= pitCrossing.TimestampMilliseconds ? mainCrossing : pitCrossing)
-            : crossedMain ? mainCrossing : pitCrossing;
-        return true;
-    }
-
-    private bool ObservePitTransit(
-        EstatePitDefinition? pit,
-        EstateTimedPosition previous,
-        EstateTimedPosition current)
-    {
-        if (pit is null)
-        {
-            pitTransitActive = false;
-            previousPitRouteProjection = null;
-            return false;
-        }
-
-        var previousRoute = previousPitRouteProjection ??
-                            ProjectPitRoute(pit.CenterLine, previous.X, previous.Y, previous.Z);
-        var currentRoute = ProjectPitRoute(pit.CenterLine, current.X, current.Y, current.Z);
-        previousPitRouteProjection = currentRoute;
-        var entryProgress = activePitEntryProgressMeters ??= PitGateProgress(pit.CenterLine, pit.EntryGate);
-        var exitProgress = activePitExitProgressMeters ??= PitGateProgress(pit.CenterLine, pit.ExitGate);
-        var corridorWidth = Math.Clamp(pit.LaneHalfWidthMeters, 1, 20) * 1.35 + 0.75;
-        var enteredByProgress = previousRoute.DistanceMeters <= corridorWidth &&
-                                currentRoute.DistanceMeters <= corridorWidth &&
-                                previousRoute.ProgressMeters < entryProgress - 0.25 &&
-                                currentRoute.ProgressMeters >= entryProgress - 0.25;
-        var recoveredInsidePit = currentRoute.DistanceMeters <= corridorWidth &&
-                                 currentRoute.ProgressMeters > entryProgress + 0.75 &&
-                                 currentRoute.ProgressMeters < currentRoute.TotalLengthMeters - 0.75;
-        if (!pitTransitActive &&
-            (EstateTrackAlgorithms.TryDetectForwardCrossing(
-                 pit.EntryGate,
-                 previous,
-                 current,
-                 out _) ||
-             enteredByProgress || recoveredInsidePit))
-        {
-            pitTransitActive = true;
-            pitFinishConsumed = false;
-            LogIfInitialized("Estate pit transit entered.");
-        }
-
-        var activeAtFinish = pitTransitActive;
-        var transitEndProgress = Math.Max(exitProgress, currentRoute.TotalLengthMeters - 0.75);
-        var exitedByProgress = previousRoute.DistanceMeters <= corridorWidth &&
-                               currentRoute.DistanceMeters <= corridorWidth &&
-                               previousRoute.ProgressMeters < transitEndProgress &&
-                               currentRoute.ProgressMeters >= transitEndProgress;
-        if (pitTransitActive &&
-            (exitedByProgress ||
-             currentRoute.DistanceMeters <= corridorWidth &&
-             currentRoute.ProgressMeters >= transitEndProgress))
-        {
-            pitTransitActive = false;
-            // The next racing-line projection must not be compared with the
-            // stale progress that preceded the pit split. Re-arm continuity at
-            // the actual pit exit instead.
             previousProjectedProgress = null;
             projectionIndex = 0;
             accumulatedReverseProgress = 0;
             invalidProjectionStartedAt = null;
             LogIfInitialized("Estate pit transit exited.");
         }
-        return activeAtFinish;
+        EstateGateCrossing mainCrossing = default;
+        var crossedMain = !pitTiming.FinishConsumed && EstateTrackAlgorithms.TryDetectForwardCrossing(
+            mainGate, previous, current, out mainCrossing);
+        crossing = crossedMain && crossedPit
+            ? (mainCrossing.TimestampMilliseconds <= pitCrossing.TimestampMilliseconds ? mainCrossing : pitCrossing)
+            : crossedMain ? mainCrossing : pitCrossing;
+        return crossedMain || crossedPit;
     }
 
-    private static PitRouteProjection ProjectPitRoute(
-        IReadOnlyList<EstateGatePoint> line,
-        double x,
-        double y,
-        double z)
-    {
-        var bestDistance = double.PositiveInfinity;
-        var bestProgress = 0d;
-        var progress = 0d;
-        for (var index = 0; index < line.Count - 1; index++)
-        {
-            var start = line[index];
-            var end = line[index + 1];
-            var dx = end.X - start.X;
-            var dy = end.Y - start.Y;
-            var dz = end.Z - start.Z;
-            var lengthSquared = dx * dx + dy * dy + dz * dz;
-            if (lengthSquared < 0.0001) continue;
-            var length = Math.Sqrt(lengthSquared);
-            var amount = Math.Clamp(
-                ((x - start.X) * dx + (y - start.Y) * dy + (z - start.Z) * dz) /
-                lengthSquared,
-                0,
-                1);
-            var distance = Math.Sqrt(
-                Math.Pow(x - (start.X + dx * amount), 2) +
-                Math.Pow(y - (start.Y + dy * amount), 2) +
-                Math.Pow(z - (start.Z + dz * amount), 2));
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                bestProgress = progress + length * amount;
-            }
-            progress += length;
-        }
-        return new PitRouteProjection(bestDistance, bestProgress, progress);
-    }
-
-    private static double PitGateProgress(
-        IReadOnlyList<EstateGatePoint> line,
-        EstateTimingGate gate) =>
-        ProjectPitRoute(
-            line,
-            (gate.Left.X + gate.Right.X) / 2,
-            (gate.Left.Y + gate.Right.Y) / 2,
-            (gate.Left.Z + gate.Right.Z) / 2).ProgressMeters;
-
-    private void PreparePitTimingGeometry(EstatePitDefinition? pit)
-    {
-        previousPitRouteProjection = null;
-        activePitEntryProgressMeters = pit is null ? null : PitGateProgress(pit.CenterLine, pit.EntryGate);
-        activePitExitProgressMeters = pit is null ? null : PitGateProgress(pit.CenterLine, pit.ExitGate);
-    }
+    private void PreparePitTimingGeometry(EstatePitDefinition? pit) => pitTiming.Configure(pit);
 
     private void BeginLap(long timestamp, DateTimeOffset arrivalTime)
     {
@@ -1690,8 +1563,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
 
         ResetLapTracking();
         previousPosition = null;
-        previousPitRouteProjection = null;
-        pitTransitActive = false;
+        pitTiming.Reset();
         lastCrossingTimestamp = long.MinValue;
         lapStartTimestamp = 0;
         heldComparisons = null;
@@ -1723,7 +1595,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private void ResynchronizeLapAfterDriverIntervention(string reason, bool resetTimestamp)
     {
         previousPosition = null;
-        previousPitRouteProjection = null;
+        pitTiming.BreakContinuity();
         previousProjectedProgress = null;
         accumulatedReverseProgress = 0;
         invalidProjectionStartedAt = null;
@@ -2110,10 +1982,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         routeCapture.Clear();
         activeTrack = null;
         activeDefinition = null;
-        pitTransitActive = false;
-        previousPitRouteProjection = null;
-        activePitEntryProgressMeters = null;
-        activePitExitProgressMeters = null;
+        pitTiming.Configure(null);
         activeSectors = [];
         previousPosition = null;
         lastCrossingTimestamp = long.MinValue;
@@ -2334,7 +2203,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         minimumAcceptedFrameSequence = latest?.Sequence ?? long.MinValue;
         minimumAcceptedFrameArrival = latest?.ArrivalTime ?? DateTimeOffset.MinValue;
         previousPosition = null;
-        previousPitRouteProjection = null;
+        pitTiming.BreakContinuity();
     }
 
     private void ResetLiveCumulativeHistoricalDelta()
@@ -2343,11 +2212,6 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         liveCumulativeHistoricalDeltaUntil = DateTimeOffset.MinValue;
         liveCumulativeHistoricalDeltaSector = -1;
     }
-
-    private readonly record struct PitRouteProjection(
-        double DistanceMeters,
-        double ProgressMeters,
-        double TotalLengthMeters);
 
     private void ClearCumulativeHistoricalDeltaDisplay()
     {

@@ -94,6 +94,10 @@ Schema 13 以事务追加可空的 `Laps.TrackRevision` 和 `VehicleSnapshot`，
 
 ## 地产赛事跨仓库边界
 
+维修计时几何由 Analysis 的 `EstatePitTimingTracker` 管理：通道计时门与换胎区在同一终点平面上的有限交线共同构成合法过线范围；一次维修通行的过线消费状态独立于每圈重置和维修停留计时。`EstateCircuitModule` 只在接受过线后消费它，网络层继续使用既有可靠圈事件。换胎停留、处罚执行和策略预测不控制是否生成圈事件。
+
+服务端 `RaceProgressTimeline` 只处理有效归一化进度、遥测顺序和共同距离的通过时刻，不读取进站或换胎标记。合法维修通路上的有效进度与主路线使用同一时间线；暂停期间不采样，恢复后保留上一位置作为跨线顺序依据。圈完成事件提供距离下界，接收时刻不进入通过时刻历史；权威计圈仍只接受可靠事件。时间线有界、仅存于内存，赛事切换或进程重建后重新建立，恢复身份、成绩、处罚和去重记录仍由原有持久化负责。
+
 语音工程师只消费现有 `EstateRaceHudState` 权威快照及进站预测，不重新计算成绩或处罚。`RaceEngineerObserver` 提取重要变化，`RaceEngineer` 负责有界队列（16 条）、阶段隔离、最近 4096 个事件去重、优先级、过期和分类冷却，仅依赖 `ISpeechOutput`。消息到期也会取消已开始的合成／播放。静音、关闭、退出和赛事切换取消当前输出并清空队列；语音故障仅停用输出。开关、静音与音量沿用 AppSettings 保存，无数据库迁移或网络协议变化。
 
 `LazyForza.Speech` 的 `RadioSpeechOutput` 通过 `ISpeechSynthesisProvider` 获得 PCM，由 `ISpeechAudioPlayer` 按接通音、语音、断开音顺序播放。合成默认超时 10 秒，内存缓存上限为 32 条／4 MiB，最多允许两次合成重叠以容纳取消中的请求；迟到结果不能播放。App 的 `LocalRaceSpeech` 装配 Windows SAPI 内存合成（独立 STA、24 kHz 单声道）与播放器独占并复用的 waveOut 句柄；取消只停止本次音频，退出时关闭设备。原创起止音由 `RadioCues` 合成。用户可在同一配置浮窗中选择 ElevenLabs、Azure Speech、腾讯云、阿里云 NLS、千问 AI 平台或 MiniMax：适配器使用官方 HTTPS 地址，共用有界 HTTP 传输、错误分类和可取消请求，输出统一为 16 或 24 kHz 单声道 PCM16。阿里云 NLS 与千问模型服务分别配置凭据和音色。凭据由 App 分别通过当前用户 DPAPI 加密持久保存，服务切换重建输出；可选 Windows 故障回退带请求冷却且不缓存回退声音。接口、资源所有权与适配要求见 [语音输出说明](docs/RACE_ENGINEER_SPEECH.md)。
