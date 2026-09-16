@@ -7,8 +7,9 @@ internal static class SidebarQuickSettings
     internal const string StoreKey = "ui.sidebarQuickSettings";
     internal const string Mute = "engineerMute", Volume = "engineerVolume", Motion = "reduceMotion";
     internal const string ShiftRecommendations = "shiftRecommendations";
-    internal static readonly string[] Available = [Mute, ShiftRecommendations, Volume, Motion];
-    internal static string[] Default => [Mute, ShiftRecommendations];
+    internal const string ShiftIndicators = "shiftIndicators";
+    internal static readonly string[] Available = [Mute, ShiftIndicators, ShiftRecommendations, Volume, Motion];
+    internal static string[] Default => [Mute, ShiftIndicators];
 
     internal static string[] Load(string? json)
     {

@@ -21,6 +21,7 @@ internal sealed partial class MainWindow
     private Action? refreshEngineerControls;
     private Action? refreshShiftControls;
     private Action? syncHudMotionPreference;
+    private Action? syncHudShiftPreference;
 
     private void InitializeSidebar()
     {
@@ -74,7 +75,8 @@ internal sealed partial class MainWindow
     {
         SidebarQuickSettings.Mute => "语音工程师",
         SidebarQuickSettings.Volume => "语音音量",
-        SidebarQuickSettings.ShiftRecommendations => "推荐换挡",
+        SidebarQuickSettings.ShiftRecommendations => "本车换挡推荐",
+        SidebarQuickSettings.ShiftIndicators => "HUD 换挡提示",
         _ => "减少动态"
     });
 
@@ -114,18 +116,21 @@ internal sealed partial class MainWindow
                     SidebarQuickSettings.Mute => $"{engineerEnabled}:{engineerMuted}:{raceEngineer?.Error}",
                     SidebarQuickSettings.Volume => engineerVolume.ToString(CultureInfo.InvariantCulture),
                     SidebarQuickSettings.ShiftRecommendations => $"{dashboard.ActiveVehicleProfileId}:{dashboard.ShiftRecommendationsEnabled}",
+                    SidebarQuickSettings.ShiftIndicators => overlay.TimingLayout.ShowShiftIndicators.ToString(),
                     _ => overlay.TimingLayout.ReduceMotion.ToString()
                 };
                 if (state == previousState) return;
                 previousState = state;
                 var mute = id == SidebarQuickSettings.Mute;
                 var shift = id == SidebarQuickSettings.ShiftRecommendations;
+                var indicators = id == SidebarQuickSettings.ShiftIndicators;
                 var active = mute ? !engineerMuted && engineerEnabled : shift
                     ? dashboard.ActiveVehicleProfileId is not null && dashboard.ShiftRecommendationsEnabled
-                    : overlay.TimingLayout.ReduceMotion;
+                    : indicators ? overlay.TimingLayout.ShowShiftIndicators : overlay.TimingLayout.ReduceMotion;
                 action.IsEnabled = shift ? dashboard.ActiveVehicleProfileId is not null : !mute || engineerEnabled;
                 action.Content = id == SidebarQuickSettings.Volume ? Label($"{engineerVolume}", 11)
-                    : QuickIcon(shift ? "M6 18 V5 M2 9 L6 5 L10 9 M18 6 V19 M14 15 L18 19 L22 15" : mute
+                    : QuickIcon(indicators ? "M2 12 Q12 2 22 12 Q12 22 2 12 Z M12 16 V8 M9 11 L12 8 L15 11"
+                        : shift ? "M6 18 V5 M2 9 L6 5 L10 9 M18 6 V19 M14 15 L18 19 L22 15" : mute
                         ? active ? "M3 9 H7 L12 5 V19 L7 15 H3 Z M16 8 Q21 12 16 16" : "M3 9 H7 L12 5 V19 L7 15 H3 Z M16 9 L22 15 M22 9 L16 15"
                         : "M5 8 H19 M5 12 H15 M5 16 H11", active);
                 action.ToolTip = id switch
@@ -133,6 +138,8 @@ internal sealed partial class MainWindow
                     SidebarQuickSettings.Mute => EngineerText(!engineerEnabled ? "语音未启用" : engineerMuted ? "恢复声音" : "立即静音",
                         !engineerEnabled ? "Speech is disabled" : engineerMuted ? "Unmute" : "Mute now"),
                     SidebarQuickSettings.Volume => QuickSettingTitle(id) + $" · {engineerVolume}%",
+                    SidebarQuickSettings.ShiftIndicators => AppLocalization.Literal(active
+                        ? "HUD 换挡提示已显示，点击隐藏。" : "HUD 换挡提示已隐藏，点击显示。"),
                     SidebarQuickSettings.ShiftRecommendations => AppLocalization.Literal(dashboard.ActiveVehicleProfileId is null
                         ? "识别车辆后可切换推荐换挡。"
                         : active ? "当前车辆：推荐换挡已开启，点击关闭。" : "当前车辆：推荐换挡已关闭，点击开启。"),
@@ -149,6 +156,14 @@ internal sealed partial class MainWindow
                     ApplyEngineerPreferences();
                 }
                 else if (id == SidebarQuickSettings.Volume) OpenQuickVolume(action);
+                else if (id == SidebarQuickSettings.ShiftIndicators)
+                {
+                    await FlushSettingsAsync();
+                    var next = overlay.CurrentLayout with { ShowShiftIndicators = !overlay.TimingLayout.ShowShiftIndicators };
+                    store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
+                    await overlay.SetLayoutAsync(next, lifetimeCancellation.Token);
+                    syncHudShiftPreference?.Invoke();
+                }
                 else if (id == SidebarQuickSettings.ShiftRecommendations)
                 {
                     if (dashboard.ActiveVehicleProfileId is not { } profileId) return;

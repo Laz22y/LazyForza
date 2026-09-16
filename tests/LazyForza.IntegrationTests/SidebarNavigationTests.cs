@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Text.Json;
 using LazyForza.App;
 using LazyForza.Domain;
 using LazyForza.Storage;
@@ -20,12 +21,14 @@ public sealed class SidebarNavigationTests
                 store.SetAppSetting(SidebarQuickSettings.StoreKey, SidebarQuickSettings.Save([SidebarQuickSettings.ShiftRecommendations, SidebarQuickSettings.Volume, SidebarQuickSettings.Motion]));
                 store.SetAppSetting("raceEngineer.muted", "True");
                 store.SetAppSetting("raceEngineer.volume", "35");
+                store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(new OverlayLayout(ShowShiftIndicators: false)));
             }
             using (var store = new LazyForzaStore(path))
             {
                 CollectionAssert.AreEqual(new[] { SidebarQuickSettings.ShiftRecommendations, SidebarQuickSettings.Volume, SidebarQuickSettings.Motion }, SidebarQuickSettings.Load(store.GetAppSetting(SidebarQuickSettings.StoreKey)));
                 Assert.AreEqual("True", store.GetAppSetting("raceEngineer.muted"));
                 Assert.AreEqual("35", store.GetAppSetting("raceEngineer.volume"));
+                Assert.IsFalse(JsonSerializer.Deserialize<OverlayLayout>(store.GetAppSetting("overlay.layout")!)!.ShowShiftIndicators);
                 store.SetAppSetting(SidebarQuickSettings.StoreKey, SidebarQuickSettings.Save([]));
             }
             using (var store = new LazyForzaStore(path))
@@ -37,11 +40,11 @@ public sealed class SidebarNavigationTests
     [TestMethod]
     public void QuickSettingsKeepEmptySelectionAndNormalizeStoredChoices()
     {
-        CollectionAssert.AreEqual(new[] { SidebarQuickSettings.Mute, SidebarQuickSettings.ShiftRecommendations }, SidebarQuickSettings.Load(null));
+        CollectionAssert.AreEqual(new[] { SidebarQuickSettings.Mute, SidebarQuickSettings.ShiftIndicators }, SidebarQuickSettings.Load(null));
         CollectionAssert.AreEqual(Array.Empty<string>(), SidebarQuickSettings.Load("[]"));
         var saved = SidebarQuickSettings.Save([SidebarQuickSettings.Volume, "connectCue", SidebarQuickSettings.Mute, SidebarQuickSettings.Volume]);
         CollectionAssert.AreEqual(new[] { SidebarQuickSettings.Mute, SidebarQuickSettings.Volume }, SidebarQuickSettings.Load(saved));
-        CollectionAssert.AreEqual(new[] { SidebarQuickSettings.Mute, SidebarQuickSettings.ShiftRecommendations }, SidebarQuickSettings.Load("{"));
+        CollectionAssert.AreEqual(new[] { SidebarQuickSettings.Mute, SidebarQuickSettings.ShiftIndicators }, SidebarQuickSettings.Load("{"));
         CollectionAssert.AreEqual(new[] { SidebarQuickSettings.Mute }, SidebarQuickSettings.Load("[\"engineerMute\"]"),
             "Existing custom choices are not changed when a new quick action is introduced.");
     }

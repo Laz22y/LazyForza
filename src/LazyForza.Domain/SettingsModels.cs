@@ -46,7 +46,8 @@ public sealed record OverlayLayout(
     double? EstateRaceHudTop = null,
     double? EstateRaceHudWidth = null,
     double? EstateRaceHudHeight = null,
-    double EstateRaceBackdropOpacity = 1);
+    double EstateRaceBackdropOpacity = 1,
+    bool ShowShiftIndicators = true);
 
 public enum OverlayHudKind
 {

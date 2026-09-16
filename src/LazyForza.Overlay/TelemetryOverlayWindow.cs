@@ -562,7 +562,7 @@ internal sealed partial class HudSurface : FrameworkElement
         if (layoutPreview)
         {
             drift = OverlayLayoutPreviewState.Drift(drift, now);
-            DrawFullDriftDashboard(drawingContext, drift);
+            DrawFullDriftDashboard(drawingContext, drift, layout.ShowShiftIndicators);
             return;
         }
 
@@ -571,7 +571,7 @@ internal sealed partial class HudSurface : FrameworkElement
                 now,
                 layout.LiveHudStaleSeconds))
         {
-            DrawFullDriftDashboard(drawingContext, drift!);
+            DrawFullDriftDashboard(drawingContext, drift!, layout.ShowShiftIndicators);
         }
     }
 
@@ -670,7 +670,7 @@ internal sealed partial class HudSurface : FrameworkElement
         var rightCenter = new Point(width * 0.63, height * 0.41);
         if (BeginDashboardWidget(dc, width, height, widgets, DashboardWidgetKind.SpeedGear, out var speedTranslated))
         {
-            DrawSpeedGear(dc, state, leftCenter, circleRadius);
+            DrawSpeedGear(dc, state, leftCenter, circleRadius, layout.ShowShiftIndicators);
             EndDashboardWidget(dc, speedTranslated);
         }
         if (BeginDashboardWidget(dc, width, height, widgets, DashboardWidgetKind.EngineOutput, out var engineTranslated))
@@ -732,20 +732,21 @@ internal sealed partial class HudSurface : FrameworkElement
         DrawingContext dc,
         Modules.Dashboard.DashboardHudState state,
         Point center,
-        double radius)
+        double radius,
+        bool showShiftIndicators)
     {
         DrawGaugeCircle(dc, center, radius, BrushOf(0x8A, 0x8E, 0x94));
         Text(dc, state.GearDisplay, center.X, center.Y - radius * 0.47,
             radius * 0.64, White, TextAlignment.Center, true);
         var gearCueY = center.Y - radius * 0.47;
-        if (state.UpshiftCueActive)
+        if (showShiftIndicators && state.UpshiftCueActive)
             DrawShiftArrow(
                 dc,
                 new Point(center.X + radius * 0.48, gearCueY),
                 radius * 0.16,
                 true,
                 BrushOf(0x82, 0xE6, 0xAE));
-        if (state.DownshiftCueActive)
+        if (showShiftIndicators && state.DownshiftCueActive)
             DrawShiftArrow(
                 dc,
                 new Point(center.X - radius * 0.48, gearCueY),
@@ -1055,7 +1056,8 @@ internal sealed partial class HudSurface : FrameworkElement
 
     private void DrawFullDriftDashboard(
         DrawingContext dc,
-        DriftHudState state)
+        DriftHudState state,
+        bool showShiftIndicators)
     {
         var width = ActualWidth;
         var height = ActualHeight;
@@ -1191,7 +1193,8 @@ internal sealed partial class HudSurface : FrameworkElement
                 height * 0.095),
             state.GearDisplay,
             state.GearCue,
-            safetyColor);
+            safetyColor,
+            showShiftIndicators);
         DrawDriftLevelBar(
             dc,
             new Rect(
@@ -1299,7 +1302,8 @@ internal sealed partial class HudSurface : FrameworkElement
         Rect bounds,
         string gearDisplay,
         DriftGearCue cue,
-        Brush safetyColor)
+        Brush safetyColor,
+        bool showShiftIndicators)
     {
         dc.DrawRoundedRectangle(
             BrushOf(0x0A, 0x0D, 0x11, 0.7),
@@ -1325,6 +1329,7 @@ internal sealed partial class HudSurface : FrameworkElement
             White,
             TextAlignment.Center,
             true);
+        if (!showShiftIndicators) return;
         var cueCenter = new Point(
             bounds.Left + bounds.Width * 0.76,
             bounds.Top + bounds.Height * 0.52);

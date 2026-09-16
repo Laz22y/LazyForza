@@ -255,6 +255,23 @@ internal sealed partial class MainWindow
             "各部件可独立开关；位置请在 Overlay 布局编辑器中拖动，并可一键恢复当前默认布局。",
             componentPanel));
 
+        var shiftIndicators = new ToggleButton
+        {
+            IsChecked = current.ShowShiftIndicators, HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(12, 7, 12, 7)
+        };
+        void RefreshShiftIndicators() => shiftIndicators.Content = AppLocalization.Literal(
+            shiftIndicators.IsChecked == true ? "HUD 换挡提示：显示" : "HUD 换挡提示：隐藏");
+        shiftIndicators.Checked += (_, _) => RefreshShiftIndicators();
+        shiftIndicators.Unchecked += (_, _) => RefreshShiftIndicators();
+        RefreshShiftIndicators();
+        syncHudShiftPreference = () =>
+        {
+            shiftIndicators.IsChecked = overlay.TimingLayout.ShowShiftIndicators;
+            RefreshShiftIndicators();
+        };
+        hudComponents.Children.Add(SettingGroup("HUD 换挡提示", "显示仪表盘与漂移 HUD 的换挡提示符号。", shiftIndicators));
+
         var estateRaceComponentItems = new[]
         {
             (EstateRaceHudWidgetKind.Leaderboard, "比赛排行榜"),
@@ -461,6 +478,7 @@ internal sealed partial class MainWindow
                 ClickThrough = true,
                 IsLocked = true,
                 ReduceMotion = reduceMotion.IsChecked == true,
+                ShowShiftIndicators = shiftIndicators.IsChecked == true,
                 DashboardMotionEnabled = dashboardMotion.IsChecked == true,
                 DashboardMotionIntensity = motionIntensity.Value,
                 DashboardIdleWaitSeconds = dashboardIdleWait.Value,
@@ -494,7 +512,7 @@ internal sealed partial class MainWindow
             RefreshSidebar();
         }, applyStatus);
         controls.AddHandler(Slider.ValueChangedEvent, new RoutedPropertyChangedEventHandler<double>((_, _) => automatic.Request()));
-        foreach (var toggle in componentToggles.Values.Concat(estateRaceToggles.Values).Append(reduceMotion).Append(dashboardMotion))
+        foreach (var toggle in componentToggles.Values.Concat(estateRaceToggles.Values).Append(reduceMotion).Append(dashboardMotion).Append(shiftIndicators))
         {
             toggle.Checked += (_, _) => automatic.Request();
             toggle.Unchecked += (_, _) => automatic.Request();

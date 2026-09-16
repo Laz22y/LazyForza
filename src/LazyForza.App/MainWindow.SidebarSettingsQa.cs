@@ -98,7 +98,33 @@ internal sealed partial class MainWindow
         Check(!SidebarQuickSettings.Load(store.GetAppSetting(SidebarQuickSettings.StoreKey)).Contains(SidebarQuickSettings.Volume), "Quick selection persisted");
         choice.IsChecked = true; choice.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
 
+        hudComponentsExpanded = true;
         await ShowSettings(SettingsCategory.Hud);
+        var originalIndicators = overlay.TimingLayout.ShowShiftIndicators;
+        var indicatorsToggle = QaChildren<ToggleButton>(content).Single(toggle => toggle.Content is string text &&
+            text.StartsWith(AppLocalization.Literal("HUD 换挡提示"), StringComparison.Ordinal));
+        var quickIndicators = QaChildren<Button>(quickSettingsHost).Single(button =>
+            AutomationProperties.GetName(button) == QuickSettingTitle(SidebarQuickSettings.ShiftIndicators));
+        var savedVehiclePreferences = store.ListVehicleProfiles().Select(profile => (profile.Id, profile.ShiftRecommendationsEnabled)).ToArray();
+        Check(quickIndicators.IsEnabled, "HUD shift visibility is available without a learned vehicle");
+        quickIndicators.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        await Task.Delay(200); await FlushSettingsAsync();
+        Check(overlay.TimingLayout.ShowShiftIndicators == !originalIndicators && indicatorsToggle.IsChecked == !originalIndicators,
+            "HUD shift quick action updates full settings");
+        Check(JsonSerializer.Deserialize<OverlayLayout>(store.GetAppSetting("overlay.layout")!)!.ShowShiftIndicators == !originalIndicators,
+            "HUD shift visibility is saved");
+        Check(savedVehiclePreferences.SequenceEqual(store.ListVehicleProfiles().Select(profile => (profile.Id, profile.ShiftRecommendationsEnabled))),
+            "HUD shift visibility preserves all vehicle preferences");
+        indicatorsToggle.IsChecked = originalIndicators;
+        await FlushSettingsAsync(); RefreshSidebar();
+        Check(overlay.TimingLayout.ShowShiftIndicators == originalIndicators &&
+            Equals(indicatorsToggle.Content, AppLocalization.Literal(originalIndicators
+                ? "HUD 换挡提示：显示" : "HUD 换挡提示：隐藏")) &&
+            quickIndicators.ToolTip?.ToString() == AppLocalization.Literal(originalIndicators
+                ? "HUD 换挡提示已显示，点击隐藏。" : "HUD 换挡提示已隐藏，点击显示。"), "Full settings updates HUD shift quick action");
+        indicatorsToggle.BringIntoView();
+        await Task.Delay(120); UpdateLayout();
+        CaptureVisual(this, Path.Combine(directory, "hud-shift-indicators.png"));
         var originalMotion = overlay.TimingLayout.ReduceMotion;
         Check(!QaChildren<Button>(content).Any(button => button.Content is string text &&
             new[] { "保存", "应用", "Save", "Apply" }.Any(text.StartsWith)), "No HUD apply button");

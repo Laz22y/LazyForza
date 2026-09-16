@@ -678,6 +678,7 @@ internal sealed partial class MainWindow : Window
         refreshEngineerControls = null;
         refreshShiftControls = null;
         syncHudMotionPreference = null;
+        syncHudShiftPreference = null;
         var page = navigation.SelectedIndex switch
         {
             0 => OverviewPage(),
