@@ -668,6 +668,7 @@ internal sealed partial class MainWindow : Window
     private async void RenderSelectedPage(bool preserveScroll = false)
     {
         if (changingModule || navigation.SelectedIndex < 0) return;
+        if (quickSettingPopup is not null) quickSettingPopup.IsOpen = false;
         var revision = ++pageRenderRevision;
         await FlushSettingsAsync();
         if (revision != pageRenderRevision || lifetimeCancellation.IsCancellationRequested) return;
@@ -679,6 +680,8 @@ internal sealed partial class MainWindow : Window
         refreshShiftControls = null;
         syncHudMotionPreference = null;
         syncHudShiftPreference = null;
+        syncHudOpacityPreferences = null;
+        syncAutomaticRecordingPreference = null;
         var page = navigation.SelectedIndex switch
         {
             0 => OverviewPage(),

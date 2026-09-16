@@ -158,6 +158,11 @@ internal sealed partial class MainWindow
         var estateBackdropOpacity = AddValueSlider(
             opacityControls, "地产赛事底板不透明度", "只调整赛事面板底色，文字、旗语和状态标识保持清晰。",
             current.EstateRaceBackdropOpacity, 0, 1, 0.05, value => value.ToString("P0"));
+        syncHudOpacityPreferences = () =>
+        {
+            opacity.Value = overlay.TimingLayout.Opacity;
+            estateBackdropOpacity.Value = overlay.TimingLayout.EstateRaceBackdropOpacity;
+        };
         var monitor = Label(
             AppLocalization.Format("settings.overlay.monitor", "当前显示器：{0}", current.MonitorId),
             10,

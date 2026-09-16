@@ -86,6 +86,25 @@ internal sealed partial class MainWindow
         Check(store.GetAppSetting("telemetry.port") == portBox.Text, "Port auto-saved without button");
         portBox.Text = originalPort; await FlushSettingsAsync();
 
+        Button QuickButton(string id) => QaChildren<Button>(quickSettingsHost).Single(button =>
+            AutomationProperties.GetName(button) == QuickSettingTitle(id));
+        var recordingToggle = QaChildren<ToggleButton>(content).Single(toggle => toggle.Content is string text &&
+            text.StartsWith(AppLocalization.Format("settings.recording.enabled", "自动录制：{0}", ""), StringComparison.Ordinal));
+        var originalRecording = recorder.AutomaticOptions;
+        QuickButton(SidebarQuickSettings.AutomaticRecording).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        await Task.Delay(150); await FlushSettingsAsync();
+        Check(recorder.AutomaticOptions == originalRecording with { Enabled = !originalRecording.Enabled } &&
+            recordingToggle.IsChecked == !originalRecording.Enabled &&
+            AutomaticRecordingOptions.Load(store).Enabled == !originalRecording.Enabled,
+            "Recording quick toggle updates full settings and persists without changing capacity or rotation");
+        recordingToggle.IsChecked = originalRecording.Enabled;
+        recordingToggle.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        await FlushSettingsAsync();
+        Check(recorder.AutomaticOptions == originalRecording &&
+            QuickButton(SidebarQuickSettings.AutomaticRecording).ToolTip?.ToString() ==
+            QuickSettingTitle(SidebarQuickSettings.AutomaticRecording) + " · " + AppLocalization.Literal(originalRecording.Enabled ? "开" : "关"),
+            "Recording full settings update the quick action");
+
         await ShowSettings(SettingsCategory.General);
         var identity = QaChildren<TextBox>(content).Single();
         var originalIdentity = identity.Text;
@@ -100,6 +119,56 @@ internal sealed partial class MainWindow
 
         hudComponentsExpanded = true;
         await ShowSettings(SettingsCategory.Hud);
+        var originalOpacity = overlay.TimingLayout.Opacity;
+        var originalBackdrop = overlay.TimingLayout.EstateRaceBackdropOpacity;
+        var fullOpacity = QaChildren<Slider>(content).Single(slider => AutomationProperties.GetName(slider) == AppLocalization.Literal("整体不透明度"));
+        var fullBackdrop = QaChildren<Slider>(content).Single(slider => AutomationProperties.GetName(slider) == QuickSettingTitle(SidebarQuickSettings.EstateBackdropOpacity));
+        // Leave a full-page edit pending as the popup opens: it must not later overwrite the quick value.
+        fullOpacity.Value = 0.8;
+        async Task<Slider> OpenSlider(string id)
+        {
+            QuickButton(id).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            await Task.Delay(150); UpdateLayout();
+            Check(quickSettingPopup?.IsOpen == true, $"Slider popup opens for {id}");
+            return QaChildren<Slider>(quickSettingPopup!.Child).Single();
+        }
+        var opacitySlider = await OpenSlider(SidebarQuickSettings.HudOpacity);
+        Check(opacitySlider.Value == 80 && opacitySlider.Minimum == 25 && opacitySlider.Maximum == 100,
+            "HUD opacity uses the saved setting and the same limits as the full page");
+        opacitySlider.Value = 25; opacitySlider.Value = 100; opacitySlider.Value = 65;
+        quickSettingPopup!.IsOpen = false;
+        await FlushSettingsAsync();
+        await Task.Delay(100); await FlushSettingsAsync();
+        Check(overlay.TimingLayout.Opacity == 0.65 && fullOpacity.Value == 0.65 &&
+            overlay.TimingLayout.EstateRaceBackdropOpacity == originalBackdrop &&
+            JsonSerializer.Deserialize<OverlayLayout>(store.GetAppSetting("overlay.layout")!)!.Opacity == 0.65,
+            "Rapid opacity edits persist the last value on dismiss and synchronize without changing the backdrop");
+
+        var backdropSlider = await OpenSlider(SidebarQuickSettings.EstateBackdropOpacity);
+        Check(backdropSlider.Minimum == 0 && backdropSlider.Maximum == 100, "Backdrop quick slider includes fully transparent");
+        backdropSlider.Value = 0;
+        await FlushSettingsAsync();
+        Check(overlay.TimingLayout.EstateRaceBackdropOpacity == 0 && fullBackdrop.Value == 0 && overlay.TimingLayout.Opacity == 0.65,
+            "Backdrop can become transparent without changing overall opacity");
+        backdropSlider.Value = 35;
+        await FlushSettingsAsync();
+        UpdateLayout();
+        CaptureVisual((FrameworkElement)quickSettingPopup!.Child, Path.Combine(directory, "quick-backdrop-popup.png"));
+        quickSettingPopup.IsOpen = false;
+        fullBackdrop.Value = 0.55;
+        await FlushSettingsAsync();
+        backdropSlider = await OpenSlider(SidebarQuickSettings.EstateBackdropOpacity);
+        Check(Math.Abs(backdropSlider.Value - 55) < 0.000001, "Reopened slider reflects full-page edits");
+        backdropSlider.Value = 45;
+        await ShowSettings(SettingsCategory.General);
+        Check(quickSettingPopup is null && overlay.TimingLayout.EstateRaceBackdropOpacity == 0.45 &&
+            JsonSerializer.Deserialize<OverlayLayout>(store.GetAppSetting("overlay.layout")!)!.EstateRaceBackdropOpacity == 0.45,
+            "Navigating away closes the slider and saves its last edit");
+        await ShowSettings(SettingsCategory.Hud);
+        fullOpacity = QaChildren<Slider>(content).Single(slider => AutomationProperties.GetName(slider) == AppLocalization.Literal("整体不透明度"));
+        fullBackdrop = QaChildren<Slider>(content).Single(slider => AutomationProperties.GetName(slider) == QuickSettingTitle(SidebarQuickSettings.EstateBackdropOpacity));
+        fullOpacity.Value = originalOpacity; fullBackdrop.Value = originalBackdrop;
+        await FlushSettingsAsync();
         var originalIndicators = overlay.TimingLayout.ShowShiftIndicators;
         var indicatorsToggle = QaChildren<ToggleButton>(content).Single(toggle => toggle.Content is string text &&
             text.StartsWith(AppLocalization.Literal("HUD 换挡提示"), StringComparison.Ordinal));
@@ -144,11 +213,22 @@ internal sealed partial class MainWindow
         language.SelectedItem = AppLocalization.SupportedLanguages.First(option => option.Code != originalLanguage);
         await Task.Delay(250);
         Check(AppLocalization.CurrentLanguage != originalLanguage, "Language applied without restarting");
+        var translatedSlider = await OpenSlider(SidebarQuickSettings.HudOpacity);
+        CaptureVisual((FrameworkElement)quickSettingPopup!.Child, Path.Combine(directory, "quick-opacity-popup-translated.png"));
+        Check(AutomationProperties.GetName(translatedSlider) == QuickSettingTitle(SidebarQuickSettings.HudOpacity),
+            "Opacity popup follows the interface language");
+        quickSettingPopup.IsOpen = false;
         language = QaChildren<ComboBox>(content).Single(box => box.SelectedItem is AppLanguageOption);
         language.SelectedItem = AppLocalization.SupportedLanguages.First(option => option.Code == originalLanguage);
         await Task.Delay(250);
         Check(AppLocalization.CurrentLanguage == originalLanguage, "Language switches back");
         Width = 1440; Height = 900;
+        quickSettingIds = [SidebarQuickSettings.Mute, SidebarQuickSettings.ShiftIndicators, SidebarQuickSettings.HudOpacity,
+            SidebarQuickSettings.EstateBackdropOpacity, SidebarQuickSettings.AutomaticRecording];
+        BuildSidebarQuickSettings();
+        navigation.SelectedIndex = 0;
+        await Task.Delay(150); UpdateLayout();
+        CaptureVisual(this, Path.Combine(directory, "quick-settings-selected-overview.png"));
         quickSettingIds = originalChoices;
         store.SetAppSetting(SidebarQuickSettings.StoreKey, SidebarQuickSettings.Save(originalChoices));
         BuildSidebarQuickSettings(); navigation.SelectedIndex = 0;

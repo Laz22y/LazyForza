@@ -17,11 +17,13 @@ internal sealed partial class MainWindow
     private readonly List<Action> refreshQuickSettings = [];
     private TextBlock? sidebarStatus, sidebarPort;
     private System.Windows.Shapes.Ellipse? sidebarDot;
-    private Popup? quickVolumePopup;
+    private Popup? quickSettingPopup;
     private Action? refreshEngineerControls;
     private Action? refreshShiftControls;
     private Action? syncHudMotionPreference;
     private Action? syncHudShiftPreference;
+    private Action? syncHudOpacityPreferences;
+    private Action? syncAutomaticRecordingPreference;
 
     private void InitializeSidebar()
     {
@@ -40,7 +42,7 @@ internal sealed partial class MainWindow
         status.Children.Add(sidebarStatus);
         navigation.SetFooter(status, quickSettingsHost);
         navigation.CompactChanged += (_, _) => BuildSidebarQuickSettings();
-        Deactivated += (_, _) => { if (quickVolumePopup is not null) quickVolumePopup.IsOpen = false; };
+        Deactivated += (_, _) => { if (quickSettingPopup is not null) quickSettingPopup.IsOpen = false; };
         BuildSidebarQuickSettings();
         RefreshSidebar();
     }
@@ -77,19 +79,22 @@ internal sealed partial class MainWindow
         SidebarQuickSettings.Volume => "语音音量",
         SidebarQuickSettings.ShiftRecommendations => "本车换挡推荐",
         SidebarQuickSettings.ShiftIndicators => "HUD 换挡提示",
+        SidebarQuickSettings.HudOpacity => "HUD 整体不透明度",
+        SidebarQuickSettings.EstateBackdropOpacity => "地产赛事底板不透明度",
+        SidebarQuickSettings.AutomaticRecording => "比赛自动录制",
         _ => "减少动态"
     });
 
     private void BuildSidebarQuickSettings()
     {
         var dashboard = moduleManager.Modules.OfType<DashboardModule>().Single();
-        if (quickVolumePopup is not null) quickVolumePopup.IsOpen = false;
+        if (quickSettingPopup is not null) quickSettingPopup.IsOpen = false;
         quickSettingsHost.Children.Clear(); refreshQuickSettings.Clear();
         if (quickSettingIds.Length == 0) return;
         var heading = Label("快速设置", 10, FontWeights.Normal, "MutedBrush");
         heading.Margin = new Thickness(14, 0, 0, 4);
         quickSettingsHost.Children.Add(heading);
-        var compact = navigation.IsCompact && quickSettingIds.Length > 1;
+        var compact = (navigation.IsCompact || quickSettingIds.Length > 5) && quickSettingIds.Length > 1;
         Panel rows = compact ? new WrapPanel { Margin = new Thickness(10, 0, 10, 8) } : new StackPanel();
         quickSettingsHost.Children.Add(rows);
         foreach (var id in quickSettingIds)
@@ -108,6 +113,7 @@ internal sealed partial class MainWindow
                 title.TextTrimming = TextTrimming.CharacterEllipsis;
                 row.Children.Add(title); rows.Children.Add(row);
             }
+            var busy = false;
             string? previousState = null;
             void Refresh()
             {
@@ -117,19 +123,30 @@ internal sealed partial class MainWindow
                     SidebarQuickSettings.Volume => engineerVolume.ToString(CultureInfo.InvariantCulture),
                     SidebarQuickSettings.ShiftRecommendations => $"{dashboard.ActiveVehicleProfileId}:{dashboard.ShiftRecommendationsEnabled}",
                     SidebarQuickSettings.ShiftIndicators => overlay.TimingLayout.ShowShiftIndicators.ToString(),
+                    SidebarQuickSettings.HudOpacity => overlay.TimingLayout.Opacity.ToString(CultureInfo.InvariantCulture),
+                    SidebarQuickSettings.EstateBackdropOpacity => overlay.TimingLayout.EstateRaceBackdropOpacity.ToString(CultureInfo.InvariantCulture),
+                    SidebarQuickSettings.AutomaticRecording => recorder.AutomaticOptions.Enabled.ToString(),
                     _ => overlay.TimingLayout.ReduceMotion.ToString()
                 };
+                state += $":{busy}";
                 if (state == previousState) return;
                 previousState = state;
                 var mute = id == SidebarQuickSettings.Mute;
                 var shift = id == SidebarQuickSettings.ShiftRecommendations;
                 var indicators = id == SidebarQuickSettings.ShiftIndicators;
+                var recording = id == SidebarQuickSettings.AutomaticRecording;
                 var active = mute ? !engineerMuted && engineerEnabled : shift
                     ? dashboard.ActiveVehicleProfileId is not null && dashboard.ShiftRecommendationsEnabled
-                    : indicators ? overlay.TimingLayout.ShowShiftIndicators : overlay.TimingLayout.ReduceMotion;
-                action.IsEnabled = shift ? dashboard.ActiveVehicleProfileId is not null : !mute || engineerEnabled;
+                    : indicators ? overlay.TimingLayout.ShowShiftIndicators : recording ? recorder.AutomaticOptions.Enabled
+                    : id is SidebarQuickSettings.HudOpacity or SidebarQuickSettings.EstateBackdropOpacity || overlay.TimingLayout.ReduceMotion;
+                action.IsEnabled = !busy && (shift ? dashboard.ActiveVehicleProfileId is not null : !mute || engineerEnabled);
                 action.Content = id == SidebarQuickSettings.Volume ? Label($"{engineerVolume}", 11)
-                    : QuickIcon(indicators ? "M2 12 Q12 2 22 12 Q12 22 2 12 Z M12 16 V8 M9 11 L12 8 L15 11"
+                    : QuickIcon(id == SidebarQuickSettings.HudOpacity
+                        ? "M12 2 A10 10 0 1 1 12 22 A10 10 0 1 1 12 2 Z M12 2 V22 M12 6 H20 M12 10 H22 M12 14 H22 M12 18 H20"
+                        : id == SidebarQuickSettings.EstateBackdropOpacity
+                        ? "M3 3 H21 V21 H3 Z M3 15 L15 3 M3 21 L21 3 M9 21 L21 9 M15 21 L21 15"
+                        : recording ? "M12 2 A10 10 0 1 1 12 22 A10 10 0 1 1 12 2 Z M12 8 A4 4 0 1 1 12 16 A4 4 0 1 1 12 8 Z"
+                        : indicators ? "M2 12 Q12 2 22 12 Q12 22 2 12 Z M12 16 V8 M9 11 L12 8 L15 11"
                         : shift ? "M6 18 V5 M2 9 L6 5 L10 9 M18 6 V19 M14 15 L18 19 L22 15" : mute
                         ? active ? "M3 9 H7 L12 5 V19 L7 15 H3 Z M16 8 Q21 12 16 16" : "M3 9 H7 L12 5 V19 L7 15 H3 Z M16 9 L22 15 M22 9 L16 15"
                         : "M5 8 H19 M5 12 H15 M5 16 H11", active);
@@ -138,6 +155,8 @@ internal sealed partial class MainWindow
                     SidebarQuickSettings.Mute => EngineerText(!engineerEnabled ? "语音未启用" : engineerMuted ? "恢复声音" : "立即静音",
                         !engineerEnabled ? "Speech is disabled" : engineerMuted ? "Unmute" : "Mute now"),
                     SidebarQuickSettings.Volume => QuickSettingTitle(id) + $" · {engineerVolume}%",
+                    SidebarQuickSettings.HudOpacity => QuickSettingTitle(id) + $" · {overlay.TimingLayout.Opacity:P0}",
+                    SidebarQuickSettings.EstateBackdropOpacity => QuickSettingTitle(id) + $" · {overlay.TimingLayout.EstateRaceBackdropOpacity:P0}",
                     SidebarQuickSettings.ShiftIndicators => AppLocalization.Literal(active
                         ? "HUD 换挡提示已显示，点击隐藏。" : "HUD 换挡提示已隐藏，点击显示。"),
                     SidebarQuickSettings.ShiftRecommendations => AppLocalization.Literal(dashboard.ActiveVehicleProfileId is null
@@ -150,36 +169,58 @@ internal sealed partial class MainWindow
             refreshQuickSettings.Add(Refresh); Refresh();
             action.Click += async (_, _) =>
             {
-                if (id == SidebarQuickSettings.Mute)
+                if (busy) return;
+                busy = true; Refresh();
+                try
                 {
-                    engineerMuted = !engineerMuted;
-                    ApplyEngineerPreferences();
+                    if (id == SidebarQuickSettings.Mute)
+                    {
+                        engineerMuted = !engineerMuted;
+                        ApplyEngineerPreferences();
+                    }
+                    else if (id is SidebarQuickSettings.Volume or SidebarQuickSettings.HudOpacity or SidebarQuickSettings.EstateBackdropOpacity)
+                    {
+                        await FlushSettingsAsync();
+                        if (action.IsLoaded) OpenQuickSlider(action, id);
+                    }
+                    else if (id == SidebarQuickSettings.AutomaticRecording)
+                    {
+                        await FlushSettingsAsync();
+                        await recorder.SetAutomaticOptionsAsync(
+                            recorder.AutomaticOptions with { Enabled = !recorder.AutomaticOptions.Enabled }, lifetimeCancellation.Token);
+                        syncAutomaticRecordingPreference?.Invoke();
+                    }
+                    else if (id == SidebarQuickSettings.ShiftIndicators)
+                    {
+                        await FlushSettingsAsync();
+                        var next = overlay.CurrentLayout with { ShowShiftIndicators = !overlay.TimingLayout.ShowShiftIndicators };
+                        store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
+                        await overlay.SetLayoutAsync(next, lifetimeCancellation.Token);
+                        syncHudShiftPreference?.Invoke();
+                    }
+                    else if (id == SidebarQuickSettings.ShiftRecommendations)
+                    {
+                        if (dashboard.ActiveVehicleProfileId is not { } profileId) return;
+                        var enabled = !await store.GetShiftRecommendationsEnabledAsync(profileId, lifetimeCancellation.Token);
+                        store.SetShiftRecommendationsEnabled(profileId, enabled);
+                        dashboard.SetShiftRecommendationsEnabled(profileId, enabled);
+                        refreshShiftControls?.Invoke();
+                    }
+                    else
+                    {
+                        var next = overlay.CurrentLayout with { ReduceMotion = !overlay.TimingLayout.ReduceMotion };
+                        store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
+                        await overlay.SetLayoutAsync(next, lifetimeCancellation.Token);
+                        syncHudMotionPreference?.Invoke();
+                    }
                 }
-                else if (id == SidebarQuickSettings.Volume) OpenQuickVolume(action);
-                else if (id == SidebarQuickSettings.ShiftIndicators)
+                catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested) { }
+                catch (Exception exception)
                 {
-                    await FlushSettingsAsync();
-                    var next = overlay.CurrentLayout with { ShowShiftIndicators = !overlay.TimingLayout.ShowShiftIndicators };
-                    store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
-                    await overlay.SetLayoutAsync(next, lifetimeCancellation.Token);
-                    syncHudShiftPreference?.Invoke();
+                    AppDialog.Show(AppLocalization.Format("settings.auto.failed", "未能应用：{0}", exception.Message),
+                        QuickSettingTitle(id), MessageBoxButton.OK, MessageBoxImage.Error);
                 }
-                else if (id == SidebarQuickSettings.ShiftRecommendations)
-                {
-                    if (dashboard.ActiveVehicleProfileId is not { } profileId) return;
-                    var enabled = !await store.GetShiftRecommendationsEnabledAsync(profileId, lifetimeCancellation.Token);
-                    store.SetShiftRecommendationsEnabled(profileId, enabled);
-                    dashboard.SetShiftRecommendationsEnabled(profileId, enabled);
-                    refreshShiftControls?.Invoke();
-                }
-                else
-                {
-                    var next = overlay.CurrentLayout with { ReduceMotion = !overlay.TimingLayout.ReduceMotion };
-                    store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
-                    await overlay.SetLayoutAsync(next, lifetimeCancellation.Token);
-                    syncHudMotionPreference?.Invoke();
-                }
-                RefreshSidebar();
+                finally { busy = false; RefreshSidebar(); }
             };
         }
     }
@@ -192,27 +233,64 @@ internal sealed partial class MainWindow
         return icon;
     }
 
-    private void OpenQuickVolume(Button target)
+    private void OpenQuickSlider(Button target, string id)
     {
-        if (quickVolumePopup is not null) quickVolumePopup.IsOpen = false;
-        var panel = new StackPanel { Width = 184 };
-        var value = Label($"{QuickSettingTitle(SidebarQuickSettings.Volume)} · {engineerVolume}%", 12);
-        panel.Children.Add(value);
-        var slider = new Slider { Minimum = 0, Maximum = 100, Value = engineerVolume, TickFrequency = 1,
+        if (quickSettingPopup is not null) quickSettingPopup.IsOpen = false;
+        var volume = id == SidebarQuickSettings.Volume;
+        var panel = new StackPanel { Width = 252 };
+        var heading = new DockPanel();
+        var value = Label("", 12, FontWeights.SemiBold, "AccentBrush");
+        value.Margin = new Thickness(12, 0, 0, 0);
+        DockPanel.SetDock(value, Dock.Right); heading.Children.Add(value);
+        heading.Children.Add(Label(QuickSettingTitle(id), 12));
+        panel.Children.Add(heading);
+        var initial = volume ? engineerVolume : 100 * (id == SidebarQuickSettings.HudOpacity
+            ? overlay.TimingLayout.Opacity : overlay.TimingLayout.EstateRaceBackdropOpacity);
+        var slider = new Slider { Minimum = id == SidebarQuickSettings.HudOpacity ? 25 : 0, Maximum = 100,
+            Value = initial, TickFrequency = volume ? 1 : 5, SmallChange = volume ? 1 : 5, LargeChange = 10,
             IsSnapToTickEnabled = true, Margin = new Thickness(0, 12, 0, 0) };
-        AutomationProperties.SetName(slider, QuickSettingTitle(SidebarQuickSettings.Volume));
+        AutomationProperties.SetName(slider, QuickSettingTitle(id));
+        value.Text = $"{slider.Value:0}%";
+        panel.Children.Add(slider);
+        var status = AutoApplyStatus();
+        panel.Children.Add(status);
+        var automatic = AutoApplySettings(panel, async () =>
+        {
+            if (volume)
+            {
+                engineerVolume = (int)slider.Value;
+                ApplyEngineerPreferences();
+            }
+            else
+            {
+                var next = id == SidebarQuickSettings.HudOpacity
+                    ? overlay.CurrentLayout with { Opacity = slider.Value / 100 }
+                    : overlay.CurrentLayout with { EstateRaceBackdropOpacity = slider.Value / 100 };
+                store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
+                await overlay.SetLayoutAsync(next, lifetimeCancellation.Token);
+                syncHudOpacityPreferences?.Invoke();
+                RefreshSidebar();
+            }
+            status.Visibility = Visibility.Collapsed;
+        }, status, milliseconds: 50);
         slider.ValueChanged += (_, _) =>
         {
-            engineerVolume = (int)slider.Value;
-            ApplyEngineerPreferences();
-            value.Text = $"{QuickSettingTitle(SidebarQuickSettings.Volume)} · {engineerVolume}%";
+            value.Text = $"{slider.Value:0}%";
+            automatic.Request();
         };
-        panel.Children.Add(slider);
-        quickVolumePopup = new Popup { PlacementTarget = target, Placement = PlacementMode.Right,
+        var popup = new Popup { PlacementTarget = target, Placement = PlacementMode.Right,
             StaysOpen = false, AllowsTransparency = true,
             Child = new Border { Child = panel, Background = Brush("PanelBrush"), BorderBrush = Brush("BorderBrush"),
                 BorderThickness = new Thickness(1), Padding = new Thickness(16), CornerRadius = new CornerRadius(8) } };
-        quickVolumePopup.IsOpen = true;
+        popup.Closed += async (_, _) =>
+        {
+            await automatic.FlushAsync();
+            automatic.Dispose();
+            settingApplications.Remove(automatic);
+            if (ReferenceEquals(quickSettingPopup, popup)) quickSettingPopup = null;
+        };
+        quickSettingPopup = popup;
+        popup.IsOpen = true;
         slider.Focus();
     }
 

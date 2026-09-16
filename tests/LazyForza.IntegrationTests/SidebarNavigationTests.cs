@@ -13,22 +13,33 @@ public sealed class SidebarNavigationTests
     [TestMethod]
     public void QuickChoicesAndExistingSpeechPreferencesSurviveStoreReopen()
     {
+        string[] selected = [SidebarQuickSettings.ShiftRecommendations, SidebarQuickSettings.Volume,
+            SidebarQuickSettings.HudOpacity, SidebarQuickSettings.EstateBackdropOpacity,
+            SidebarQuickSettings.AutomaticRecording, SidebarQuickSettings.Motion];
         var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"lazyforza-quick-{Guid.NewGuid():N}.db");
         try
         {
             using (var store = new LazyForzaStore(path))
             {
-                store.SetAppSetting(SidebarQuickSettings.StoreKey, SidebarQuickSettings.Save([SidebarQuickSettings.ShiftRecommendations, SidebarQuickSettings.Volume, SidebarQuickSettings.Motion]));
+                store.SetAppSetting(SidebarQuickSettings.StoreKey, SidebarQuickSettings.Save(selected));
                 store.SetAppSetting("raceEngineer.muted", "True");
                 store.SetAppSetting("raceEngineer.volume", "35");
-                store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(new OverlayLayout(ShowShiftIndicators: false)));
+                store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(new OverlayLayout(
+                    Opacity: 0.65, EstateRaceBackdropOpacity: 0.35, ShowShiftIndicators: false)));
+                (AutomaticRecordingOptions.Load(store) with { Enabled = true, RotateOldest = true }).Save(store);
             }
             using (var store = new LazyForzaStore(path))
             {
-                CollectionAssert.AreEqual(new[] { SidebarQuickSettings.ShiftRecommendations, SidebarQuickSettings.Volume, SidebarQuickSettings.Motion }, SidebarQuickSettings.Load(store.GetAppSetting(SidebarQuickSettings.StoreKey)));
+                CollectionAssert.AreEqual(selected, SidebarQuickSettings.Load(store.GetAppSetting(SidebarQuickSettings.StoreKey)));
                 Assert.AreEqual("True", store.GetAppSetting("raceEngineer.muted"));
                 Assert.AreEqual("35", store.GetAppSetting("raceEngineer.volume"));
-                Assert.IsFalse(JsonSerializer.Deserialize<OverlayLayout>(store.GetAppSetting("overlay.layout")!)!.ShowShiftIndicators);
+                var layout = JsonSerializer.Deserialize<OverlayLayout>(store.GetAppSetting("overlay.layout")!)!;
+                Assert.IsFalse(layout.ShowShiftIndicators);
+                Assert.AreEqual(0.65, layout.Opacity);
+                Assert.AreEqual(0.35, layout.EstateRaceBackdropOpacity);
+                var recording = AutomaticRecordingOptions.Load(store);
+                Assert.IsTrue(recording.Enabled);
+                Assert.IsTrue(recording.RotateOldest);
                 store.SetAppSetting(SidebarQuickSettings.StoreKey, SidebarQuickSettings.Save([]));
             }
             using (var store = new LazyForzaStore(path))

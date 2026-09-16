@@ -8,7 +8,10 @@ internal static class SidebarQuickSettings
     internal const string Mute = "engineerMute", Volume = "engineerVolume", Motion = "reduceMotion";
     internal const string ShiftRecommendations = "shiftRecommendations";
     internal const string ShiftIndicators = "shiftIndicators";
-    internal static readonly string[] Available = [Mute, ShiftIndicators, ShiftRecommendations, Volume, Motion];
+    internal const string HudOpacity = "hudOpacity", EstateBackdropOpacity = "estateBackdropOpacity";
+    internal const string AutomaticRecording = "automaticRecording";
+    internal static readonly string[] Available =
+        [Mute, ShiftIndicators, ShiftRecommendations, Volume, HudOpacity, EstateBackdropOpacity, AutomaticRecording, Motion];
     internal static string[] Default => [Mute, ShiftIndicators];
 
     internal static string[] Load(string? json)

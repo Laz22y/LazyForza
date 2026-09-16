@@ -39,7 +39,8 @@ internal sealed partial class MainWindow
             "settings.recording.enabled",
             "自动录制：{0}",
             AppLocalization.Literal(enabled.IsChecked == true ? "开" : "关"));
-        enabled.Click += (_, _) => RefreshEnabledText();
+        enabled.Checked += (_, _) => RefreshEnabledText();
+        enabled.Unchecked += (_, _) => RefreshEnabledText();
         RefreshEnabledText();
         Grid.SetColumn(enabled, 1);
         header.Children.Add(enabled);
@@ -126,6 +127,13 @@ internal sealed partial class MainWindow
         status.Margin = new Thickness(0, 13, 0, 8);
         panel.Children.Add(status);
 
+        syncAutomaticRecordingPreference = () =>
+        {
+            enabled.IsChecked = recorder.AutomaticOptions.Enabled;
+            status.Text = AppLocalization.Format("settings.recording.status", "{0}\n当前录制占用 {1} · 目录 {2}",
+                AppLocalization.Literal(recorder.AutomaticStatus), FormatBytes(recorder.RecordingBytes), directories.RecordingsPath);
+        };
+
         var actions = new WrapPanel();
         var applyStatus = AutoApplyStatus();
         panel.Children.Add(applyStatus);
@@ -145,6 +153,7 @@ internal sealed partial class MainWindow
                 status.Text = AppLocalization.Format("settings.recording.status", "{0}\n当前录制占用 {1} · 目录 {2}",
                     AppLocalization.Literal(recorder.AutomaticStatus), FormatBytes(recorder.RecordingBytes), directories.RecordingsPath);
                 applyStatus.Visibility = Visibility.Collapsed;
+                RefreshSidebar();
         }, applyStatus);
         enabled.Click += (_, _) => automatic.Request();
         rotate.Click += (_, _) => automatic.Request();
