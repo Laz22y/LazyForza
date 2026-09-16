@@ -9,51 +9,38 @@ namespace LazyForza.App;
 
 internal sealed partial class MainWindow
 {
-    private Border BuildLapAnalysisExchangeCard(
+    private Border BuildLapAnalysisToolbar(
         LapAnalysisModule module,
-        out Button exportSelected)
+        out Button exportSelected,
+        out Button deleteSelected,
+        out Button deleteTrack)
     {
-        var layout = new Grid();
-        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var copy = new StackPanel();
-        copy.Children.Add(Label("圈速文件", 16, FontWeights.SemiBold));
-        copy.Children.Add(Label(
-            ".lfzlap 保留圈速、走线、动态遥测和玩家代号；导入后可直接参与本地对比。",
-            11,
-            FontWeights.Normal,
-            "MutedBrush"));
-        layout.Children.Add(copy);
-
-        var actions = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(18, 0, 0, 0)
-        };
-        var import = new Button
-        {
-            Content = "导入圈速",
-            Padding = new Thickness(14, 7, 14, 7)
-        };
+        var caption = Label("管理圈速记录", 12, FontWeights.SemiBold, "MutedBrush");
+        caption.Margin = new Thickness(0, 0, 0, 6);
+        var actions = new WrapPanel { Margin = new Thickness(0, 0, -8, -8) };
+        var import = AnalysisButton("导入圈速");
+        import.ToolTip = AppLocalization.Literal("导入 .lfzlap 圈速文件，加入本地对比。");
         import.Click += async (_, _) => await ImportLapAnalysisAsync(module, import);
         actions.Children.Add(import);
-        var exportButton = new Button
-        {
-            Content = "导出所选",
-            Padding = new Thickness(14, 7, 14, 7),
-            Margin = new Thickness(10, 0, 0, 0),
-            IsEnabled = selectedLapIds.Count > 0,
-            ToolTip = "从圈速表格中勾选 1–4 圈"
-        };
+        var exportButton = AnalysisButton("导出所选");
+        exportButton.IsEnabled = false;
+        exportButton.ToolTip = AppLocalization.Literal("从圈速表格中勾选 1–4 圈");
         exportButton.Click += async (_, _) =>
             await ExportSelectedLapAnalysisAsync(exportButton);
         exportSelected = exportButton;
         actions.Children.Add(exportButton);
-        Grid.SetColumn(actions, 1);
-        layout.Children.Add(actions);
-        return Card(layout);
+        deleteSelected = AnalysisButton("删除所选圈速");
+        deleteSelected.IsEnabled = false;
+        deleteSelected.ToolTip = AppLocalization.Literal("删除表格中已勾选的记录");
+        deleteTrack = AnalysisButton("删除赛道记录");
+        deleteTrack.IsEnabled = false;
+        deleteTrack.ToolTip = AppLocalization.Literal("可按筛选等级删除，并选择是否保留历史最快圈");
+        actions.Children.Add(deleteSelected);
+        actions.Children.Add(deleteTrack);
+        var content = new StackPanel();
+        content.Children.Add(caption);
+        content.Children.Add(actions);
+        return AnalysisCard(content);
     }
 
     private async Task ExportSelectedLapAnalysisAsync(Button button)

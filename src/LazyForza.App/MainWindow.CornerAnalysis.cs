@@ -30,6 +30,14 @@ internal sealed partial class MainWindow
         var markers = new ComboBox { MinWidth = 220 };
         panel.Children.Add(AnalysisField("弯道区间", markers));
         var editor = new StackPanel { Margin = new Thickness(16, 4, 16, 16) };
+        var mapHint = Label("在走线上依次点击起点、终点。", 13, FontWeights.SemiBold);
+        mapHint.Margin = new Thickness(0, 6, 0, 10);
+        mapHint.TextWrapping = TextWrapping.Wrap;
+        editor.Children.Add(mapHint);
+        var mapHost = new Border { Margin = new Thickness(0, 0, 0, 16), CornerRadius = new CornerRadius(8), ClipToBounds = true };
+        editor.Children.Add(mapHost);
+        TrackMapView? intervalMap = null;
+        var pickingStep = 0;
         var fields = new WrapPanel();
         var name = new TextBox { Text = "T1", MaxLength = 40 };
         var start = new TextBox { Text = "0" };
@@ -41,10 +49,11 @@ internal sealed partial class MainWindow
         var actions = new WrapPanel();
         var save = AnalysisButton("保存区间", primary: true);
         var remove = AnalysisButton("删除区间");
-        var markStart = AnalysisButton("曲线标记起点");
-        var markEnd = AnalysisButton("曲线标记终点");
-        foreach (var button in new[] { save, markStart, markEnd, remove }) actions.Children.Add(button);
+        var repick = AnalysisButton("重选起终点");
+        var add = AnalysisButton("新增区间");
+        foreach (var button in new[] { save, repick, add, remove }) actions.Children.Add(button);
         editor.Children.Add(actions);
+        editor.Children.Add(Label("滚轮缩放 · 拖动平移 · 双击复位", 12, FontWeights.Normal, "MutedBrush"));
         editor.Children.Add(Label("区间至少 30 米；跨终点弯请分开标记。", 12, FontWeights.Normal, "MutedBrush"));
         var editSection = AnalysisDisclosure("编辑弯道区间", editor);
         panel.Children.Add(editSection);
@@ -57,20 +66,18 @@ internal sealed partial class MainWindow
         panel.Children.Add(curves);
         var cursor = new LapAnalysisCursor();
         TabControl? curveTabs = null;
-        TextBox? marking = null;
-        cursor.CommitRequested += (_, position) =>
-        {
-            if (marking is not null)
-            {
-                marking.Text = position.ProgressMeters.ToString("0.0", CultureInfo.InvariantCulture);
-                marking = null;
-                status.Text = AppLocalization.Literal("位置已填写，点击“保存区间”保留标记。");
-            }
-        };
-        markStart.Click += (_, _) => { marking = start; if (curveTabs is not null) curveTabs.SelectedIndex = 0; status.Text = AppLocalization.Literal("请在下方曲线上点击弯道起点。"); };
-        markEnd.Click += (_, _) => { marking = end; if (curveTabs is not null) curveTabs.SelectedIndex = 0; status.Text = AppLocalization.Literal("请在下方曲线上点击弯道终点。"); };
         var candidates = store.LoadLapSummaries(track.Id);
         var corners = new List<ManualCorner>();
+        repick.Click += (_, _) => BeginPicking();
+        add.Click += (_, _) =>
+        {
+            markers.SelectedIndex = -1;
+            var number = 1;
+            while (corners.Any(corner => string.Equals(corner.Name, $"T{number}", StringComparison.OrdinalIgnoreCase))) number++;
+            name.Text = $"T{number}";
+            remove.IsEnabled = false;
+            BeginPicking();
+        };
         string key = "";
         LapRecord? selected = null;
         LapRecord? referenceLap = null;
@@ -98,6 +105,16 @@ internal sealed partial class MainWindow
             catch (JsonException) { status.Text = AppLocalization.Literal("保存的弯道标记无法读取，请重新标记；保存后将替换这些标记。"); }
             RefreshMarkers();
             editSection.IsExpanded = corners.Count == 0;
+            intervalMap = new TrackMapView([selected], track)
+            {
+                Height = 300, ShowLegend = false, ShowEndpoints = false, ShowCornerAnnotations = false,
+                Cursor = System.Windows.Input.Cursors.Cross
+            };
+            System.Windows.Automation.AutomationProperties.SetName(intervalMap, AppLocalization.Literal("弯道区间走线选点"));
+            intervalMap.ProgressPicked += PickProgress;
+            mapHost.Child = intervalMap;
+            if (corners.Count == 0) BeginPicking();
+            else UpdateMapInterval();
             reference.SelectedIndex = 0;
         };
         reference.SelectionChanged += (_, _) =>
@@ -112,8 +129,14 @@ internal sealed partial class MainWindow
             name.Text = corner.Name;
             start.Text = corner.StartS.ToString("0.0", CultureInfo.InvariantCulture);
             end.Text = corner.EndS.ToString("0.0", CultureInfo.InvariantCulture);
+            pickingStep = 0;
+            mapHint.Text = AppLocalization.Literal("已标记区间，可重选起终点或微调距离。");
+            remove.IsEnabled = true;
+            UpdateMapInterval();
             Analyze();
         };
+        start.TextChanged += (_, _) => UpdateMapInterval();
+        end.TextChanged += (_, _) => UpdateMapInterval();
         save.Click += (_, _) =>
         {
             if (!double.TryParse(start.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var from) ||
@@ -137,10 +160,50 @@ internal sealed partial class MainWindow
         ApplyAnalysisTheme(card);
         return card;
 
+        void BeginPicking()
+        {
+            pickingStep = 1;
+            start.Clear();
+            end.Clear();
+            mapHint.Text = AppLocalization.Literal("点击走线，选择起点 1。");
+            editSection.IsExpanded = true;
+        }
+        void PickProgress(double progress)
+        {
+            if (pickingStep == 0) return;
+            if (pickingStep == 1)
+            {
+                start.Text = progress.ToString("0.0", CultureInfo.InvariantCulture);
+                pickingStep = 2;
+                mapHint.Text = AppLocalization.Literal("起点已选，点击走线选择终点 2。");
+            }
+            else
+            {
+                if (!TryDistance(start, out var from) || progress - from < 30)
+                {
+                    mapHint.Text = AppLocalization.Literal("请沿行驶方向选择至少 30 米后的终点；跨终点弯请分开标记。");
+                    return;
+                }
+                end.Text = progress.ToString("0.0", CultureInfo.InvariantCulture);
+                pickingStep = 0;
+                mapHint.Text = AppLocalization.Literal("区间已选，可微调距离后保存。");
+            }
+            if (selected is not null) cursor.Set(mapHost, selected.Id, progress);
+        }
+        void UpdateMapInterval()
+        {
+            intervalMap?.SetSelectedInterval(TryDistance(start, out var from) ? from : null,
+                TryDistance(end, out var to) ? to : null);
+        }
+        bool TryDistance(TextBox field, out double value) =>
+            double.TryParse(field.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) &&
+            double.IsFinite(value) && value >= 0 && value <= track.LengthMeters;
+
         void Persist()
         {
             store.SetAppSetting(key, JsonSerializer.Serialize(corners));
             status.Text = AppLocalization.Literal("区间已保存。");
+            pickingStep = 0;
             RefreshMarkers();
             editSection.IsExpanded = false;
             Analyze();

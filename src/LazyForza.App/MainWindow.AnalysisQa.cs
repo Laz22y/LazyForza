@@ -57,6 +57,11 @@ internal sealed partial class MainWindow
         {
             Width = width;
             Height = height;
+            module.ClearTrackSelection();
+            navigation.SelectedIndex = 4;
+            RenderSelectedPage();
+            await Capture(4, "empty");
+            module.SelectTrack(track.Id);
             foreach (var page in new[] { 4, 5 })
             {
                 navigation.SelectedIndex = page;
@@ -104,6 +109,7 @@ internal sealed partial class MainWindow
                     if (editor is not null)
                     {
                         editor.IsExpanded = true;
+                        editor.BringIntoView();
                         await Capture(page, "corner-editor");
                     }
                 }

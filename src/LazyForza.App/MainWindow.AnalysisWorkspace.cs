@@ -48,6 +48,60 @@ internal sealed partial class MainWindow
         CornerRadius = new CornerRadius(12), Padding = new Thickness(20), Margin = new Thickness(0, 0, 0, 16), Child = child
     };
 
+    private static Border AnalysisEmptyState(string title, string message)
+    {
+        var content = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            MaxWidth = 520, Margin = new Thickness(12, 16, 12, 16)
+        };
+        content.Children.Add(new Border
+        {
+            Width = 64, Height = 64, CornerRadius = new CornerRadius(16),
+            Background = Brush("AccentSoftBrush"), Padding = new Thickness(10),
+            Margin = new Thickness(0, 0, 0, 18), Child = TrackSelectionIcon()
+        });
+        var heading = Label(title, 20, FontWeights.SemiBold);
+        heading.TextAlignment = TextAlignment.Center;
+        content.Children.Add(heading);
+        var description = Label(message, 13, FontWeights.Normal, "MutedBrush");
+        description.TextAlignment = TextAlignment.Center;
+        description.TextWrapping = TextWrapping.Wrap;
+        description.Margin = new Thickness(0, 10, 0, 0);
+        content.Children.Add(description);
+        var card = AnalysisCard(content);
+        card.MinHeight = 220;
+        card.Margin = new Thickness(0, 8, 0, 24);
+        return card;
+    }
+
+    private static Viewbox TrackSelectionIcon()
+    {
+        var canvas = new Canvas { Width = 48, Height = 48, SnapsToDevicePixels = true };
+        // Two edges define a road: a straight, a chicane and a hairpin, with a separate finish flag.
+        Path("M 11,17 H 18 C 22,17 25,20 25,24 V 26 C 25,29 27,31 30,31 H 33 C 38,31 41,34 41,38 C 41,42 38,45 33,45 H 14 C 7,45 3,41 3,34 V 25 C 3,20 6,17 11,17 Z", 1.6);
+        Path("M 11,22 H 18 C 19,22 20,23 20,24 V 26 C 20,32 24,36 30,36 H 33 C 35,36 36,37 36,38 C 36,39 35,40 33,40 H 14 C 10,40 8,38 8,34 V 25 C 8,23 9,22 11,22 Z", 1.3).Opacity = .65;
+        Path("M 17,39 V 46 M 30,5 V 27", 1.8);
+        var flag = Path("M 30,6 H 46 V 18 H 30 Z", 1.5);
+        flag.Fill = Brush("PanelBrush");
+        var checks = Path("M 30,6 H 34 V 10 H 30 Z M 38,6 H 42 V 10 H 38 Z M 34,10 H 38 V 14 H 34 Z M 42,10 H 46 V 14 H 42 Z M 30,14 H 34 V 18 H 30 Z M 38,14 H 42 V 18 H 38 Z", 0);
+        checks.Fill = Brush("AccentBrush");
+        return new Viewbox { Child = canvas, Stretch = System.Windows.Media.Stretch.Uniform };
+
+        System.Windows.Shapes.Path Path(string data, double thickness)
+        {
+            var path = new System.Windows.Shapes.Path
+            {
+                Data = System.Windows.Media.Geometry.Parse(data), Stroke = Brush("AccentBrush"),
+                StrokeThickness = thickness, StrokeLineJoin = System.Windows.Media.PenLineJoin.Round,
+                StrokeStartLineCap = System.Windows.Media.PenLineCap.Round,
+                StrokeEndLineCap = System.Windows.Media.PenLineCap.Round
+            };
+            canvas.Children.Add(path);
+            return path;
+        }
+    }
+
     private static Border AnalysisBody(Border card)
     {
         card.BorderThickness = new Thickness(0);

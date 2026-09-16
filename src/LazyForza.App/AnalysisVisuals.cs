@@ -958,7 +958,7 @@ internal sealed class LapInputChart : FrameworkElement
     }
 }
 
-internal sealed class TrackMapView : FrameworkElement
+internal sealed partial class TrackMapView : FrameworkElement
 {
     private const double MinimumZoom = 1;
     private const double MaximumZoom = 24;
@@ -1034,7 +1034,7 @@ internal sealed class TrackMapView : FrameworkElement
         Focusable = true;
         MouseWheel += OnMouseWheel;
         MouseMove += OnMouseMove;
-        PreviewMouseLeftButtonDown += (_, _) => linkedCursor?.Commit(this);
+        PreviewMouseLeftButtonDown += (_, _) => { if (ProgressPicked is null) linkedCursor?.Commit(this); };
         MouseLeftButtonDown += OnMouseLeftButtonDown;
         MouseLeftButtonUp += OnMouseLeftButtonUp;
         MouseLeave += (_, _) =>
@@ -1126,6 +1126,7 @@ internal sealed class TrackMapView : FrameworkElement
         viewport = ClampViewport(viewport, metrics);
         EnsureBaseDrawing(metrics);
         if (baseDrawing is not null) drawingContext.DrawDrawing(baseDrawing);
+        DrawSelectedInterval(drawingContext, metrics);
         var legendBounds = showLegend
             ? MapLegendBounds(metrics)
             : Rect.Empty;
@@ -1188,6 +1189,8 @@ internal sealed class TrackMapView : FrameworkElement
         var pointer = eventArgs.GetPosition(this);
         if (dragging && eventArgs.LeftButton == MouseButtonState.Pressed)
         {
+            if (!mapGestureMoved && (pointer - mapGestureStart).Length < 4) return;
+            mapGestureMoved = true;
             if (!TryMetrics(out var metrics)) return;
             viewport = ClampViewport(
                 viewport with
@@ -1223,6 +1226,8 @@ internal sealed class TrackMapView : FrameworkElement
 
         dragging = true;
         dragStart = eventArgs.GetPosition(this);
+        mapGestureStart = dragStart;
+        mapGestureMoved = false;
         CaptureMouse();
         hoverToolTip.IsOpen = false;
         Cursor = Cursors.SizeAll;
@@ -1234,7 +1239,9 @@ internal sealed class TrackMapView : FrameworkElement
         if (!dragging) return;
         dragging = false;
         ReleaseMouseCapture();
-        UpdateHover(eventArgs.GetPosition(this));
+        var pointer = eventArgs.GetPosition(this);
+        CompleteIntervalPick(pointer, mapGestureMoved || (pointer - mapGestureStart).Length >= 4);
+        UpdateHover(pointer);
         eventArgs.Handled = true;
     }
 
@@ -1243,6 +1250,13 @@ internal sealed class TrackMapView : FrameworkElement
         if (dragging || !TryMetrics(out var metrics) || !metrics.Bounds.Contains(pointer))
         {
             ClearHover();
+            return;
+        }
+
+        if (ProgressPicked is not null)
+        {
+            ClearHover();
+            Cursor = Cursors.Cross;
             return;
         }
 

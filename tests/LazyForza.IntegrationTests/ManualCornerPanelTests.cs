@@ -46,7 +46,28 @@ public sealed class ManualCornerPanelTests
                     navigated = true;
                 });
                 var textBoxes = Descendants<TextBox>(card).ToArray();
-                textBoxes[0].Text = "T1"; textBoxes[1].Text = "80"; textBoxes[2].Text = "400";
+                var map = Descendants<TrackMapView>(card).Single();
+                map.Measure(new Size(800, 300));
+                map.Arrange(new Rect(0, 0, 800, 300));
+                // This lap is a straight 500 m line, mapped into the viewport's 18 px padding.
+                Point At(double s) => new(18.5 + s * 763 / 500, 150);
+                Assert.IsFalse(map.CompleteIntervalPick(new Point(400, 20), wasDragged: false));
+                Assert.AreEqual("", textBoxes[1].Text, "Empty canvas must not choose the last hovered position.");
+                Assert.IsFalse(map.CompleteIntervalPick(At(80), wasDragged: true));
+                Assert.AreEqual("", textBoxes[1].Text, "Panning must not choose an endpoint.");
+                Assert.IsTrue(map.CompleteIntervalPick(At(80), wasDragged: false));
+                Assert.AreEqual("80.0", textBoxes[1].Text);
+                Assert.IsTrue(map.CompleteIntervalPick(At(90), wasDragged: false));
+                Assert.AreEqual("", textBoxes[2].Text, "Too-short or reversed intervals remain in endpoint selection.");
+                Assert.IsTrue(map.CompleteIntervalPick(At(400), wasDragged: false));
+                Assert.AreEqual("400.0", textBoxes[2].Text);
+                Assert.IsTrue(map.TryPickProgress(At(82.5), out var betweenSamples));
+                Assert.AreEqual(82.5, betweenSamples, .001, "Pick between samples by projecting onto the line segment.");
+                var viewportField = typeof(TrackMapView).GetField("viewport", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                viewportField.SetValue(map, new ChartViewport(2, 60, 0));
+                Assert.IsTrue(map.TryPickProgress(new Point(460, 151), out var zoomed));
+                Assert.AreEqual(250, zoomed, .001, "Picking uses the current zoom and pan transform.");
+                viewportField.SetValue(map, new ChartViewport(1, 0, 0));
                 Click(Descendants<Button>(card).Single(button => Equals(button.Content, "保存区间")));
                 var selectors = Descendants<ComboBox>(card).ToArray();
                 Assert.AreEqual(2, selectors[1].Items.Count);
@@ -72,6 +93,11 @@ public sealed class ManualCornerPanelTests
 
                 var rebuilt = MainWindow.BuildManualCornerAnalysisCard(store, track, [store.LoadLap(selected.Id)!]);
                 Assert.AreEqual(1, Descendants<ComboBox>(rebuilt).ElementAt(2).Items.Count);
+                Assert.AreEqual("80.0", Descendants<TextBox>(rebuilt).ElementAt(1).Text);
+                Assert.AreEqual("400.0", Descendants<TextBox>(rebuilt).ElementAt(2).Text);
+                Click(Descendants<Button>(rebuilt).Single(button => Equals(button.Content, "新增区间")));
+                Assert.AreEqual("T2", Descendants<TextBox>(rebuilt).First().Text);
+                Assert.AreEqual("", Descendants<TextBox>(rebuilt).ElementAt(1).Text);
                 var revised = MainWindow.BuildManualCornerAnalysisCard(store, track with { UpdatedAt = time.AddSeconds(1) }, [selected]);
                 Assert.AreEqual(0, Descendants<ComboBox>(revised).ElementAt(2).Items.Count);
                 Assert.AreEqual(1, Descendants<ComboBox>(revised).ElementAt(1).Items.Count);

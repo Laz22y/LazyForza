@@ -894,12 +894,13 @@ internal sealed partial class MainWindow : Window
     {
         var stack = PageStack("圈速分析", "选择赛道，对比已保存的圈速、分段和走线。");
         var module = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
-        var exchange = BuildLapAnalysisExchangeCard(module, out var exportSelectedLaps);
+        var toolbar = BuildLapAnalysisToolbar(module, out var exportSelectedLaps,
+            out var deleteSelectedLaps, out var deleteTrackLaps);
         var hud = module.Snapshot as LapHudState;
         if (hud is null)
         {
-            stack.Children.Add(EmptyCard("圈速分析未启用", "请先在“模块”中启用。"));
-            stack.Children.Add(AnalysisDisclosure("导入与导出", exchange));
+            stack.Children.Add(toolbar);
+            stack.Children.Add(AnalysisEmptyState("圈速分析未启用", "请先在“模块”中启用。"));
             refreshVisiblePage = () =>
             {
                 if (module.Snapshot is LapHudState) RenderSelectedPage(true);
@@ -923,22 +924,27 @@ internal sealed partial class MainWindow : Window
             .OrderByDescending(item => item.RecordedLaps)
             .ThenBy(item => item.Summary.Name, StringComparer.CurrentCulture)
             .ToArray();
-        Button? deleteSelectedLapsButton = null;
+        var deleteSelectedLapsButton = deleteSelectedLaps;
         Button? displaySelectedLapsButton = null;
-        Expander? recordManagement = null;
         if (compatibleTracks.Length > 0)
         {
-            var selectorGrid = new Grid();
-            selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            selectorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var filterActions = new Grid { Margin = new Thickness(0, 18, 0, 0) };
+            filterActions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            filterActions.ColumnDefinitions.Add(new ColumnDefinition());
+            filterActions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            filterActions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var selectorText = new StackPanel();
-            selectorText.Children.Add(Label("性能等级", 12, FontWeights.Normal, "MutedBrush"));
+            var classCaption = Label("性能等级", 12, FontWeights.Normal, "MutedBrush");
+            classCaption.Margin = new Thickness(0, 0, 0, 6);
+            selectorText.Children.Add(classCaption);
             selectorText.ToolTip = AppLocalization.Literal(module.HasCurrentCompetitionSession
                 ? "比赛中会自动识别赛道；手动切换将结束当前分析。"
                 : "普通赛事会自动识别；地产环道需要在这里手动选择后查看圈速。");
-            selectorGrid.Children.Add(selectorText);
-            Grid.SetColumn(selectorText, 1);
-            selectorText.Margin = new Thickness(18, 0, 0, 0);
+            filterActions.Children.Add(selectorText);
+            if (module.CurrentTrack is null)
+            {
+                selectorText.Visibility = Visibility.Collapsed;
+            }
             var selector = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center };
             var emptySelection = new ComboBoxItem
             {
@@ -1022,7 +1028,7 @@ internal sealed partial class MainWindow : Window
             }
             if (selectedTrackIdForActions != Guid.Empty)
             {
-                var classFilter = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+                var classFilter = new WrapPanel();
                 foreach (var performanceClass in selectedTrackLaps.Select(lap => lap.Vehicle.CarClass).Distinct().Order())
                 {
                     var selected = selectedClasses.Contains(performanceClass);
@@ -1034,7 +1040,7 @@ internal sealed partial class MainWindow : Window
                         IsChecked = selected,
                         Width = 52,
                         Height = 32,
-                        Margin = new Thickness(0, 0, 7, 7),
+                        Margin = new Thickness(0, 2, 7, 2),
                         FontSize = 14,
                         FontWeight = FontWeights.Bold,
                         Foreground = selected ? Brushes.White : new SolidColorBrush(Color.FromRgb(150, 157, 169)),
@@ -1060,18 +1066,7 @@ internal sealed partial class MainWindow : Window
                 selectorText.Children.Add(classFilter);
             }
 
-            var deleteTrackLaps = new Button
-            {
-                Content = "删除赛道记录",
-                Padding = new Thickness(12, 7, 12, 7),
-                Margin = new Thickness(0, 0, 8, 0),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Background = new SolidColorBrush(Color.FromRgb(58, 28, 35)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(168, 71, 85)),
-                Foreground = new SolidColorBrush(Color.FromRgb(255, 179, 190)),
-                IsEnabled = selectedTrackLaps.Length > 0,
-                ToolTip = "可按筛选等级删除，并选择是否保留历史最快圈"
-            };
+            deleteTrackLaps.IsEnabled = selectedTrackLaps.Length > 0;
             deleteTrackLaps.Click += (_, _) =>
             {
                 if (selector.SelectedItem is not ComboBoxItem { Tag: Guid selectedTrackId }) return;
@@ -1096,19 +1091,7 @@ internal sealed partial class MainWindow : Window
             };
 
             var selectedTrackLapIds = selectedTrackLaps.Select(lap => lap.Id).ToHashSet();
-            var deleteSelectedLaps = new Button
-            {
-                Content = "删除所选圈速",
-                Padding = new Thickness(12, 7, 12, 7),
-                Margin = new Thickness(0),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Background = new SolidColorBrush(Color.FromRgb(58, 28, 35)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(168, 71, 85)),
-                Foreground = new SolidColorBrush(Color.FromRgb(255, 179, 190)),
-                IsEnabled = selectedLapIds.Any(selectedTrackLapIds.Contains),
-                ToolTip = "删除表格中已勾选的记录"
-            };
-            deleteSelectedLapsButton = deleteSelectedLaps;
+            deleteSelectedLaps.IsEnabled = selectedLapIds.Any(selectedTrackLapIds.Contains);
             deleteSelectedLaps.Click += (_, _) =>
             {
                 if (selector.SelectedItem is not ComboBoxItem { Tag: Guid selectedTrackId }) return;
@@ -1162,35 +1145,31 @@ internal sealed partial class MainWindow : Window
             trackCaption.Margin = new Thickness(0, 0, 0, 6);
             selectorControls.Children.Add(trackCaption);
             selectorControls.Children.Add(selector);
-            if (selectedTrackIdForActions != Guid.Empty)
+            var controls = new StackPanel();
+            controls.Children.Add(selectorControls);
+            AnalysisBody(toolbar);
+            filterActions.Children.Add(toolbar);
+            controls.Children.Add(filterActions);
+            controls.SizeChanged += (_, _) => ArrangeFilterActions();
+            stack.Children.Add(AnalysisCard(controls));
+
+            void ArrangeFilterActions()
             {
-                var deleteActions = new WrapPanel { Margin = new Thickness(0, 7, 0, 0) };
-                deleteActions.Children.Add(deleteTrackLaps);
-                deleteActions.Children.Add(deleteSelectedLaps);
-                recordManagement = AnalysisDisclosure("管理圈速记录", deleteActions);
+                selectorText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                toolbar.Margin = new Thickness(0);
+                toolbar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                var hasClasses = selectorText.Visibility == Visibility.Visible;
+                var stacked = hasClasses && selectorText.DesiredSize.Width + toolbar.DesiredSize.Width + 32 > controls.ActualWidth;
+                Grid.SetRow(toolbar, stacked ? 1 : 0);
+                Grid.SetColumn(toolbar, hasClasses && !stacked ? 1 : 0);
+                Grid.SetColumnSpan(toolbar, hasClasses && !stacked ? 1 : 2);
+                toolbar.Margin = stacked ? new Thickness(0, 14, 0, 0)
+                    : hasClasses ? new Thickness(32, 0, 0, 0) : new Thickness(0);
             }
-            Grid.SetColumn(selectorControls, 0);
-            selectorGrid.Children.Add(selectorControls);
-            stack.Children.Add(AnalysisCard(selectorGrid));
         }
+        else stack.Children.Add(toolbar);
 
         if (pointToPointTimingApproximate) stack.Children.Add(PointToPointTimingNotice());
-        var statusLabel = Label(string.Empty, 15);
-        var liveDetails = new StackPanel { Margin = new Thickness(16, 0, 16, 16) };
-        liveDetails.Children.Add(statusLabel);
-        var table = new Grid { Margin = new Thickness(4) };
-        var sectorRows = new List<TextBlock[]>();
-        foreach (var width in new[] { 0.6, 1.1, 1.1, 1.1, 1.1, 1.0 }) table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width, GridUnitType.Star) });
-        AddRow(["段", "当前圈", "本场最快", "历史最快", "秒差", "状态"], 0, true);
-        for (var index = 0; index < hud.Sectors.Count; index++)
-        {
-            var sector = hud.Sectors[index];
-            sectorRows.Add(AddRow([
-                (sector.Index + 1).ToString(), AnalysisTime(sector.CurrentSeconds, pointToPointTimingApproximate), AnalysisTime(sector.CurrentCompetitionBestSeconds, pointToPointTimingApproximate), AnalysisTime(sector.HistoricalBestSeconds, pointToPointTimingApproximate),
-                sector.DeltaSeconds is double delta ? $"{delta:+0.000;-0.000;0.000}" : "—", SectorStateText(sector.State)
-            ], index + 1, false));
-        }
-        liveDetails.Children.Add(table);
         var activeTrack = module.CurrentTrack;
         var activePerformanceClasses = activeTrack is not null &&
                                        selectedLapPerformanceClasses.TryGetValue(activeTrack.Id, out var savedClassFilter)
@@ -1367,10 +1346,8 @@ internal sealed partial class MainWindow : Window
         }
         stack.Children.Add(comparisonHost);
         RenderComparisonVisuals();
-        stack.Children.Add(AnalysisDisclosure("实时分段", liveDetails));
-        if (recordManagement is not null) stack.Children.Add(recordManagement);
-        stack.Children.Add(AnalysisDisclosure("导入与导出", exchange));
-        stack.Children.Add(AnalysisDisclosure("如何阅读对比", Label(SectorColorClassifier.DatasetBestExplanation, 12, FontWeights.Normal, "MutedBrush")));
+        if (activeTrack is not null)
+            stack.Children.Add(AnalysisDisclosure("如何阅读对比", Label(SectorColorClassifier.DatasetBestExplanation, 12, FontWeights.Normal, "MutedBrush")));
         var initialTrackId = module.CurrentTrack?.Id;
         var initialTrackTimingKind = module.CurrentTrack?.TimingKind;
         var initialCompletedLaps = hud.CompletedLaps;
@@ -1385,31 +1362,11 @@ internal sealed partial class MainWindow : Window
                 return;
             }
             if (module.Snapshot is not LapHudState current ||
-                current.Sectors.Count != sectorRows.Count ||
                 current.CompletedLaps != initialCompletedLaps ||
                 module.CurrentTrack?.Id != initialTrackId)
             {
                 RenderSelectedPage(true);
                 return;
-            }
-
-            statusLabel.Text = AppLocalization.Format(
-                "lap.status",
-                "{0} · 已保存 {1} 圈\n{2}",
-                AppLocalization.Literal(current.TrackName),
-                current.CompletedLaps,
-                AppLocalization.Literal(current.Status));
-            for (var index = 0; index < current.Sectors.Count; index++)
-            {
-                var sector = current.Sectors[index];
-                var cells = sectorRows[index];
-                cells[0].Text = (sector.Index + 1).ToString();
-                cells[1].Text = AnalysisTime(sector.CurrentSeconds, pointToPointTimingApproximate);
-                cells[2].Text = AnalysisTime(sector.CurrentCompetitionBestSeconds, pointToPointTimingApproximate);
-                cells[3].Text = AnalysisTime(sector.HistoricalBestSeconds, pointToPointTimingApproximate);
-                cells[4].Text = sector.DeltaSeconds is double delta ? $"{delta:+0.000;-0.000;0.000}" : "—";
-                cells[5].Text = SectorStateText(sector.State);
-                cells[5].Foreground = Brush(SectorStateBrush(sector.State));
             }
         };
         refreshVisiblePage();
@@ -1452,15 +1409,15 @@ internal sealed partial class MainWindow : Window
             {
                 comparisonHost.Children.Add(activeTrack is null
                     ? module.HasCurrentCompetitionSession
-                        ? EmptyCard(hud.TrackName, AppLocalization.Literal(hud.Status))
-                        : EmptyCard("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。")
+                        ? AnalysisEmptyState(hud.TrackName, AppLocalization.Literal(hud.Status))
+                        : AnalysisEmptyState("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。")
                     : activePerformanceClasses.Count == 0
-                        ? EmptyCard("未选择性能等级", "选择至少一个性能等级。")
+                        ? AnalysisEmptyState("未选择性能等级", "选择至少一个性能等级。")
                         : comparableLaps.Length > 0 && displayedLapIds.Count == 0
                             ? selectedLapIds.Count == 0
-                                ? EmptyCard("未选择对比圈", "勾选最多 4 圈，再点击“显示勾选圈数据”。")
-                                : EmptyCard("圈速已勾选", "点击“显示勾选圈数据”加载速度曲线与走线。")
-                            : EmptyCard("暂无圈速", "完成对应等级的比赛后显示。"));
+                                ? AnalysisEmptyState("未选择对比圈", "勾选最多 4 圈，再点击“查看对比”。")
+                                : AnalysisEmptyState("圈速已勾选", "点击“查看对比”加载速度曲线与走线。")
+                            : AnalysisEmptyState("暂无圈速", "完成对应等级的比赛后显示。"));
                 return;
             }
 
@@ -1625,20 +1582,6 @@ internal sealed partial class MainWindow : Window
                     (id, progress) => linkedCursor.Set(visuals, id, progress))))));
             previewStack.Children.Add(AnalysisCard(visuals));
             comparisonHost.Children.Add(previewStack);
-        }
-
-        TextBlock[] AddRow(string[] cells, int row, bool header)
-        {
-            var controls = new TextBlock[cells.Length];
-            table.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            for (var column = 0; column < cells.Length; column++)
-            {
-                var text = Label(cells[column], header ? 13 : 12, header ? FontWeights.SemiBold : FontWeights.Normal);
-                text.Margin = new Thickness(8, 7, 8, 7);
-                Grid.SetRow(text, row); Grid.SetColumn(text, column); table.Children.Add(text);
-                controls[column] = text;
-            }
-            return controls;
         }
     }
 
