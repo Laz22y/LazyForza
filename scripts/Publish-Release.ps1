@@ -9,6 +9,8 @@ param(
 
     [string]$ReleaseNotesPathEn,
 
+    [string]$ReleaseName,
+
     [Parameter(Mandatory)]
     [ValidateSet('MajorFeature', 'Feature', 'Fix')]
     [string]$UpdateType,
@@ -73,7 +75,8 @@ $updateTypeMetadata = @{
 }
 $selectedUpdateType = $updateTypeMetadata[$UpdateType]
 $baseTitle = "LazyForza $Version"
-$expectedTitle = "$baseTitle $([char]0x00B7) $($selectedUpdateType.Label)"
+$namedTitle = if ([string]::IsNullOrWhiteSpace($ReleaseName)) { $baseTitle } else { "$baseTitle $([char]0x00B7) $($ReleaseName.Trim())" }
+$expectedTitle = "$namedTitle $([char]0x00B7) $($selectedUpdateType.Label)"
 $updateTypeMarker = "<!-- lazyforza-update-type: $($selectedUpdateType.Marker) -->"
 $chineseLanguageHeading = -join @(
     [char]0x7B80,

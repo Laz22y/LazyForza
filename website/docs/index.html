@@ -48,8 +48,8 @@
         </nav>
         <div class="version-card">
           <span>当前文档</span>
-          <strong>Client 1.5.2</strong>
-          <strong>Server 0.5.0</strong>
+          <strong>Client 1.5.3</strong>
+          <strong>Server 0.6.0</strong>
         </div>
       </aside>
 
@@ -58,11 +58,11 @@
           <section class="doc-hero" id="overview">
             <p class="doc-kicker">LAZYFORZA DOCUMENTATION</p>
             <h1>用户与开发者文档</h1>
-            <p>1.5.3-alpha-3 · Radio Check：新增六家在线语音服务、Windows 音色选择和提示音独立开关，更新品牌顶栏与侧栏，设置修改后即时应用，并改善地产 HUD 显示与维修区计圈。预览版使用独立更新通道，推荐搭配 RaceServer 0.6.0-alpha-1（协议 v2）。</p>
+            <p>1.5.3 · Radio Check 带来语音比赛工程师、弯道级对比、无边框主窗口和自选快速设置，并改进维修区计圈与地产 HUD。推荐搭配 RaceServer 0.6.0，使用协议 v2。</p>
             <p class="doc-lead">了解首次连接、驾驶分析、语音配置、赛事服务端部署与开发。</p>
             <div class="doc-status">
-              <div><span>客户端</span><strong>1.5.2</strong><small>Windows 10 / 11 x64</small></div>
-              <div><span>RaceServer</span><strong>0.5.0</strong><small>Native / Cloudflare</small></div>
+              <div><span>客户端</span><strong>1.5.3</strong><small>Windows 10 / 11 x64</small></div>
+              <div><span>RaceServer</span><strong>0.6.0</strong><small>Native / Cloudflare</small></div>
               <div><span>数据入口</span><strong>UDP 2299</strong><small>FH6 Official Data Out</small></div>
             </div>
             <div class="callout callout-info"><strong>项目边界</strong><p>数据来自 FH6 官方 UDP Data Out。赛道识别和驾驶建议由 LazyForza 根据遥测推导，并标明数据来源。</p></div>
@@ -101,8 +101,8 @@
               <div><span>RECORDING</span><h3>录制与回放</h3><p>自动录制默认关闭。可保留赛前 15 秒与赛后 10 秒；回放工作台联动时间轴、驾驶输入、走线和动态遥测。</p></div>
               <div><span>DRIFT</span><h3>实验性漂移 HUD</h3><p>根据本车 UDP 遥测显示侧滑角、控车趋势和失控风险提示。换挡建议侧重维持漂移，得分以游戏内显示为准。</p></div>
               <div><span>ESTATE RACE</span><h3>地产环道与赛事</h3><p>录入支持暂存、地图预览和分项修订；赛事 HUD 提示弱网状态，服务端可选开启断线计圈恢复。</p></div>
-              <div><span>RACE ENGINEER</span><h3>语音工程师（预览版）</h3><p>支持 Windows 本地语音及 ElevenLabs、Azure Speech、腾讯云、阿里云 NLS、千问 AI 平台和 MiniMax。通过「语音服务…」浮窗配置，提示音可独立开关，音量与静音随时调整。</p></div>
-              <div><span>QUICK SETTINGS</span><h3>窗口与设置（预览版）</h3><p>品牌顶栏显示版本号与更新名，侧栏底部提供遥测状态和自选快速设置。设置页修改后自动保存并应用；数据目录切换在自行重启后生效。</p></div>
+              <div><span>RACE ENGINEER</span><h3>语音比赛工程师</h3><p>支持 Windows 本地语音及 ElevenLabs、Azure Speech、腾讯云、阿里云 NLS、千问 AI 平台和 MiniMax。通过「语音服务…」浮窗配置，提示音可独立开关，音量与静音随时调整。</p></div>
+              <div><span>QUICK SETTINGS</span><h3>窗口与快速设置</h3><p>品牌顶栏显示版本号与更新名，侧栏底部提供遥测状态和自选快速设置。设置页修改后自动保存并应用；数据目录切换在自行重启后生效。</p></div>
             </div>
           </section>
 
@@ -141,7 +141,7 @@
           <section class="doc-section" id="race-server">
             <p class="section-index">04 / RACESERVER</p>
             <h2>RaceServer</h2>
-            <p>RaceServer 后续开发版按比赛现场、赛事项目、规则与赛程、赛果与记录、服务器划分总控。一项目对应一场赛事；准备下一场时归档旧赛果并清理实时成绩和离线占位。配套客户端主动退出后释放席位；暂时掉线保留恢复身份，大厅离线占位五分钟后释放。使用前请核对服务端仓库的长期房间与版本兼容说明。</p>
+            <p>RaceServer 0.6.0 按比赛现场、赛事项目、规则与赛程、赛果与记录、服务器组织总控。一项目对应一场赛事；准备下一场时归档旧赛果并清理实时成绩和离线占位。客户端主动退出后释放席位；暂时掉线保留恢复身份，大厅离线占位五分钟后释放。</p>
             <p>RaceServer 是独立项目，只进行日常驾驶和圈速分析时无需安装。</p>
             <div class="metric-grid">
               <div><strong>1–12</strong><span>参赛车手</span></div>
@@ -191,7 +191,8 @@ chmod +x ./LazyForza.RaceServer.Web
             <p>车手需要服务端域名或 IP、房间密码、匹配的地产赛道、显示名和可选车队。客户端可收藏常用服务器，并在进入房间前测试服务端可达性、协议版本和房间信息；收藏不会保存赛事密码。OB 只接收赛事快照，不上传遥测、不参与排名和处罚。</p>
 
             <h3>兼容性</h3>
-            <p>RaceServer <code>0.5.0</code> 推荐搭配 LazyForza <code>1.5.2</code>，并兼容 <code>1.4.2–1.5.1</code> 的协议 v2 主要流程。断线计圈恢复需要客户端 <code>1.4.8</code> 或更高版本，并由服务端总控开启。</p>
+            <p>RaceServer <code>0.6.0</code> 推荐搭配 LazyForza <code>1.5.3</code>，并兼容 <code>1.4.2–1.5.2</code> 的协议 v2 主要流程。断线计圈恢复需要客户端 <code>1.4.8</code> 或更高版本，并由服务端总控开启。</p>
+            <p>主动退出释放、阶段归属和换胎区计圈修复需要客户端 1.5.3。原生服务端升级前请备份数据目录；0.5.0 的公开快照无法续赛，应完成并归档赛事后移走旧快照，再启动 0.6.0。新版恢复中的赛事先以红旗暂停，管理员核对后发布全场绿旗续赛。</p>
           </section>
 
           <section class="doc-section" id="troubleshooting">
@@ -276,6 +277,8 @@ npm test</code></pre>
               <a href="https://github.com/Laz22y/LazyForza/releases/latest"><strong>客户端 Releases</strong><span>正式包与 SHA-256</span></a>
               <a href="https://github.com/Laz22y/LazyForza.RaceServer/releases/latest"><strong>RaceServer Releases</strong><span>全平台与 Cloudflare 发行包</span></a>
             </div>
+            <h3>开发信息</h3>
+            <p>GPT-5.6 Sol 参与了此前版本的开发。1.5.3 版本起由 GPT-6 Astra 开发。</p>
             <h3>致谢</h3>
             <p>感谢 <a href="https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f">HDR 维护并提供 FH6 Car Ordinals 车辆标识符文档</a>。LazyForza 使用其内置快照完成离线车辆名称映射。</p>
             <h3>License 与商标</h3>

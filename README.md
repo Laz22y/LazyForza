@@ -8,7 +8,7 @@
 
 ## 简体中文
 
-预览版：[`1.5.3-alpha-3 · Radio Check`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-3)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-3)），推荐搭配 RaceServer `0.6.0-alpha-1`。预览版使用独立更新通道和协议 v2。当前正式版为 `1.5.2`。
+当前正式版：[`1.5.3 · Radio Check`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3)）。地产赛事推荐搭配 RaceServer `0.6.0`，使用协议 v2。
 
 <p align="center">
   <a href="https://laz22y.github.io/LazyForza/">官网</a> ·
@@ -19,7 +19,7 @@
 
 LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、不注入 DLL、不修改游戏进程。设置、圈速、车辆学习和录制默认保存在本机。
 
-1.5.2 修复了在手动 + 离合设置下，进入车库、嘉年华等场景后仪表盘不会按预期隐藏的问题。
+1.5.3「Radio Check」新增语音比赛工程师和弯道分析，更新主窗口与设置体验，并改进维修区计圈及赛事连接。
 
 ## 功能
 
@@ -34,7 +34,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 实验性漂移 HUD 默认关闭，根据本车 UDP 遥测显示侧滑角、控车趋势和失控风险提示。
 
-### 1.5.3 预览版
+### 驾驶分析与语音工程师
 
 赛道识别支持后排发车位置；歌利亚与传奇岛径道赛等共用路段会等待分流证据再确认。比赛计时刚重置，且车辆低速出现在远离上一场的另一个已知起跑区时，即使上一场没有圈速记录，也可建立新的比赛会话。普通菜单暂停和倒带仍保留当前会话。
 
@@ -50,7 +50,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 接通音后留出 180 毫秒，语音结束后留出 220 毫秒再播放断开音。展开「自定义接通/断开音」可分别导入 WAV、MP3、M4A 或 FLAC（每段最多 5 秒、10 MB，需系统支持解码），也可分别恢复默认；导入后保存音频副本，不依赖原文件路径。「试听」随机选择一句比赛示例，使用当前音量和提示音，无需连接赛事或开启自动播报；静音和零音量时不可试听，真实赛事消息优先。再次点击可停止试听。
 
-`1.5.3-alpha-3` 支持独立开关接通音和断开音，关闭时跳过对应停顿并保留自定义音频。「Windows 音色」列出本机 SAPI 可用的中英文声音，默认跟随界面语言；选择英文音色时使用英文播报。切换会停止旧输出并清空待播消息，音色、音量、提示音开关和自定义音频均自动保存，重启后继续沿用；保存的音色不可用时提示并回退默认。「试听」使用当前选择。
+提示音支持独立开关接通音和断开音，关闭时跳过对应停顿并保留自定义音频。「Windows 音色」列出本机 SAPI 可用的中英文声音，默认跟随界面语言；选择英文音色时使用英文播报。切换会停止旧输出并清空待播消息，音色、音量、提示音开关和自定义音频均自动保存，重启后继续沿用；保存的音色不可用时提示并回退默认。「试听」使用当前选择。
 
 在工程师旁打开「语音服务…」浮窗，可配置 ElevenLabs API Key、音色、模型和播报语言，或 Azure Speech 资源密钥、全球资源区域和中英文音色，再使用「试听」检查效果。ElevenLabs 默认模型为 Flash v2.5，也可选择 Multilingual v2 或 Eleven v3；Azure 默认跟随音色语言。浮窗还支持腾讯云签名凭据、阿里云 NLS AppKey 与自动续期 Token、千问 Qwen-TTS 平台 API Key，以及 MiniMax 中国站／国际站。阿里云智能语音交互与千问模型服务分别接入，凭据和音色不能混用。各家配置分别保存，凭据经当前 Windows 用户加密；在线合成会发送播报文本并消耗账户额度，可选择服务失败时回退本地语音。Windows 音色选择也收纳在该浮窗中。
 
@@ -68,7 +68,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 HUD 设置中的“地产赛事底板不透明度”只调整面板底色，文字、旗语与状态标识保持清晰；“整体不透明度”仍同时影响所有 HUD，并与各赛事部件的不透明度叠加。设置保存后在重启时保留。开启“减少动态”可立即显示赛事状态，关闭淡入、位移和闪动效果。
 
-“赛事组件”可独立调整 11 个组件的显示开关与不透明度，修改后自动生效并保存。当前使用经典主题；此前保存的转播主题自动回到经典，组件位置、缩放与不透明度保留。主题扩展与逐组件配置接口继续保留，仅有经典主题时收起主题选择控件。
+“赛事组件”可独立调整 11 个组件的显示开关与不透明度，修改后自动生效并保存。当前使用经典主题，组件位置、缩放与不透明度分别保存。
 
 主窗口默认以 1440×900 的逻辑尺寸居中打开；按所在屏幕的缩放和工作区自动收敛，给桌面留出边距。小屏幕或手动缩小窗口时仍可滚动查看完整内容。概览集中显示当前赛事、赛道预览、遥测状态和最近圈记录，可直接进入圈速分析或回放工作台；没有赛事或圈记录时显示等待状态。
 
@@ -97,7 +97,7 @@ LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 
 只使用实时 HUD 和圈速分析时不需要部署服务端。部署前阅读[赛事服务端指引](https://laz22y.github.io/LazyForza/docs/#race-server)。
 
-RaceServer 后续开发版的总控将项目、规则与赛程、赛果记录分开管理。一项目对应一场赛事，准备新一场保留旧赛果并释放离线占位；客户端主动退出房间需收到服务端确认后才清除恢复身份。协议仍为 v2，旧服务端不支持立即释放时会保留恢复令牌。部署与兼容规则见 [RaceServer 说明](https://github.com/Laz22y/LazyForza.RaceServer#长期房间与赛事管理当前源码尚未发行)。
+RaceServer 0.6.0 将项目、规则与赛程、赛果记录分开管理。一项目对应一场赛事，准备新一场保留旧赛果并释放离线占位；客户端主动退出房间后释放身份与名额，暂时掉线可恢复原身份。原生服务端支持重启恢复，进行中的赛事等待管理员确认后续赛。部署与升级步骤见 [RaceServer 说明](https://github.com/Laz22y/LazyForza.RaceServer#原生重启恢复)。
 
 ## 本地构建
 
@@ -119,6 +119,8 @@ dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --replay "C:\path
 
 ## 开发资料
 
+GPT-5.6 Sol 参与了此前版本的开发。1.5.3 版本起由 GPT-6 Astra 开发。
+
 - [Coding Agent 开发入口](AGENTS.md)
 - [完整用户与开发者文档](docs/LazyForza-Documentation.md)
 - [架构](ARCHITECTURE.md)
@@ -136,18 +138,18 @@ FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与
 
 ## English
 
-Preview: [`1.5.3-alpha-3 · Radio Check`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-3) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3-alpha-3)), recommended with RaceServer `0.6.0-alpha-1`. Previews use their own update channel and protocol v2. The current stable version is `1.5.2`.
+Current stable release: [`1.5.3 · Radio Check`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3)). RaceServer `0.6.0` is recommended for estate racing, using protocol v2.
 
 LazyForza is a local telemetry, driving-analysis and estate-racing tool for Forza Horizon 6. It uses only official FH6 UDP Data Out: no game-memory access, DLL injection or game-process modification. Settings, laps, vehicle learning and recordings stay on your PC by default.
 
-Version 1.5.2 fixes the dashboard not hiding as expected after entering the garage, Horizon Festival, or similar scenes while using Manual with Clutch.
+Version 1.5.3, Radio Check, adds a race engineer and corner analysis, refreshes the main window and settings, and improves pit-lane timing and race connections.
 
 ### Features
 
 | Area | What it provides |
 | --- | --- |
 | Live HUD | Speed, gear, RPM, pedals, steering, tires, power and shift guidance with independent layout, scale and opacity |
-| Lap analysis | Sectors, live delta, speed and input comparison, racing lines and a linked distance cursor |
+| Lap analysis | Saved laps and sectors, corner comparisons, speed and driving inputs, racing lines and a linked distance cursor |
 | Vehicle learning | Shift targets by vehicle, performance class and observable tune traits, with offline vehicle-name mapping |
 | Recording and replay | Optional automatic recording, storage limits, `.lfztelemetry` exchange and linked replay |
 | Estate racing | Pausable circuit capture, component-level revision, pit-route checks, shortcut evidence, race HUD and network warnings |
@@ -155,13 +157,13 @@ Version 1.5.2 fixes the dashboard not hiding as expected after entering the gara
 
 The experimental drift HUD is disabled by default and uses local UDP telemetry to show slip angle, control trends and spin-risk guidance.
 
-### 1.5.3 preview
+### Driving analysis and race engineer
 
 Track identification accommodates rear grid positions and waits for route divergence when events such as Goliath and Legend Island share an opening corridor. A newly reset race clock and a low vehicle speed at a different known grid far from the previous event can open a new competition session even without a saved result. Ordinary menu pauses and rewinds preserve the current session.
 
-Lap comparison, post-race review and the replay workbench support manually marked corner intervals. Enter start/end distances or mark them on a curve, then choose another recorded valid reference lap. Compare interval time, brake onset, minimum speed and throttle recovery position on the same distance axis. Up to three localized observations link to the curves. Up to 32 intervals are saved locally per track revision; split intervals that cross the finish line.
+Lap comparison, post-race review and the replay workbench support manually marked corner intervals. Click the start and end points on the racing-line preview, fine-tune the distances if needed, and choose another recorded valid reference lap. Zoom with the wheel, drag to pan and double-click to reset. Compare interval time, brake onset, minimum speed and throttle recovery position on the same distance axis. Up to three localized observations link to the curves. Up to 32 intervals are saved locally per track revision; split intervals that cross the finish line.
 
-Lap analysis opens the latest valid lap by default; expand “Choose laps to compare” to compare up to four. Charts, racing lines and corners share a consistent tab layout, with live sectors, record management and file exchange available on demand. Replay groups playback controls, the timeline and readouts together. Collapsing the corner editor preserves its draft, and switching views keeps the distance cursor linked.
+Lap analysis opens the latest valid lap by default; expand “Choose laps to compare” to compare up to four. Charts, racing lines and corners share a consistent tab layout, with import, export and record management near the top. Live sectors are shown in Current race. Replay groups playback controls, the timeline and readouts together. Collapsing the corner editor preserves its draft, and switching views keeps the distance cursor linked.
 
 Corner comparisons require compatible route revisions, directions, sector versions and vehicle conditions. Older laps remain viewable and replayable. Intervals with sufficient samples provide observations; other intervals explain the missing evidence. Observations describe recorded inputs and time differences; interpreting causes also requires considering tune, weather and other conditions.
 
@@ -171,7 +173,7 @@ Speech defaults to an installed Windows SAPI voice for the selected language, wi
 
 Speech starts 180 ms after the connect cue; the disconnect cue follows speech after 220 ms. Expand “Custom connect/disconnect sounds” to import WAV, MP3, M4A or FLAC clips (up to 5 seconds and 10 MB each, subject to installed Windows codecs), or reset either cue. An audio copy is saved independently of the source file. “Preview” plays a random race sample with the current volume and cues, even offline with automatic speech disabled. Mute and zero volume block previews; live race messages take priority. Click again to stop.
 
-`1.5.3-alpha-3` supports independent connect/disconnect switches. Disabling a cue skips its adjacent pause and keeps the imported clip. “Windows voice” lists installed Chinese/English SAPI voices; the default follows the interface language, while an English voice uses English race messages. Switching stops the old output and clears pending speech. Voice and cue settings survive restarts; unavailable saved voices fall back to the default with a notice. Preview uses the current selection.
+Radio cues support independent connect/disconnect switches. Disabling a cue skips its adjacent pause and keeps the imported clip. “Windows voice” lists installed Chinese/English SAPI voices; the default follows the interface language, while an English voice uses English race messages. Switching stops the old output and clears pending speech. Voice and cue settings survive restarts; unavailable saved voices fall back to the default with a notice. Preview uses the current selection.
 
 Open “Speech service…” next to the engineer to configure an ElevenLabs API key, voice, model and language, an Azure Speech resource key, global resource region and Chinese/English voice, or a Windows voice. ElevenLabs defaults to Flash v2.5; Multilingual v2 and Eleven v3 are also available. Azure defaults to the voice's language. The same window also supports Tencent Cloud signing credentials, Alibaba NLS AppKey and automatic token renewal, Qianwen Qwen-TTS API keys, and MiniMax China or International accounts. Alibaba NLS and Qianwen model services use separate credentials and voices. Provider settings are saved separately, with credentials encrypted for the current Windows user. Online synthesis sends speech text and uses account credits; optional Windows fallback keeps speech available during service failures. Preview uses the selected service.
 
@@ -185,11 +187,11 @@ The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu ent
 
 Settings saves and applies changes automatically. Language, HUD, recording options and valid live UDP endpoints take effect directly. Changing data folders prompts for a restart at a time of your choice; existing data stays in its original folder. Six UI accent colors are available: Default Blue, Midnight Purple, Fresh Green, Vivid Red, Pure White and Subtle Gray.
 
-The sidebar footer shows telemetry status and the active UDP port, or the simulation/replay source. Settings → General → Quick settings lets you choose race engineer mute, speech volume and reduce motion; mute is shown by default. Choices and states persist across restarts. Short windows combine multiple quick actions into an icon row while keeping Settings at the bottom.
+The sidebar footer shows telemetry status and the active UDP port, or the simulation/replay source. Settings → General → Quick settings offers engineer mute and volume, HUD shift cues, current-car shift guidance, overall HUD and estate panel opacity, automatic race recording, and reduced motion. Mute and HUD shift cues appear by default; existing custom selections are preserved. Sliders open beside the sidebar and save immediately. Disabling automatic recording saves the current automatic recording. HUD cue visibility and current-car guidance are independent; hiding cues keeps vehicle learning active. Short windows combine quick actions into an icon row while keeping Settings at the bottom.
 
 In HUD settings, Estate race panel opacity changes panel backgrounds while keeping text, flags and status indicators clear. Overall opacity still affects all HUD content and combines with individual race widget opacity. Saved settings persist across restarts. Reduce motion shows race states immediately without fades, movement or pulsing.
 
-Race widgets lets you adjust visibility and opacity independently for all 11 widgets. Changes apply and save automatically. Classic is the current theme; saved Broadcast selections return to Classic while retaining position, scale and opacity. Theme extension and per-widget configuration remain supported; theme selectors are hidden when only Classic is available.
+Race widgets use the Classic appearance, with independent visibility, position, scale and opacity for all 11 widgets. Changes apply and save automatically.
 
 The main window opens centered at a preferred size of 1440×900 device-independent units, constrained to its screen's scale and work area with a small desktop margin. Scrolling remains available on smaller screens or when the window is resized. Overview brings the current session, track preview, telemetry status and recent laps together, with direct access to lap analysis and replay. It shows an explicit waiting state when no session or lap records are available.
 
@@ -207,9 +209,13 @@ See the [complete documentation](https://laz22y.github.io/LazyForza/docs/) for s
 
 [LazyForza.RaceServer](https://github.com/Laz22y/LazyForza.RaceServer) is the independent estate-racing server. It provides 1–12 driver slots plus observers, practice, multi-session qualifying, races, stable gaps, flags, penalties, collision investigations, optional disconnected-lap recovery, pit lanes, teams, hosted track files and archived session results. The client can save frequently used servers and test reachability and protocol compatibility before joining. Race Control supports separate super-admin, administrator and steward accounts, warning-only pre-race checks, reusable rule templates and event packages, and token-protected public live timing. Native Windows/Linux/macOS packages and a Cloudflare Durable Objects implementation are available.
 
-RaceServer is not required for the live HUD or lap analysis. Read the [deployment and connection guide](https://laz22y.github.io/LazyForza/docs/#race-server) before hosting a race.
+RaceServer 0.6.0 separates event projects, rules and schedules, and results for consecutive events. Explicit departure releases slots and identities; temporary disconnections retain recovery. Native servers restore saved races after a restart and wait for administrator confirmation to resume. RaceServer is not required for the live HUD or lap analysis. Read the [deployment and connection guide](https://laz22y.github.io/LazyForza/docs/#race-server) before hosting or upgrading a server.
 
-### Build locally
+### Development
+
+GPT-5.6 Sol contributed to earlier versions. Development from version 1.5.3 is by GPT-6 Astra.
+
+#### Build locally
 
 Requires Windows 10/11 x64, .NET SDK 9 and PowerShell 7:
 

@@ -5,7 +5,7 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Version>1.5.2</Version>
+    <Version>1.5.3</Version>
     <ReleaseNameZh>Radio Check</ReleaseNameZh>
     <ReleaseNameEn>Radio Check</ReleaseNameEn>
     <ApplicationManifest>app.manifest</ApplicationManifest>
