@@ -51,12 +51,17 @@ internal sealed partial class MainWindow
     {
         if (sidebarStatus is null || sidebarPort is null || sidebarDot is null) return;
         var diagnostics = telemetry.Diagnostics;
-        sidebarStatus.Text = SidebarStatusText(sourceKind, diagnostics.State);
-        sidebarPort.Text = sourceKind == TelemetrySourceKind.Live
-            ? diagnostics.ListenPort.ToString(CultureInfo.InvariantCulture) : "";
-        sidebarDot.Fill = Brush(diagnostics.State is TelemetryStreamState.Live or TelemetryStreamState.Replay
-            ? "AccentBrush" : diagnostics.State == TelemetryStreamState.Faulted ? "DangerBrush" : "MutedBrush");
+        UpdateSidebarConnection(sourceKind, diagnostics.State, diagnostics.ListenPort);
         foreach (var refresh in refreshQuickSettings) refresh();
+    }
+
+    private void UpdateSidebarConnection(TelemetrySourceKind source, TelemetryStreamState state, int port)
+    {
+        if (sidebarStatus is null || sidebarPort is null || sidebarDot is null) return;
+        sidebarStatus.Text = SidebarStatusText(source, state);
+        sidebarPort.Text = source == TelemetrySourceKind.Live ? port.ToString(CultureInfo.InvariantCulture) : "";
+        sidebarDot.Fill = Brush(state is TelemetryStreamState.Live or TelemetryStreamState.Replay
+            ? "AccentBrush" : state == TelemetryStreamState.Faulted ? "DangerBrush" : "MutedBrush");
     }
 
     internal static string SidebarStatusText(TelemetrySourceKind source, TelemetryStreamState state) =>
@@ -146,10 +151,10 @@ internal sealed partial class MainWindow
                         : id == SidebarQuickSettings.EstateBackdropOpacity
                         ? "M3 3 H21 V21 H3 Z M3 15 L15 3 M3 21 L21 3 M9 21 L21 9 M15 21 L21 15"
                         : recording ? "M12 2 A10 10 0 1 1 12 22 A10 10 0 1 1 12 2 Z M12 8 A4 4 0 1 1 12 16 A4 4 0 1 1 12 8 Z"
-                        : indicators ? "M2 12 Q12 2 22 12 Q12 22 2 12 Z M12 16 V8 M9 11 L12 8 L15 11"
+                        : indicators ? "M5 4.5 H19 Q21 4.5 21 6.5 V17.5 Q21 19.5 19 19.5 H5 Q3 19.5 3 17.5 V6.5 Q3 4.5 5 4.5 Z M6 13.5 L9 10.5 L12 13.5 M13 10.5 L16 13.5 L19 10.5"
                         : shift ? "M6 18 V5 M2 9 L6 5 L10 9 M18 6 V19 M14 15 L18 19 L22 15" : mute
                         ? active ? "M3 9 H7 L12 5 V19 L7 15 H3 Z M16 8 Q21 12 16 16" : "M3 9 H7 L12 5 V19 L7 15 H3 Z M16 9 L22 15 M22 9 L16 15"
-                        : "M5 8 H19 M5 12 H15 M5 16 H11", active);
+                        : "M5 8 H19 M5 12 H15 M5 16 H11", active, rounded: indicators);
                 action.ToolTip = id switch
                 {
                     SidebarQuickSettings.Mute => EngineerText(!engineerEnabled ? "语音未启用" : engineerMuted ? "恢复声音" : "立即静音",
@@ -225,10 +230,13 @@ internal sealed partial class MainWindow
         }
     }
 
-    private static UIElement QuickIcon(string data, bool active)
+    private static UIElement QuickIcon(string data, bool active, bool rounded = false)
     {
         var icon = new System.Windows.Shapes.Path { Data = Geometry.Parse(data), StrokeThickness = 1.5,
-            Width = 20, Height = 20, Stretch = Stretch.Uniform };
+            Width = 20, Height = 20, Stretch = Stretch.Uniform,
+            StrokeStartLineCap = rounded ? PenLineCap.Round : PenLineCap.Flat,
+            StrokeEndLineCap = rounded ? PenLineCap.Round : PenLineCap.Flat,
+            StrokeLineJoin = rounded ? PenLineJoin.Round : PenLineJoin.Miter };
         icon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, active ? "TextBrush" : "MutedBrush");
         return icon;
     }

@@ -5,6 +5,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using LazyForza.Domain;
 using LazyForza.Modules.Dashboard;
 
@@ -234,6 +235,37 @@ internal sealed partial class MainWindow
         BuildSidebarQuickSettings(); navigation.SelectedIndex = 0;
         await Task.Delay(150); UpdateLayout();
         CaptureVisual(this, Path.Combine(directory, "sidebar-final-overview.png"));
+        // Show the real connection row using synthetic states; never alter the telemetry source or stored settings.
+        void CaptureConnection(string name, TelemetryStreamState state)
+        {
+            try
+            {
+                UpdateSidebarConnection(TelemetrySourceKind.Live, state, LazyForzaDefaults.TelemetryPort);
+                UpdateLayout();
+                var footer = (FrameworkElement)VisualTreeHelper.GetParent(quickSettingsHost);
+                var width = footer.ActualWidth + 24;
+                var height = footer.ActualHeight + 12;
+                var drawing = new DrawingVisual();
+                using (var dc = drawing.RenderOpen())
+                {
+                    dc.DrawRectangle(Brush("SidebarBrush"), null, new Rect(0, 0, width, height));
+                    dc.DrawRectangle(new VisualBrush(footer), null, new Rect(12, 0, footer.ActualWidth, footer.ActualHeight));
+                }
+                var bitmap = new RenderTargetBitmap((int)Math.Ceiling(width * 2), (int)Math.Ceiling(height * 2), 192, 192, PixelFormats.Pbgra32);
+                bitmap.Render(drawing);
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                using var output = File.Create(Path.Combine(directory, name + ".png"));
+                encoder.Save(output);
+            }
+            finally { RefreshSidebar(); }
+        }
+        CaptureConnection("sidebar-connected", TelemetryStreamState.Live);
+        CaptureConnection("sidebar-disconnected", TelemetryStreamState.Stale);
+        Height = 640;
+        await Task.Delay(120); UpdateLayout();
+        CaptureConnection("sidebar-connected-compact", TelemetryStreamState.Live);
+        Height = 900;
         File.WriteAllText(Path.Combine(directory, "settings-auto-qa.json"), JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true }));
     }
 
