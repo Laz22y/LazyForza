@@ -14,64 +14,54 @@ public sealed class EngineerSpeechSettingsWindowTests
     [DoNotParallelize]
     public void ProviderSettingsStayInDraftAndFitChineseAndEnglishFloatingWindows()
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        WpfTestHost.Run(() =>
         {
-            var app = new LazyForza.App.App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-            app.InitializeComponent();
-            try
+            var app = Application.Current;
+            foreach (var english in new[] { false, true })
+            foreach (var width in new[] { 480, 560 })
+            foreach (var providerIndex in new[] { 1, 2, 3, 4, 5, 6 })
             {
-                foreach (var english in new[] { false, true })
-                foreach (var width in new[] { 480, 560 })
-                foreach (var providerIndex in new[] { 1, 2, 3, 4, 5, 6 })
+                AppLocalization.UseLanguage(english ? "en" : "zh-Hans");
+                var saves = 0;
+                var window = new EngineerSpeechSettingsWindow(new(), [], null, english,
+                    (_, _) => { saves++; return Task.CompletedTask; });
+                var root = (Grid)window.Content;
+                var selectors = Descendants<ComboBox>(root).ToArray();
+                selectors[0].SelectedIndex = providerIndex;
+                var password = Descendants<PasswordBox>(root).Single(p => p.Name == ProviderSecretName(providerIndex));
+                Assert.AreEqual("", password.Password);
+                var save = Descendants<Button>(root).Single(b => b.IsDefault);
+                save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.AreEqual(0, saves, "An incomplete API configuration must not replace saved settings.");
+                Assert.IsTrue(Descendants<TextBlock>(root).Any(t => t.Text.Contains(english ? "valid Voice ID" : "有效的音色")));
+                root.Background = (Brush)app.Resources["PanelBrush"];
+                root.Margin = new Thickness(0);
+                root.Width = width - 48; root.Height = 680;
+                root.Measure(new Size(root.Width, root.Height));
+                root.Arrange(new Rect(0, 0, root.Width, root.Height)); root.UpdateLayout();
+                foreach (var element in Descendants<Control>(root).Where(c => c.ActualWidth > 0 && c is not ScrollViewer))
+                    Assert.IsTrue(element.ActualWidth <= root.Width + 1, $"{element.GetType().Name} exceeds the floating window width.");
+                var path = Environment.GetEnvironmentVariable("LAZYFORZA_SPEECH_QA") ?? Environment.GetEnvironmentVariable("LAZYFORZA_ELEVENLABS_QA");
+                if (!string.IsNullOrEmpty(path))
                 {
-                    AppLocalization.UseLanguage(english ? "en" : "zh-Hans");
-                    var saves = 0;
-                    var window = new EngineerSpeechSettingsWindow(new(), [], null, english,
-                        (_, _) => { saves++; return Task.CompletedTask; });
-                    var root = (Grid)window.Content;
-                    var selectors = Descendants<ComboBox>(root).ToArray();
-                    selectors[0].SelectedIndex = providerIndex;
-                    var password = Descendants<PasswordBox>(root).Single(p => p.Name == ProviderSecretName(providerIndex));
-                    Assert.AreEqual("", password.Password);
-                    var save = Descendants<Button>(root).Single(b => b.IsDefault);
-                    save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    Assert.AreEqual(0, saves, "An incomplete API configuration must not replace saved settings.");
-                    Assert.IsTrue(Descendants<TextBlock>(root).Any(t => t.Text.Contains(english ? "valid Voice ID" : "有效的音色")));
-                    root.Background = (Brush)app.Resources["PanelBrush"];
-                    root.Margin = new Thickness(0);
-                    root.Width = width - 48; root.Height = 680;
-                    root.Measure(new Size(root.Width, root.Height));
-                    root.Arrange(new Rect(0, 0, root.Width, root.Height)); root.UpdateLayout();
-                    foreach (var element in Descendants<Control>(root).Where(c => c.ActualWidth > 0 && c is not ScrollViewer))
-                        Assert.IsTrue(element.ActualWidth <= root.Width + 1, $"{element.GetType().Name} exceeds the floating window width.");
-                    var path = Environment.GetEnvironmentVariable("LAZYFORZA_SPEECH_QA") ?? Environment.GetEnvironmentVariable("LAZYFORZA_ELEVENLABS_QA");
-                    if (!string.IsNullOrEmpty(path))
-                    {
-                        Directory.CreateDirectory(path);
-                        var bitmap = new RenderTargetBitmap((int)root.Width, (int)root.Height, 96, 96, PixelFormats.Pbgra32);
-                        bitmap.Render(root);
-                        using var file = File.Create(Path.Combine(path, $"speech-settings-{providerIndex}-{(english ? "en" : "zh")}-{width}.png"));
-                        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(file);
-                    }
-                    password.Password = "unsaved-draft-key";
-                    selectors[0].SelectedIndex = 0;
-                    selectors[0].SelectedIndex = providerIndex;
-                    Assert.AreEqual("unsaved-draft-key", password.Password, "Provider switching must preserve the unsaved draft.");
-                    Assert.IsTrue(Descendants<PasswordBox>(root).Where(p => p != password).All(p => p.Password.Length == 0));
-                    window.Close();
-                    Assert.AreEqual("", password.Password);
-                    Assert.AreEqual(0, saves, "Closing a draft must not change the active speech provider.");
+                    Directory.CreateDirectory(path);
+                    var bitmap = new RenderTargetBitmap((int)root.Width, (int)root.Height, 96, 96, PixelFormats.Pbgra32);
+                    bitmap.Render(root);
+                    using var file = File.Create(Path.Combine(path, $"speech-settings-{providerIndex}-{(english ? "en" : "zh")}-{width}.png"));
+                    var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(file);
                 }
-                SavedDraftRestoresBothProviders();
-                SavedDraftRestoresNewProviders();
+                password.Password = "unsaved-draft-key";
+                selectors[0].SelectedIndex = 0;
+                selectors[0].SelectedIndex = providerIndex;
+                Assert.AreEqual("unsaved-draft-key", password.Password, "Provider switching must preserve the unsaved draft.");
+                Assert.IsTrue(Descendants<PasswordBox>(root).Where(p => p != password).All(p => p.Password.Length == 0));
+                window.Close();
+                Assert.AreEqual("", password.Password);
+                Assert.AreEqual(0, saves, "Closing a draft must not change the active speech provider.");
             }
-            catch (Exception error) { failure = error; }
-            finally { app.Shutdown(); }
+            SavedDraftRestoresBothProviders();
+            SavedDraftRestoresNewProviders();
         });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start();
-        Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(30)));
-        Assert.IsNull(failure, failure?.ToString());
     }
 
     private static string ProviderSecretName(int index) => index switch

@@ -17,13 +17,11 @@ public sealed class ManualCornerPanelTests
     public void SavedMarkersReferenceSelectionAndDifferenceNavigationSurviveRebuildingThePanel()
     {
         var path = Path.Combine(Path.GetTempPath(), $"corner-ui-{Guid.NewGuid():N}.db");
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        try
         {
-            var application = new LazyForza.App.App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-            application.InitializeComponent();
-            try
+            WpfTestHost.Run(() =>
             {
+                AppLocalization.UseLanguage("zh-Hans");
                 using var store = new LazyForzaStore(path);
                 var time = DateTimeOffset.UtcNow.AddDays(-1);
                 var track = new TrackTemplate(Guid.NewGuid(), "test", 1, "fh6_udp_live", null, [],
@@ -140,15 +138,9 @@ public sealed class ManualCornerPanelTests
                 lazyTabs.SelectedIndex = 1;
                 Assert.AreSame(draft, ((TabItem)lazyTabs.Items[1]).Content, "Tab switches preserve local edits.");
                 Assert.AreEqual(1, builds);
-            }
-            catch (Exception exception) { failure = exception; }
-            finally { application.Shutdown(); }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(30)));
-        if (File.Exists(path)) File.Delete(path);
-        Assert.IsNull(failure, failure?.ToString());
+            });
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
     }
 
     private static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

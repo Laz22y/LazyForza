@@ -68,13 +68,17 @@ public sealed class LapTelemetryExporterTests
     }
 
     [TestMethod]
-    public void CsvExportLeavesNewDynamicsFieldsBlankForLegacyLap()
+    [DataRow("zh-Hans", "旧版圈速，不包含方向与轮胎滑移")]
+    [DataRow("en", "Legacy lap without steering or tire-slip data")]
+    public void CsvExportLeavesNewDynamicsFieldsBlankForLegacyLap(string language, string expectedDescription)
     {
+        var previousLanguage = AppLocalization.CurrentLanguage;
         var path = Path.Combine(
             Path.GetTempPath(),
             $"lazyforza-telemetry-legacy-{Guid.NewGuid():N}.csv");
         try
         {
+            AppLocalization.UseLanguage(language);
             var lap = new LapRecord(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
@@ -92,13 +96,14 @@ public sealed class LapTelemetryExporterTests
             LapTelemetryExporter.WriteCsv(path, "旧圈", lap);
 
             var lines = File.ReadAllLines(path, Encoding.UTF8);
-            StringAssert.Contains(string.Join('\n', lines), "旧版圈速，不包含方向与轮胎滑移");
+            StringAssert.Contains(string.Join('\n', lines), expectedDescription);
             var data = lines[^1].Split(',');
             Assert.HasCount(24, data);
             Assert.IsTrue(data.Skip(11).All(string.IsNullOrEmpty));
         }
         finally
         {
+            AppLocalization.UseLanguage(previousLanguage);
             if (File.Exists(path)) File.Delete(path);
         }
     }

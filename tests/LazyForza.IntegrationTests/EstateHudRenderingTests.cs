@@ -446,12 +446,7 @@ public sealed class EstateHudRenderingTests
 
     internal static void Sta(Action action)
     {
-        Exception? failure = null;
-        var thread = new Thread(() => { try { action(); } catch (Exception exception) { failure = exception; } });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(30)), "WPF rendering did not complete.");
-        Assert.IsNull(failure, failure?.ToString());
+        WpfTestHost.Run(action);
     }
 
     private sealed class Contribution(Func<EstateRaceHudState> state) : IHudContribution
