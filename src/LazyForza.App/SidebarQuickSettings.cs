@@ -6,17 +6,19 @@ internal static class SidebarQuickSettings
 {
     internal const string StoreKey = "ui.sidebarQuickSettings";
     internal const string Mute = "engineerMute", Volume = "engineerVolume", Motion = "reduceMotion";
-    internal static readonly string[] Available = [Mute, Volume, Motion];
+    internal const string ShiftRecommendations = "shiftRecommendations";
+    internal static readonly string[] Available = [Mute, ShiftRecommendations, Volume, Motion];
+    internal static string[] Default => [Mute, ShiftRecommendations];
 
     internal static string[] Load(string? json)
     {
-        if (string.IsNullOrWhiteSpace(json)) return [Mute];
+        if (string.IsNullOrWhiteSpace(json)) return Default;
         try
         {
             var ids = JsonSerializer.Deserialize<string[]>(json);
-            return ids is null ? [Mute] : Normalize(ids);
+            return ids is null ? Default : Normalize(ids);
         }
-        catch (JsonException) { return [Mute]; }
+        catch (JsonException) { return Default; }
     }
 
     internal static string[] Normalize(IEnumerable<string> ids) => Available.Where(ids.Contains).ToArray();

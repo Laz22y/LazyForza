@@ -6,18 +6,20 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using LazyForza.Domain;
+using LazyForza.Modules.Dashboard;
 
 namespace LazyForza.App;
 
 internal sealed partial class MainWindow
 {
-    private string[] quickSettingIds = [SidebarQuickSettings.Mute];
+    private string[] quickSettingIds = SidebarQuickSettings.Default;
     private readonly StackPanel quickSettingsHost = new();
     private readonly List<Action> refreshQuickSettings = [];
     private TextBlock? sidebarStatus, sidebarPort;
     private System.Windows.Shapes.Ellipse? sidebarDot;
     private Popup? quickVolumePopup;
     private Action? refreshEngineerControls;
+    private Action? refreshShiftControls;
     private Action? syncHudMotionPreference;
 
     private void InitializeSidebar()
@@ -72,11 +74,13 @@ internal sealed partial class MainWindow
     {
         SidebarQuickSettings.Mute => "语音工程师",
         SidebarQuickSettings.Volume => "语音音量",
+        SidebarQuickSettings.ShiftRecommendations => "推荐换挡",
         _ => "减少动态"
     });
 
     private void BuildSidebarQuickSettings()
     {
+        var dashboard = moduleManager.Modules.OfType<DashboardModule>().Single();
         if (quickVolumePopup is not null) quickVolumePopup.IsOpen = false;
         quickSettingsHost.Children.Clear(); refreshQuickSettings.Clear();
         if (quickSettingIds.Length == 0) return;
@@ -92,7 +96,7 @@ internal sealed partial class MainWindow
                 Style = (Style)FindResource("SidebarQuickAction") };
             AutomationProperties.SetName(action, QuickSettingTitle(id));
             ToolTipService.SetShowOnDisabled(action, true);
-            if (compact) { action.Margin = new Thickness(0, 0, 6, 0); rows.Children.Add(action); }
+            if (compact) { action.Margin = new Thickness(0, 0, 4, 0); rows.Children.Add(action); }
             else
             {
                 var row = new DockPanel { Margin = new Thickness(14, 0, 8, 2), Height = 38 };
@@ -109,15 +113,19 @@ internal sealed partial class MainWindow
                 {
                     SidebarQuickSettings.Mute => $"{engineerEnabled}:{engineerMuted}:{raceEngineer?.Error}",
                     SidebarQuickSettings.Volume => engineerVolume.ToString(CultureInfo.InvariantCulture),
+                    SidebarQuickSettings.ShiftRecommendations => $"{dashboard.ActiveVehicleProfileId}:{dashboard.ShiftRecommendationsEnabled}",
                     _ => overlay.TimingLayout.ReduceMotion.ToString()
                 };
                 if (state == previousState) return;
                 previousState = state;
                 var mute = id == SidebarQuickSettings.Mute;
-                var active = mute ? !engineerMuted && engineerEnabled : overlay.TimingLayout.ReduceMotion;
-                action.IsEnabled = !mute || engineerEnabled;
+                var shift = id == SidebarQuickSettings.ShiftRecommendations;
+                var active = mute ? !engineerMuted && engineerEnabled : shift
+                    ? dashboard.ActiveVehicleProfileId is not null && dashboard.ShiftRecommendationsEnabled
+                    : overlay.TimingLayout.ReduceMotion;
+                action.IsEnabled = shift ? dashboard.ActiveVehicleProfileId is not null : !mute || engineerEnabled;
                 action.Content = id == SidebarQuickSettings.Volume ? Label($"{engineerVolume}", 11)
-                    : QuickIcon(mute
+                    : QuickIcon(shift ? "M6 18 V5 M2 9 L6 5 L10 9 M18 6 V19 M14 15 L18 19 L22 15" : mute
                         ? active ? "M3 9 H7 L12 5 V19 L7 15 H3 Z M16 8 Q21 12 16 16" : "M3 9 H7 L12 5 V19 L7 15 H3 Z M16 9 L22 15 M22 9 L16 15"
                         : "M5 8 H19 M5 12 H15 M5 16 H11", active);
                 action.ToolTip = id switch
@@ -125,6 +133,9 @@ internal sealed partial class MainWindow
                     SidebarQuickSettings.Mute => EngineerText(!engineerEnabled ? "语音未启用" : engineerMuted ? "恢复声音" : "立即静音",
                         !engineerEnabled ? "Speech is disabled" : engineerMuted ? "Unmute" : "Mute now"),
                     SidebarQuickSettings.Volume => QuickSettingTitle(id) + $" · {engineerVolume}%",
+                    SidebarQuickSettings.ShiftRecommendations => AppLocalization.Literal(dashboard.ActiveVehicleProfileId is null
+                        ? "识别车辆后可切换推荐换挡。"
+                        : active ? "当前车辆：推荐换挡已开启，点击关闭。" : "当前车辆：推荐换挡已关闭，点击开启。"),
                     _ => QuickSettingTitle(id) + " · " + AppLocalization.Literal(active ? "开" : "关")
                 };
                 AutomationProperties.SetHelpText(action, action.ToolTip.ToString());
@@ -138,6 +149,14 @@ internal sealed partial class MainWindow
                     ApplyEngineerPreferences();
                 }
                 else if (id == SidebarQuickSettings.Volume) OpenQuickVolume(action);
+                else if (id == SidebarQuickSettings.ShiftRecommendations)
+                {
+                    if (dashboard.ActiveVehicleProfileId is not { } profileId) return;
+                    var enabled = !await store.GetShiftRecommendationsEnabledAsync(profileId, lifetimeCancellation.Token);
+                    store.SetShiftRecommendationsEnabled(profileId, enabled);
+                    dashboard.SetShiftRecommendationsEnabled(profileId, enabled);
+                    refreshShiftControls?.Invoke();
+                }
                 else
                 {
                     var next = overlay.CurrentLayout with { ReduceMotion = !overlay.TimingLayout.ReduceMotion };

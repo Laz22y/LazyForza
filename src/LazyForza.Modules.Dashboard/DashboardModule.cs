@@ -57,6 +57,7 @@ public sealed class DashboardModule : LazyForzaModuleBase, IHudContribution
 
     public ShiftLearningSnapshot Learning => learner.Snapshot;
     public string? ActiveVehicleProfileId => Volatile.Read(ref activeVehicleProfileId);
+    public bool ShiftRecommendationsEnabled => Volatile.Read(ref shiftRecommendationsEnabled);
 
     public void SetShiftRecommendationsEnabled(string vehicleProfileId, bool enabled)
     {

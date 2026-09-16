@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using LazyForza.Domain;
+using LazyForza.Modules.Dashboard;
 
 namespace LazyForza.App;
 
@@ -17,6 +18,7 @@ internal sealed partial class MainWindow
         var results = new List<string>();
         void Check(bool condition, string message)
         {
+            File.AppendAllText(Path.Combine(directory, "settings-checks.txt"), $"{(condition ? "PASS" : "FAIL")}: {message}\n");
             if (!condition) throw new InvalidOperationException("Settings QA: " + message);
             results.Add(message);
         }
@@ -30,6 +32,34 @@ internal sealed partial class MainWindow
         var originalChoices = quickSettingIds;
         quickSettingIds = [.. SidebarQuickSettings.Available];
         BuildSidebarQuickSettings();
+        var dashboard = moduleManager.Modules.OfType<DashboardModule>().Single();
+        Button ShiftButton() => QaChildren<Button>(quickSettingsHost).Single(button =>
+            AutomationProperties.GetName(button) == QuickSettingTitle(SidebarQuickSettings.ShiftRecommendations));
+        UpdateLayout();
+        if (dashboard.ActiveVehicleProfileId is { } profileId)
+        {
+            var originalShift = await store.GetShiftRecommendationsEnabledAsync(profileId, lifetimeCancellation.Token);
+            var otherProfiles = store.ListVehicleProfiles().Where(profile => profile.Id != profileId)
+                .ToDictionary(profile => profile.Id, profile => profile.ShiftRecommendationsEnabled);
+            ShiftButton().RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Check(dashboard.ShiftRecommendationsEnabled == !originalShift, "Quick shift setting applies immediately");
+            Check(await store.GetShiftRecommendationsEnabledAsync(profileId, lifetimeCancellation.Token) == !originalShift,
+                "Quick shift setting persisted to the active vehicle");
+            Check(store.ListVehicleProfiles().Where(profile => otherProfiles.ContainsKey(profile.Id))
+                .All(profile => profile.ShiftRecommendationsEnabled == otherProfiles[profile.Id]), "Other vehicles retain their shift preferences");
+            await moduleManager.SetEnabledAsync(DashboardModule.ModuleId, false, lifetimeCancellation.Token);
+            RefreshSidebar();
+            Check(!ShiftButton().IsEnabled, "Quick shift setting is disabled without an active vehicle");
+            await moduleManager.SetEnabledAsync(DashboardModule.ModuleId, true, lifetimeCancellation.Token);
+            for (var attempt = 0; dashboard.ActiveVehicleProfileId is null && attempt < 100; attempt++) await Task.Delay(50);
+            Check(dashboard.ActiveVehicleProfileId == profileId && dashboard.ShiftRecommendationsEnabled == !originalShift,
+                "Restarted dashboard restores the vehicle shift preference");
+            store.SetShiftRecommendationsEnabled(profileId, originalShift);
+            dashboard.SetShiftRecommendationsEnabled(profileId, originalShift);
+            RefreshSidebar();
+            Check(ShiftButton().IsEnabled, "Quick shift setting becomes available when a vehicle is identified again");
+        }
+        else Check(!ShiftButton().IsEnabled, "Quick shift setting waits until the vehicle configuration is learned");
         foreach (var size in new[] { new Size(1440, 900), new Size(960, 640) })
         {
             Width = size.Width; Height = size.Height;
@@ -37,7 +67,7 @@ internal sealed partial class MainWindow
             if (content.Content is ScrollViewer scroll) scroll.ScrollToBottom();
             await Task.Delay(120);
             CaptureVisual(this, Path.Combine(directory, $"quick-settings-{size.Width:0}x{size.Height:0}.png"));
-            Check(QaChildren<Button>(quickSettingsHost).Count() == 3, $"Three quick actions at {size}");
+            Check(QaChildren<Button>(quickSettingsHost).Count() == SidebarQuickSettings.Available.Length, $"All quick actions at {size}");
             Check(!QaChildren<Button>(content).Any(button => button.Content is string text &&
                 new[] { "保存", "应用", "Save", "Apply" }.Any(text.StartsWith)), $"No general apply buttons at {size}");
             await ShowSettings(SettingsCategory.Telemetry);

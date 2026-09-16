@@ -676,6 +676,7 @@ internal sealed partial class MainWindow : Window
         var previousOffset = preserveScroll && content.Content is ScrollViewer currentScroll ? currentScroll.VerticalOffset : 0;
         refreshVisiblePage = null;
         refreshEngineerControls = null;
+        refreshShiftControls = null;
         syncHudMotionPreference = null;
         var page = navigation.SelectedIndex switch
         {
@@ -2494,8 +2495,7 @@ internal sealed partial class MainWindow : Window
         refreshVisiblePage = () =>
         {
             var learning = module.Learning;
-            var recommendationsEnabled =
-                (module.Snapshot as DashboardHudState)?.ShiftRecommendationsEnabled ?? true;
+            var recommendationsEnabled = module.ShiftRecommendationsEnabled;
             var eta = learning.State == LearningState.Ready
                 ? AppLocalization.Literal("已就绪")
                 : learning.EstimatedSecondsRemaining is double seconds
@@ -2558,6 +2558,7 @@ internal sealed partial class MainWindow : Window
                 string.IsNullOrEmpty(rejected) ? AppLocalization.Literal("暂无") : rejected);
             RefreshProfiles();
         };
+        refreshShiftControls = () => { RefreshProfiles(true); refreshVisiblePage?.Invoke(); };
         RefreshProfiles(true);
         refreshVisiblePage();
         return Scroll(stack);
@@ -2720,6 +2721,7 @@ internal sealed partial class MainWindow : Window
             var enabled = recommendation.IsChecked == true;
             store.SetShiftRecommendationsEnabled(profile.Id, enabled);
             module.SetShiftRecommendationsEnabled(profile.Id, enabled);
+            RefreshSidebar();
             recommendation.Content = AppLocalization.Literal(enabled ? "推荐挡位：开" : "推荐挡位：关");
             refreshProfiles();
         };
