@@ -669,6 +669,11 @@ public partial class App : Application
             }
             await overlay.SetLayoutAsync(original, CancellationToken.None);
         }
+        catch (Exception exception)
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "qa-error.txt"), exception.ToString());
+        }
         finally
         {
             ExitApplication();

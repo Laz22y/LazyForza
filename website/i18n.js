@@ -146,7 +146,7 @@
     "实时仪表盘": "Live dashboard",
     "速度、挡位、转速、踏板、方向、轮胎、动力和性能等级可独立开关、移动、缩放与调节透明度。窗口支持置顶和鼠标穿透。": "Speed, gear, RPM, pedals, steering, tires, power and performance class can be toggled, moved, scaled and adjusted independently. HUD windows support always-on-top and click-through modes.",
     "圈速与走线": "Lap times and racing lines",
-    "按距离对齐单圈，联动速度、油门、制动、方向与走线。紫色分段表示本地同一性能等级下的最快分段。": "Align laps by distance and compare speed, throttle, braking, steering and racing lines. Purple marks the fastest local sector in the same performance class.",
+    "按比赛整理圈记录，查看整场用时、圈速波动与逐圈节奏，再深入对比单圈的速度、踏板和走线。地产练习、排位和正赛分别归档，普通地图按本地比赛会话整理。总用时仅包含已记录圈，不含缺失圈和服务端处罚。": "Group laps by session to review recorded time, variation and lap-by-lap pace, then compare individual speed, input and racing-line data. Estate practice, qualifying and races are separate; ordinary maps use locally detected sessions. Recorded time excludes missing laps and server penalties.",
     "按车型、性能等级和可观测调校特征保存结果。车辆名称映射使用 HDR 提供的 Car Ordinals 文档内置快照。": "Stores results by vehicle, performance class and observable tune traits. Vehicle names use a bundled snapshot of HDR's Car Ordinals documentation.",
     "自动录制默认关闭。可保留赛前 15 秒与赛后 10 秒；回放工作台联动时间轴、驾驶输入、走线和动态遥测。": "Automatic recording is off by default. It can retain 15 seconds before and 10 seconds after a session; replay links the timeline, driving inputs, line and telemetry.",
     "实验性漂移 HUD": "Experimental drift HUD",

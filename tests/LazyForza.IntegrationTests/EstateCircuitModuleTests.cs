@@ -242,7 +242,8 @@ public sealed class EstateCircuitModuleTests
                 Assert.AreEqual(EstateCircuitPhase.Idle, module.State.Phase);
                 Assert.AreEqual(0, store.CountLaps(track.Id));
 
-                module.StartTiming(track.Id);
+                var raceSession = new LapSessionInfo(Guid.NewGuid(), LapSessionKind.EstateRace, "Race session");
+                module.StartTiming(track.Id, sessionInfo: raceSession);
                 PublishPosition(feed, 0, 100, 2, -0.005, 20);
                 PublishPosition(feed, 1, 100, 2, 0.25, 20);
                 await Task.Delay(50);
@@ -260,6 +261,8 @@ public sealed class EstateCircuitModuleTests
                 Assert.AreEqual(1, store.CountLaps(track.Id));
                 var lap = store.LoadLapSummaries(track.Id, 5).Single();
                 Assert.IsTrue(lap.IsValid, lap.InvalidReason);
+                Assert.AreEqual(raceSession.Id, lap.SessionId);
+                Assert.AreEqual(raceSession, lap.SessionInfo);
                 Assert.IsTrue(lap.TotalSeconds > 60);
 
                 await WaitUntilAsync(

@@ -897,7 +897,7 @@ internal sealed partial class MainWindow : Window
 
     private UIElement LapAnalysisPage()
     {
-        var stack = PageStack("圈速分析", "选择赛道，对比已保存的圈速、分段和走线。");
+        var stack = PageStack("圈速分析", "按比赛整理圈记录，查看整场节奏或深入对比单圈。");
         var module = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
         var toolbar = BuildLapAnalysisToolbar(module, out var exportSelectedLaps,
             out var deleteSelectedLaps, out var deleteTrackLaps);
@@ -1010,7 +1010,7 @@ internal sealed partial class MainWindow : Window
                 ? module.VisibleLaps.Where(lap => lap.TrackId == trackId).ToArray()
                 : trackId == Guid.Empty
                     ? []
-                : store.LoadLapSummaries(trackId, LazyForzaStore.MaxLapsPerTrack).ToArray();
+                : store.LoadLapHistory(trackId).ToArray();
 
             var selectedTrackLaps = TrackLaps(selectedTrackIdForActions);
             HashSet<int> selectedClasses;
@@ -1188,171 +1188,45 @@ internal sealed partial class MainWindow : Window
                               activePerformanceClasses.Contains(lap.Vehicle.CarClass))
                 .OrderByDescending(lap => lap.StartedAt)
                 .ToArray();
-        selectedLapIds.RemoveWhere(id => comparableLaps.All(lap => lap.Id != id));
-        displayedLapIds.RemoveWhere(id => comparableLaps.All(lap => lap.Id != id));
-        if (displayedLapIds.Count == 0 && selectedLapIds.Count == 0 && comparableLaps.Length > 0)
-        {
-            var latest = comparableLaps.FirstOrDefault(lap => lap.IsValid) ?? comparableLaps[0];
-            selectedLapIds.Add(latest.Id);
-            displayedLapIds.Add(latest.Id);
-        }
-        exportSelectedLaps.IsEnabled = selectedLapIds.Count > 0;
-        if (deleteSelectedLapsButton is not null) deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
-        var comparisonHost = new StackPanel();
-        if (comparableLaps.Length > 0)
-        {
-            var bestLapIds = comparableLaps
-                .Where(lap => lap.IsValid)
-                .GroupBy(lap => lap.Vehicle.CarClass)
-                .Select(group => group
-                    .OrderBy(lap => lap.TotalSeconds)
-                    .ThenBy(lap => lap.StartedAt)
-                    .ThenBy(lap => lap.Id)
-                    .First().Id)
-                .ToHashSet();
-            var focusSessionId = module.HasCurrentCompetitionSession && comparableLaps.Any(lap => lap.SessionId == module.CurrentSessionId)
-                ? module.CurrentSessionId
-                : comparableLaps[0].SessionId;
-            var focusSessionLabel = module.HasCurrentCompetitionSession && focusSessionId == module.CurrentSessionId
-                ? AppLocalization.Literal("当前比赛")
-                : AppLocalization.Literal("最近一次比赛");
-            var savedTable = new Grid { Margin = new Thickness(4) };
-            foreach (var width in new[] { 40d, 110d, 100d, 125d })
-                savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
-            savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 140 });
-            AddSavedRow(0, null, "比赛范围", false, true);
-            for (var index = 0; index < comparableLaps.Length; index++)
-            {
-                var savedLap = comparableLaps[index];
-                var isHistoricalBest = savedLap.IsValid && bestLapIds.Contains(savedLap.Id);
-                AddSavedRow(index + 1, savedLap,
-                    savedLap.SessionId == focusSessionId ? focusSessionLabel : AppLocalization.Literal("历史比赛"),
-                    isHistoricalBest, false);
-            }
-            var savedStack = new StackPanel();
-            var lapLibrary = AnalysisDisclosure("选择对比圈", savedStack);
-            var savedHeader = new Grid();
-            savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var savedHeaderText = new StackPanel();
-            savedHeaderText.Children.Add(Label(AppLocalization.Format(
-                "lap.savedCount",
-                "已保存圈速 · {0}/50",
-                comparableLaps.Length), 16, FontWeights.SemiBold));
-            savedHeaderText.Children.Add(Label("勾选最多 4 圈，再加载图表；每个性能等级单独标记历史最快。", 11, FontWeights.Normal, "MutedBrush"));
-            savedHeader.Children.Add(savedHeaderText);
-            var displaySelectedLaps = new Button
-            {
-                Content = "查看对比",
-                Padding = new Thickness(14, 7, 14, 7),
-                Margin = new Thickness(16, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                IsEnabled = selectedLapIds.Count > 0,
-                ToolTip = "一次性加载当前勾选圈的速度与走线数据"
-            };
-            displaySelectedLaps.Click += (_, _) =>
-            {
-                displayedLapIds.Clear();
-                displayedLapIds.UnionWith(selectedLapIds);
-                lapLibrary.IsExpanded = false;
-                RenderComparisonVisuals();
-                comparisonHost.BringIntoView();
-            };
-            displaySelectedLapsButton = displaySelectedLaps;
-            Grid.SetColumn(displaySelectedLaps, 1);
-            savedHeader.Children.Add(displaySelectedLaps);
-            savedStack.Children.Add(savedHeader);
-            savedStack.Children.Add(new ScrollViewer
-            {
-                Content = savedTable, MaxHeight = 270, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 12, 0, 0)
-            });
-            savedStack.Margin = new Thickness(16, 0, 16, 16);
-            stack.Children.Add(lapLibrary);
-
-            void AddSavedRow(int row, LapSummary? selectableLap, string group, bool historicalBest, bool header)
-            {
-                var cells = header
-                    ? new[] { "", "圈速", "等级 / PI", "保存时间", "详情" }
-                    : new[]
-                    {
-                        string.Empty,
-                        AnalysisTime(selectableLap!.TotalSeconds, pointToPointTimingApproximate) + "\n" + AppLocalization.Literal(selectableLap.IsValid ? "有效" : "无效"),
-                        $"{PerformanceClassName(selectableLap.Vehicle.CarClass)} {selectableLap.Vehicle.PerformanceIndex}",
-                        selectableLap.StartedAt.ToLocalTime().ToString("MM-dd HH:mm"),
-                        PlayerCodeText(selectableLap.PlayerCode) + "\n" + string.Join("  ", selectableLap.Segments.Select(segment => $"S{segment.Index + 1} {AnalysisTime(segment.TimeSeconds, pointToPointTimingApproximate)}"))
-                    };
-                savedTable.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto, MinHeight = header ? 32 : 48 });
-                for (var column = 0; column < cells.Length; column++)
+        TabControl? archiveTabs = null;
+        archiveTabs = AnalysisTabs(
+            ("比赛记录", () => BuildLapSessionHistory(activeTrack,
+                activeTrack is null ? [] : module.VisibleLaps.Where(lap => lap.TrackId == activeTrack.Id &&
+                    lap.Direction == activeTrack.Direction && lap.SectorSchemaVersion == TrackAlgorithms.SectorSchemaVersion).ToArray(),
+                activePerformanceClasses, pointToPointTimingApproximate, lap =>
                 {
-                    UIElement cell;
-                    if (column == 0 && selectableLap is not null)
+                    selectedLapIds.Clear();
+                    displayedLapIds.Clear();
+                    selectedLapIds.Add(lap.Id);
+                    displayedLapIds.Add(lap.Id);
+                    if (!comparableLaps.Any(candidate => candidate.Id == lap.Id))
                     {
-                        var check = new CheckBox
-                        {
-                            IsChecked = selectedLapIds.Contains(selectableLap.Id),
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                            VerticalAlignment = VerticalAlignment.Center,
-                            ToolTip = "用于图表对比或批量删除"
-                        };
-                        check.Click += (_, _) =>
-                        {
-                            if (check.IsChecked == true)
-                            {
-                                if (selectedLapIds.Count >= 4)
-                                {
-                                    check.IsChecked = false;
-                                    AppDialog.Show(AppLocalization.Literal("一次最多比较 4 圈。"), AppLocalization.Literal("圈选择"), MessageBoxButton.OK, MessageBoxImage.Information);
-                                    return;
-                                }
-                                selectedLapIds.Add(selectableLap.Id);
-                            }
-                            else
-                            {
-                                selectedLapIds.Remove(selectableLap.Id);
-                            }
-                            if (deleteSelectedLapsButton is not null)
-                                deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
-                            exportSelectedLaps.IsEnabled = selectedLapIds.Count > 0;
-                            if (displaySelectedLapsButton is not null)
-                                displaySelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
-                        };
-                        cell = check;
+                        activePerformanceClasses.Add(lap.Vehicle.CarClass);
+                        lapAnalysisTabIndex = 1;
+                        RenderSelectedPage(true);
+                        return;
                     }
-                    else
-                    {
-                        string? brush = null;
-                        if (!header && column == 4) brush = "MutedBrush";
-                        if (!header && column == 1) brush = !selectableLap!.IsValid ? "DangerBrush" : historicalBest ? "PurpleBrush" : null;
-                        var textCell = Label(cells[column], header ? 12 : 11, header ? FontWeights.SemiBold : FontWeights.Normal, brush);
-                        if (column > 0)
-                        {
-                            textCell.TextWrapping = TextWrapping.NoWrap;
-                            textCell.TextTrimming = TextTrimming.CharacterEllipsis;
-                            if (!header) textCell.ToolTip = cells[column];
-                        }
-                        if (!header && column == 4)
-                        {
-                            textCell.ToolTip = AppLocalization.Format(
-                                "lap.playerCodeTooltip",
-                                "{0} · 玩家代号：{1}",
-                                AppLocalization.Literal(group),
-                                PlayerCodeText(selectableLap!.PlayerCode)) + "\n" + cells[column];
-                        }
-                        cell = textCell;
-                    }
-                    cell.SetValue(FrameworkElement.MarginProperty, new Thickness(8, 6, 8, 6));
-                    cell.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
-                    Grid.SetRow(cell, row);
-                    Grid.SetColumn(cell, column);
-                    savedTable.Children.Add(cell);
-                }
-            }
+                    var comparison = BuildComparisonPage();
+                    AppLocalization.ApplyTo(comparison);
+                    ((TabItem)archiveTabs!.Items[1]).Content = comparison;
+                    archiveTabs.SelectedIndex = 1;
+                })),
+            ("单圈对比", BuildComparisonPage));
+        archiveTabs.SelectedIndex = lapAnalysisTabIndex;
+        archiveTabs.SelectionChanged += (_, args) =>
+        {
+            if (!ReferenceEquals(args.Source, archiveTabs)) return;
+            lapAnalysisTabIndex = archiveTabs.SelectedIndex;
+            UpdateSelectionActions();
+        };
+        UpdateSelectionActions();
+        stack.Children.Add(archiveTabs);
+        void UpdateSelectionActions()
+        {
+            var active = archiveTabs.SelectedIndex == 1 && selectedLapIds.Count > 0;
+            exportSelectedLaps.IsEnabled = active;
+            deleteSelectedLaps.IsEnabled = active;
         }
-        stack.Children.Add(comparisonHost);
-        RenderComparisonVisuals();
-        if (activeTrack is not null)
-            stack.Children.Add(AnalysisDisclosure("如何阅读对比", Label(SectorColorClassifier.DatasetBestExplanation, 12, FontWeights.Normal, "MutedBrush")));
         var initialTrackId = module.CurrentTrack?.Id;
         var initialTrackTimingKind = module.CurrentTrack?.TimingKind;
         var initialCompletedLaps = hud.CompletedLaps;
@@ -1360,7 +1234,9 @@ internal sealed partial class MainWindow : Window
         {
             if (initialTrackId is Guid estateTrackId &&
                 initialTrackTimingKind == TrackTimingKind.EstateGeometry &&
-                store.LoadLapSummaries(estateTrackId, LazyForzaStore.MaxLapsPerTrack).Count != module.VisibleLaps.Count)
+                (store.CountLaps(estateTrackId) != module.VisibleLaps.Count ||
+                 store.LoadLapSummaries(estateTrackId, 1).LastOrDefault() is { } latest &&
+                 !module.VisibleLaps.Any(lap => lap.Id == latest.Id)))
             {
                 module.RefreshSelectedTrackHistory();
                 RenderSelectedPage(true);
@@ -1377,216 +1253,389 @@ internal sealed partial class MainWindow : Window
         refreshVisiblePage();
         return Scroll(stack);
 
+
         static string TrackAnalysisKind(TrackSummary summary) => summary.TimingKind == TrackTimingKind.EstateGeometry
             ? "地产环道"
             : summary.LayoutKind == TrackLayoutKind.PointToPoint
                 ? "定点"
                 : "环道";
 
-        void RenderComparisonVisuals()
+
+        UIElement BuildComparisonPage()
         {
-            comparisonHost.Children.Clear();
-            var selectedVisualLaps = comparableLaps
-                .Where(lap => displayedLapIds.Contains(lap.Id))
-                .OrderBy(lap => lap.StartedAt)
-                .Take(4)
-                .ToArray();
-            var singleLapPlan = selectedVisualLaps.Length == 1
-                ? LapComparisonPlanner.Resolve(selectedVisualLaps[0], comparableLaps)
-                : null;
-            var lapIdsToLoad = selectedVisualLaps
-                .Select(lap => lap.Id)
-                .ToList();
-            if (singleLapPlan?.ReferenceLap is { } referenceSummary &&
-                !lapIdsToLoad.Contains(referenceSummary.Id))
-                lapIdsToLoad.Add(referenceSummary.Id);
-            var loadedLaps = module.LoadLapDetails(lapIdsToLoad)
-                .Where(lap => lap.Samples.Count >= 2)
-                .ToArray();
-            var visualLaps = singleLapPlan is null
-                ? loadedLaps.OrderBy(lap => lap.StartedAt).ToArray()
-                : lapIdsToLoad
-                    .Select(id => loadedLaps.FirstOrDefault(lap => lap.Id == id))
-                    .Where(lap => lap is not null)
-                    .Cast<LapRecord>()
+            var comparisonPage = new StackPanel();
+            selectedLapIds.RemoveWhere(id => comparableLaps.All(lap => lap.Id != id));
+            displayedLapIds.RemoveWhere(id => comparableLaps.All(lap => lap.Id != id));
+            if (displayedLapIds.Count == 0 && selectedLapIds.Count == 0 && comparableLaps.Length > 0)
+            {
+                var latest = comparableLaps.FirstOrDefault(lap => lap.IsValid) ?? comparableLaps[0];
+                selectedLapIds.Add(latest.Id);
+                displayedLapIds.Add(latest.Id);
+            }
+            exportSelectedLaps.IsEnabled = selectedLapIds.Count > 0;
+            if (deleteSelectedLapsButton is not null) deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
+            var comparisonHost = new StackPanel();
+            if (comparableLaps.Length > 0)
+            {
+                var bestLapIds = comparableLaps
+                    .Where(lap => lap.IsValid)
+                    .GroupBy(lap => lap.Vehicle.CarClass)
+                    .Select(group => group
+                        .OrderBy(lap => lap.TotalSeconds)
+                        .ThenBy(lap => lap.StartedAt)
+                        .ThenBy(lap => lap.Id)
+                        .First().Id)
+                    .ToHashSet();
+                var focusSessionId = module.HasCurrentCompetitionSession && comparableLaps.Any(lap => lap.SessionId == module.CurrentSessionId)
+                    ? module.CurrentSessionId
+                    : comparableLaps[0].SessionId;
+                var focusSessionLabel = module.HasCurrentCompetitionSession && focusSessionId == module.CurrentSessionId
+                    ? AppLocalization.Literal("当前比赛")
+                    : AppLocalization.Literal("最近一次比赛");
+                var savedTable = new Grid { Margin = new Thickness(4) };
+                foreach (var width in new[] { 40d, 110d, 100d, 125d })
+                    savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
+                savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 140 });
+                AddSavedRow(0, null, "比赛范围", false, true);
+                for (var index = 0; index < comparableLaps.Length; index++)
+                {
+                    var savedLap = comparableLaps[index];
+                    var isHistoricalBest = savedLap.IsValid && bestLapIds.Contains(savedLap.Id);
+                    AddSavedRow(index + 1, savedLap,
+                        savedLap.SessionId == focusSessionId ? focusSessionLabel : AppLocalization.Literal("历史比赛"),
+                        isHistoricalBest, false);
+                }
+                var savedStack = new StackPanel();
+                var lapLibrary = AnalysisDisclosure("选择对比圈", savedStack);
+                var savedHeader = new Grid();
+                savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                savedHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var savedHeaderText = new StackPanel();
+                savedHeaderText.Children.Add(Label(AppLocalization.Format(
+                    "lap.savedTotal",
+                    "已保存圈速 · {0}",
+                    comparableLaps.Length), 16, FontWeights.SemiBold));
+                savedHeaderText.Children.Add(Label("勾选最多 4 圈，再加载图表；每个性能等级单独标记历史最快。", 11, FontWeights.Normal, "MutedBrush"));
+                savedHeader.Children.Add(savedHeaderText);
+                var displaySelectedLaps = new Button
+                {
+                    Content = "查看对比",
+                    Padding = new Thickness(14, 7, 14, 7),
+                    Margin = new Thickness(16, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    IsEnabled = selectedLapIds.Count > 0,
+                    ToolTip = "一次性加载当前勾选圈的速度与走线数据"
+                };
+                displaySelectedLaps.Click += (_, _) =>
+                {
+                    displayedLapIds.Clear();
+                    displayedLapIds.UnionWith(selectedLapIds);
+                    lapLibrary.IsExpanded = false;
+                    RenderComparisonVisuals();
+                    comparisonHost.BringIntoView();
+                };
+                displaySelectedLapsButton = displaySelectedLaps;
+                Grid.SetColumn(displaySelectedLaps, 1);
+                savedHeader.Children.Add(displaySelectedLaps);
+                savedStack.Children.Add(savedHeader);
+                savedStack.Children.Add(new ScrollViewer
+                {
+                    Content = savedTable, MaxHeight = 270, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 12, 0, 0)
+                });
+                savedStack.Margin = new Thickness(16, 0, 16, 16);
+                comparisonPage.Children.Add(lapLibrary);
+
+                void AddSavedRow(int row, LapSummary? selectableLap, string group, bool historicalBest, bool header)
+                {
+                    var cells = header
+                        ? new[] { "", "圈速", "等级 / PI", "保存时间", "详情" }
+                        : new[]
+                        {
+                            string.Empty,
+                            AnalysisTime(selectableLap!.TotalSeconds, pointToPointTimingApproximate) + "\n" + AppLocalization.Literal(selectableLap.IsValid ? "有效" : "无效"),
+                            $"{PerformanceClassName(selectableLap.Vehicle.CarClass)} {selectableLap.Vehicle.PerformanceIndex}",
+                            selectableLap.StartedAt.ToLocalTime().ToString("MM-dd HH:mm"),
+                            PlayerCodeText(selectableLap.PlayerCode) + "\n" + string.Join("  ", selectableLap.Segments.Select(segment => $"S{segment.Index + 1} {AnalysisTime(segment.TimeSeconds, pointToPointTimingApproximate)}"))
+                        };
+                    savedTable.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto, MinHeight = header ? 32 : 48 });
+                    for (var column = 0; column < cells.Length; column++)
+                    {
+                        UIElement cell;
+                        if (column == 0 && selectableLap is not null)
+                        {
+                            var check = new CheckBox
+                            {
+                                IsChecked = selectedLapIds.Contains(selectableLap.Id),
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                                VerticalAlignment = VerticalAlignment.Center,
+                                ToolTip = "用于图表对比或批量删除"
+                            };
+                            check.Click += (_, _) =>
+                            {
+                                if (check.IsChecked == true)
+                                {
+                                    if (selectedLapIds.Count >= 4)
+                                    {
+                                        check.IsChecked = false;
+                                        AppDialog.Show(AppLocalization.Literal("一次最多比较 4 圈。"), AppLocalization.Literal("圈选择"), MessageBoxButton.OK, MessageBoxImage.Information);
+                                        return;
+                                    }
+                                    selectedLapIds.Add(selectableLap.Id);
+                                }
+                                else
+                                {
+                                    selectedLapIds.Remove(selectableLap.Id);
+                                }
+                                if (deleteSelectedLapsButton is not null)
+                                    deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
+                                exportSelectedLaps.IsEnabled = selectedLapIds.Count > 0;
+                                if (displaySelectedLapsButton is not null)
+                                    displaySelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
+                            };
+                            cell = check;
+                        }
+                        else
+                        {
+                            string? brush = null;
+                            if (!header && column == 4) brush = "MutedBrush";
+                            if (!header && column == 1) brush = !selectableLap!.IsValid ? "DangerBrush" : historicalBest ? "PurpleBrush" : null;
+                            var textCell = Label(cells[column], header ? 12 : 11, header ? FontWeights.SemiBold : FontWeights.Normal, brush);
+                            if (column > 0)
+                            {
+                                textCell.TextWrapping = TextWrapping.NoWrap;
+                                textCell.TextTrimming = TextTrimming.CharacterEllipsis;
+                                if (!header) textCell.ToolTip = cells[column];
+                            }
+                            if (!header && column == 4)
+                            {
+                                textCell.ToolTip = AppLocalization.Format(
+                                    "lap.playerCodeTooltip",
+                                    "{0} · 玩家代号：{1}",
+                                    AppLocalization.Literal(group),
+                                    PlayerCodeText(selectableLap!.PlayerCode)) + "\n" + cells[column];
+                            }
+                            cell = textCell;
+                        }
+                        cell.SetValue(FrameworkElement.MarginProperty, new Thickness(8, 6, 8, 6));
+                        cell.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+                        Grid.SetRow(cell, row);
+                        Grid.SetColumn(cell, column);
+                        savedTable.Children.Add(cell);
+                    }
+                }
+            }
+            comparisonPage.Children.Add(comparisonHost);
+            RenderComparisonVisuals();
+            if (activeTrack is not null)
+                comparisonPage.Children.Add(AnalysisDisclosure("如何阅读对比", Label(SectorColorClassifier.DatasetBestExplanation, 12, FontWeights.Normal, "MutedBrush")));
+            return comparisonPage;
+
+            void RenderComparisonVisuals()
+            {
+                comparisonHost.Children.Clear();
+                var selectedVisualLaps = comparableLaps
+                    .Where(lap => displayedLapIds.Contains(lap.Id))
+                    .OrderBy(lap => lap.StartedAt)
+                    .Take(4)
                     .ToArray();
-            if (visualLaps.Length == 0)
-            {
-                comparisonHost.Children.Add(activeTrack is null
-                    ? module.HasCurrentCompetitionSession
-                        ? AnalysisEmptyState(hud.TrackName, AppLocalization.Literal(hud.Status))
-                        : AnalysisEmptyState("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。")
-                    : activePerformanceClasses.Count == 0
-                        ? AnalysisEmptyState("未选择性能等级", "选择至少一个性能等级。")
-                        : comparableLaps.Length > 0 && displayedLapIds.Count == 0
-                            ? selectedLapIds.Count == 0
-                                ? AnalysisEmptyState("未选择对比圈", "勾选最多 4 圈，再点击“查看对比”。")
-                                : AnalysisEmptyState("圈速已勾选", "点击“查看对比”加载速度曲线与走线。")
-                            : AnalysisEmptyState("暂无圈速", "完成对应等级的比赛后显示。"));
-                return;
+                var singleLapPlan = selectedVisualLaps.Length == 1
+                    ? LapComparisonPlanner.Resolve(selectedVisualLaps[0], comparableLaps)
+                    : null;
+                var lapIdsToLoad = selectedVisualLaps
+                    .Select(lap => lap.Id)
+                    .ToList();
+                if (singleLapPlan?.ReferenceLap is { } referenceSummary &&
+                    !lapIdsToLoad.Contains(referenceSummary.Id))
+                    lapIdsToLoad.Add(referenceSummary.Id);
+                var loadedLaps = module.LoadLapDetails(lapIdsToLoad)
+                    .Where(lap => lap.Samples.Count >= 2)
+                    .ToArray();
+                var visualLaps = singleLapPlan is null
+                    ? loadedLaps.OrderBy(lap => lap.StartedAt).ToArray()
+                    : lapIdsToLoad
+                        .Select(id => loadedLaps.FirstOrDefault(lap => lap.Id == id))
+                        .Where(lap => lap is not null)
+                        .Cast<LapRecord>()
+                        .ToArray();
+                if (visualLaps.Length == 0)
+                {
+                    comparisonHost.Children.Add(activeTrack is null
+                        ? module.HasCurrentCompetitionSession
+                            ? AnalysisEmptyState(hud.TrackName, AppLocalization.Literal(hud.Status))
+                            : AnalysisEmptyState("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。")
+                        : activePerformanceClasses.Count == 0
+                            ? AnalysisEmptyState("未选择性能等级", "选择至少一个性能等级。")
+                            : comparableLaps.Length > 0 && displayedLapIds.Count == 0
+                                ? selectedLapIds.Count == 0
+                                    ? AnalysisEmptyState("未选择对比圈", "勾选最多 4 圈，再点击“查看对比”。")
+                                    : AnalysisEmptyState("圈速已勾选", "点击“查看对比”加载速度曲线与走线。")
+                                : AnalysisEmptyState("暂无圈速", "完成对应等级的比赛后显示。"));
+                    return;
+                }
+
+                var previewStack = new StackPanel();
+                var legendEntries = new List<LapSeriesLegendEntry>(visualLaps.Length);
+                for (var index = 0; index < visualLaps.Length; index++)
+                {
+                    var lap = visualLaps[index];
+                    var pi = lap.Vehicle.PerformanceIndex >= 0 ? lap.Vehicle.PerformanceIndex.ToString() : "—";
+                    var role = singleLapPlan is null
+                        ? null
+                        : lap.Id == singleLapPlan.SelectedLap.Id
+                            ? singleLapPlan.Mode == SingleLapAnalysisMode.AnalyzePersonalBest
+                                ? AppLocalization.Literal("所选圈 · 同等级个人最快")
+                                : AppLocalization.Literal("所选圈")
+                            : AppLocalization.Literal("个人参考圈 · 同等级最快");
+                    legendEntries.Add(new LapSeriesLegendEntry(
+                        $"{AnalysisTime(lap.TotalSeconds, pointToPointTimingApproximate)}" +
+                        $"{(role is null ? string.Empty : $" · {role}")}",
+                        $"{PerformanceClassName(lap.Vehicle.CarClass)} {pi} · " +
+                        $"{lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss}" +
+                        $"{(lap.IsValid ? string.Empty : AppLocalization.Literal(" · 无效"))}"));
+                }
+
+                IReadOnlyList<CornerMapAnnotation> cornerAnnotations = [];
+                if (singleLapPlan is not null)
+                {
+                    var selectedDetail = visualLaps.FirstOrDefault(lap => lap.Id == singleLapPlan.SelectedLap.Id);
+                    var referenceDetail = singleLapPlan.ReferenceLap is null
+                        ? null
+                        : visualLaps.FirstOrDefault(lap => lap.Id == singleLapPlan.ReferenceLap.Id);
+                    if (selectedDetail is not null)
+                        cornerAnnotations = BuildCornerMapAnnotations(
+                            singleLapPlan,
+                            selectedDetail,
+                            referenceDetail,
+                            pointToPointTimingApproximate);
+                }
+
+                var visuals = new StackPanel();
+                var selectedDynamicsLayer = DrivingDynamicsLayer.Default;
+                var dynamicsLapId = singleLapPlan?.SelectedLap.Id ?? visualLaps[0].Id;
+                var linkedCursor = new LapAnalysisCursor();
+                var exportRow = new Grid();
+                exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var exportHint = Label(
+                    "遥测对比",
+                    17,
+                    FontWeights.SemiBold);
+                exportHint.VerticalAlignment = VerticalAlignment.Center;
+                exportRow.Children.Add(exportHint);
+                var exportPng = new Button
+                {
+                    Content = "导出 PNG",
+                    Padding = new Thickness(13, 7, 13, 7),
+                    Margin = new Thickness(12, 0, 0, 8),
+                    ToolTip = "导出固定尺寸的圈速分析图片"
+                };
+                exportPng.Click += (_, _) => ExportLapComparisonPng(
+                    activeTrack?.Name ?? hud.TrackName,
+                    activeTrack,
+                    visualLaps,
+                    legendEntries,
+                    cornerAnnotations,
+                    pointToPointTimingApproximate,
+                    selectedDynamicsLayer,
+                    dynamicsLapId);
+                Grid.SetColumn(exportPng, 1);
+                exportRow.Children.Add(exportPng);
+                visuals.Children.Add(exportRow);
+                var chartPanel = new Grid { Height = 320 };
+                chartPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                chartPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                var chartTitle = Label("速度 · km/h", 13, FontWeights.SemiBold);
+                chartTitle.Margin = new Thickness(0, 0, 0, 8);
+                chartPanel.Children.Add(chartTitle);
+                var chart = new LapTelemetryChart(
+                    visualLaps,
+                    activeTrack?.LengthMeters,
+                    legendEntries,
+                    linkedCursor);
+                Grid.SetRow(chart, 1);
+                chartPanel.Children.Add(chart);
+
+                var inputLap = visualLaps.First(lap => lap.Id == dynamicsLapId);
+                var inputPanel = new Grid { Height = 250 };
+                inputPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                inputPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                var inputTitle = Label(
+                    "油门 / 制动 / 方向",
+                    13,
+                    FontWeights.SemiBold);
+                inputTitle.Margin = new Thickness(0, 0, 0, 8);
+                inputPanel.Children.Add(inputTitle);
+                var inputChart = new LapInputChart(
+                    inputLap,
+                    activeTrack?.LengthMeters,
+                    linkedCursor);
+                Grid.SetRow(inputChart, 1);
+                inputPanel.Children.Add(inputChart);
+                var telemetryPanel = new StackPanel();
+                telemetryPanel.Children.Add(chartPanel);
+                inputPanel.Margin = new Thickness(0, 16, 0, 0);
+                inputPanel.Height = 190;
+                telemetryPanel.Children.Add(inputPanel);
+
+                var mapPanel = new Grid
+                {
+                    Height = LapAnalysisVisualLayout.AdaptiveMapHeight(
+                        ActualHeight > 0 ? ActualHeight : Height)
+                };
+                mapPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                mapPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                var mapHeader = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+                var mapTitle = Label(
+                    cornerAnnotations.Count == 0
+                        ? "滚轮缩放 · 拖动平移"
+                        : AppLocalization.Format(
+                            "analysis.map.cornerCount",
+                            "走线预览 · {0} 个弯角标记 · 悬停查看分析",
+                            cornerAnnotations.Count),
+                    13,
+                    FontWeights.SemiBold);
+                mapHeader.Children.Add(mapTitle);
+                mapPanel.Children.Add(mapHeader);
+                var mapSurface = new Grid();
+                var mapView = new TrackMapView(
+                    visualLaps,
+                    activeTrack,
+                    legendEntries,
+                    cornerAnnotations,
+                    dynamicsLapId,
+                    linkedCursor);
+                if (singleLapPlan is not null)
+                {
+                    var layerControls = DynamicsLayerControls(
+                        mapView,
+                        layer => selectedDynamicsLayer = layer);
+                    layerControls.Margin = new Thickness(0, 7, 0, 0);
+                    mapHeader.Children.Add(layerControls);
+                }
+                mapSurface.Children.Add(mapView);
+                mapSurface.Children.Add(MapDisplayControls(mapView));
+                Grid.SetRow(mapSurface, 1);
+                mapPanel.Children.Add(mapSurface);
+                void ResizeMap() =>
+                    mapPanel.Height = LapAnalysisVisualLayout.AdaptiveMapHeight(ActualHeight);
+                SizeChangedEventHandler resizeMap = (_, _) =>
+                    ResizeMap();
+                mapPanel.Loaded += (_, _) =>
+                {
+                    SizeChanged += resizeMap;
+                    ResizeMap();
+                };
+                mapPanel.Unloaded += (_, _) => SizeChanged -= resizeMap;
+                visuals.Children.Add(AnalysisTabs(
+                    ("曲线", () => telemetryPanel),
+                    ("走线", () => mapPanel),
+                    ("弯道", () => AnalysisBody(BuildManualCornerAnalysisCard(store, activeTrack,
+                        visualLaps.Where(lap => selectedVisualLaps.Any(summary => summary.Id == lap.Id)).ToArray(),
+                        (id, progress) => linkedCursor.Set(visuals, id, progress))))));
+                previewStack.Children.Add(AnalysisCard(visuals));
+                comparisonHost.Children.Add(previewStack);
             }
-
-            var previewStack = new StackPanel();
-            var legendEntries = new List<LapSeriesLegendEntry>(visualLaps.Length);
-            for (var index = 0; index < visualLaps.Length; index++)
-            {
-                var lap = visualLaps[index];
-                var pi = lap.Vehicle.PerformanceIndex >= 0 ? lap.Vehicle.PerformanceIndex.ToString() : "—";
-                var role = singleLapPlan is null
-                    ? null
-                    : lap.Id == singleLapPlan.SelectedLap.Id
-                        ? singleLapPlan.Mode == SingleLapAnalysisMode.AnalyzePersonalBest
-                            ? AppLocalization.Literal("所选圈 · 同等级个人最快")
-                            : AppLocalization.Literal("所选圈")
-                        : AppLocalization.Literal("个人参考圈 · 同等级最快");
-                legendEntries.Add(new LapSeriesLegendEntry(
-                    $"{AnalysisTime(lap.TotalSeconds, pointToPointTimingApproximate)}" +
-                    $"{(role is null ? string.Empty : $" · {role}")}",
-                    $"{PerformanceClassName(lap.Vehicle.CarClass)} {pi} · " +
-                    $"{lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss}" +
-                    $"{(lap.IsValid ? string.Empty : AppLocalization.Literal(" · 无效"))}"));
-            }
-
-            IReadOnlyList<CornerMapAnnotation> cornerAnnotations = [];
-            if (singleLapPlan is not null)
-            {
-                var selectedDetail = visualLaps.FirstOrDefault(lap => lap.Id == singleLapPlan.SelectedLap.Id);
-                var referenceDetail = singleLapPlan.ReferenceLap is null
-                    ? null
-                    : visualLaps.FirstOrDefault(lap => lap.Id == singleLapPlan.ReferenceLap.Id);
-                if (selectedDetail is not null)
-                    cornerAnnotations = BuildCornerMapAnnotations(
-                        singleLapPlan,
-                        selectedDetail,
-                        referenceDetail,
-                        pointToPointTimingApproximate);
-            }
-
-            var visuals = new StackPanel();
-            var selectedDynamicsLayer = DrivingDynamicsLayer.Default;
-            var dynamicsLapId = singleLapPlan?.SelectedLap.Id ?? visualLaps[0].Id;
-            var linkedCursor = new LapAnalysisCursor();
-            var exportRow = new Grid();
-            exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            exportRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var exportHint = Label(
-                "遥测对比",
-                17,
-                FontWeights.SemiBold);
-            exportHint.VerticalAlignment = VerticalAlignment.Center;
-            exportRow.Children.Add(exportHint);
-            var exportPng = new Button
-            {
-                Content = "导出 PNG",
-                Padding = new Thickness(13, 7, 13, 7),
-                Margin = new Thickness(12, 0, 0, 8),
-                ToolTip = "导出固定尺寸的圈速分析图片"
-            };
-            exportPng.Click += (_, _) => ExportLapComparisonPng(
-                activeTrack?.Name ?? hud.TrackName,
-                activeTrack,
-                visualLaps,
-                legendEntries,
-                cornerAnnotations,
-                pointToPointTimingApproximate,
-                selectedDynamicsLayer,
-                dynamicsLapId);
-            Grid.SetColumn(exportPng, 1);
-            exportRow.Children.Add(exportPng);
-            visuals.Children.Add(exportRow);
-            var chartPanel = new Grid { Height = 320 };
-            chartPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            chartPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            var chartTitle = Label("速度 · km/h", 13, FontWeights.SemiBold);
-            chartTitle.Margin = new Thickness(0, 0, 0, 8);
-            chartPanel.Children.Add(chartTitle);
-            var chart = new LapTelemetryChart(
-                visualLaps,
-                activeTrack?.LengthMeters,
-                legendEntries,
-                linkedCursor);
-            Grid.SetRow(chart, 1);
-            chartPanel.Children.Add(chart);
-
-            var inputLap = visualLaps.First(lap => lap.Id == dynamicsLapId);
-            var inputPanel = new Grid { Height = 250 };
-            inputPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            inputPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            var inputTitle = Label(
-                "油门 / 制动 / 方向",
-                13,
-                FontWeights.SemiBold);
-            inputTitle.Margin = new Thickness(0, 0, 0, 8);
-            inputPanel.Children.Add(inputTitle);
-            var inputChart = new LapInputChart(
-                inputLap,
-                activeTrack?.LengthMeters,
-                linkedCursor);
-            Grid.SetRow(inputChart, 1);
-            inputPanel.Children.Add(inputChart);
-            var telemetryPanel = new StackPanel();
-            telemetryPanel.Children.Add(chartPanel);
-            inputPanel.Margin = new Thickness(0, 16, 0, 0);
-            inputPanel.Height = 190;
-            telemetryPanel.Children.Add(inputPanel);
-
-            var mapPanel = new Grid
-            {
-                Height = LapAnalysisVisualLayout.AdaptiveMapHeight(
-                    ActualHeight > 0 ? ActualHeight : Height)
-            };
-            mapPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            mapPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            var mapHeader = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
-            var mapTitle = Label(
-                cornerAnnotations.Count == 0
-                    ? "滚轮缩放 · 拖动平移"
-                    : AppLocalization.Format(
-                        "analysis.map.cornerCount",
-                        "走线预览 · {0} 个弯角标记 · 悬停查看分析",
-                        cornerAnnotations.Count),
-                13,
-                FontWeights.SemiBold);
-            mapHeader.Children.Add(mapTitle);
-            mapPanel.Children.Add(mapHeader);
-            var mapSurface = new Grid();
-            var mapView = new TrackMapView(
-                visualLaps,
-                activeTrack,
-                legendEntries,
-                cornerAnnotations,
-                dynamicsLapId,
-                linkedCursor);
-            if (singleLapPlan is not null)
-            {
-                var layerControls = DynamicsLayerControls(
-                    mapView,
-                    layer => selectedDynamicsLayer = layer);
-                layerControls.Margin = new Thickness(0, 7, 0, 0);
-                mapHeader.Children.Add(layerControls);
-            }
-            mapSurface.Children.Add(mapView);
-            mapSurface.Children.Add(MapDisplayControls(mapView));
-            Grid.SetRow(mapSurface, 1);
-            mapPanel.Children.Add(mapSurface);
-            void ResizeMap() =>
-                mapPanel.Height = LapAnalysisVisualLayout.AdaptiveMapHeight(ActualHeight);
-            SizeChangedEventHandler resizeMap = (_, _) =>
-                ResizeMap();
-            mapPanel.Loaded += (_, _) =>
-            {
-                SizeChanged += resizeMap;
-                ResizeMap();
-            };
-            mapPanel.Unloaded += (_, _) => SizeChanged -= resizeMap;
-            visuals.Children.Add(AnalysisTabs(
-                ("曲线", () => telemetryPanel),
-                ("走线", () => mapPanel),
-                ("弯道", () => AnalysisBody(BuildManualCornerAnalysisCard(store, activeTrack,
-                    visualLaps.Where(lap => selectedVisualLaps.Any(summary => summary.Id == lap.Id)).ToArray(),
-                    (id, progress) => linkedCursor.Set(visuals, id, progress))))));
-            previewStack.Children.Add(AnalysisCard(visuals));
-            comparisonHost.Children.Add(previewStack);
         }
     }
 

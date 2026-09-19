@@ -40,7 +40,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 圈速对比、赛后复盘和回放工作台支持手动弯道分析：在走线预览上依次点击起点和终点，高亮所选区间，也可输入距离微调，再选择另一条已记录的有效参考圈。走线支持滚轮缩放、拖动平移和双击复位。按赛道距离比较区间耗时、制动起点、最低速度及恢复油门位置；最多显示三条中文差异说明，点击即可定位曲线。区间标记保存在本机，每个赛道版本最多 32 个；跨终点弯请拆成两段。
 
-圈速分析默认打开最近有效圈，通过「选择对比圈」切换最多四圈。「曲线」「走线」「弯道」使用统一页签；导入、导出和记录管理常驻页面顶部，实时分段集中在「当前比赛」显示。回放的播放、时间轴与读数集中显示；弯道编辑收起后保留草稿，切换视图仍保持距离游标联动。
+圈速分析默认按比赛整理记录。地产练习、排位、正赛和独立计时分别归档，普通地图按本地识别的比赛会话归档；选择场次可查看记录总用时、典型圈速、波动和逐圈节奏，再打开某圈深入分析。「单圈对比」通过「选择对比圈」切换最多四圈。每条赛道按 50 个完整场次保留记录，优先保留各性能等级最快圈所在场次。旧记录按已有会话整理，缺失圈不会补全；记录总用时不包含缺失圈和服务端处罚。「曲线」「走线」「弯道」使用统一页签；导入、导出和记录管理常驻页面顶部，实时分段集中在「当前比赛」显示。回放的播放、时间轴与读数集中显示；弯道编辑收起后保留草稿，切换视图仍保持距离游标联动。
 
 弯道比较要求路线修订、方向、分段版本及车辆条件兼容。旧圈缺少路线修订或完整车辆信息时仍可查看和回放；样本充分的区间提供差异说明，其余位置显示缺失原因。说明描述已记录的操作与耗时差异；判断原因还需结合调校、天气等条件。
 
@@ -163,7 +163,7 @@ Track identification accommodates rear grid positions and waits for route diverg
 
 Lap comparison, post-race review and the replay workbench support manually marked corner intervals. Click the start and end points on the racing-line preview, fine-tune the distances if needed, and choose another recorded valid reference lap. Zoom with the wheel, drag to pan and double-click to reset. Compare interval time, brake onset, minimum speed and throttle recovery position on the same distance axis. Up to three localized observations link to the curves. Up to 32 intervals are saved locally per track revision; split intervals that cross the finish line.
 
-Lap analysis opens the latest valid lap by default; expand “Choose laps to compare” to compare up to four. Charts, racing lines and corners share a consistent tab layout, with import, export and record management near the top. Live sectors are shown in Current race. Replay groups playback controls, the timeline and readouts together. Collapsing the corner editor preserves its draft, and switching views keeps the distance cursor linked.
+Lap analysis groups saved laps into sessions by default. Estate practice, qualifying, races and solo timing are kept separate; ordinary maps use locally detected game sessions. Select a session to review recorded time, typical pace, variation and lap-by-lap progress, then inspect an individual lap. In Lap comparison, expand “Choose laps to compare” to compare up to four. Each track retains up to 50 complete sessions, prioritizing sessions containing the best lap in each performance class. Older records use their existing session IDs; missing laps are not reconstructed, and recorded time excludes missing laps and server penalties. Charts, racing lines and corners share a consistent tab layout, with import, export and record management near the top. Live sectors are shown in Current race. Replay groups playback controls, the timeline and readouts together. Collapsing the corner editor preserves its draft, and switching views keeps the distance cursor linked.
 
 Corner comparisons require compatible route revisions, directions, sector versions and vehicle conditions. Older laps remain viewable and replayable. Intervals with sufficient samples provide observations; other intervals explain the missing evidence. Observations describe recorded inputs and time differences; interpreting causes also requires considering tune, weather and other conditions.
 

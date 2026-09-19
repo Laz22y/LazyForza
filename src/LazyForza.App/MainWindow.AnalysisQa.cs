@@ -26,11 +26,11 @@ internal sealed partial class MainWindow
         var sectors = TrackAlgorithms.CreateSectors(track);
         store.SaveTrack(track, sectors);
         var vehicle = new VehicleProfileFingerprint(6001, 5, 850, 2, 8, 8000, "qa", "qa");
-        var session = Guid.NewGuid();
-        var laps = Enumerable.Range(0, 6).Select(index =>
+        var sessions = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
+        var laps = Enumerable.Range(0, 18).Select(index =>
         {
             var total = 86.21 + index * .39;
-            return new LapRecord(Guid.NewGuid(), track.Id, track.Direction, TrackAlgorithms.SectorSchemaVersion, session,
+            return new LapRecord(Guid.NewGuid(), track.Id, track.Direction, TrackAlgorithms.SectorSchemaVersion, sessions[index / 6],
                 vehicle, DateTimeOffset.Now.AddMinutes(-30 + index * 2), total, true, null,
                 sectors.Select(sector => new LapSegment(sector.Index, total * (sector.EndS - sector.StartS) / track.LengthMeters, true)).ToArray(),
                 track.Points.Select(point =>
@@ -41,9 +41,27 @@ internal sealed partial class MainWindow
                         Math.Clamp(.6 + Math.Cos(phase + .5), 0, 1), Math.Clamp(-Math.Sin(phase + .1) - .5, 0, 1),
                         0, point.X, point.Y, point.Z)
                     { Dynamics = new LapDynamics(Math.Sin(phase) * .25, default, default, new WheelValues(.1f, .15f, .1f, .15f)) };
-                }).ToArray()) { TrackRevision = LapTrackRevision.Create(track), PlayerCode = "DRIVER 07" };
+                }).ToArray()) { TrackRevision = LapTrackRevision.Create(track), PlayerCode = "DRIVER 07", SessionInfo = new LapSessionInfo(sessions[index / 6], LapSessionKind.GameRace) };
         }).ToArray();
         foreach (var lap in laps) store.SaveLap(lap);
+        var estateTrack = track with { Id = Guid.NewGuid(), Name = "Estate Endurance", TimingKind = TrackTimingKind.EstateGeometry };
+        store.SaveTrack(estateTrack, sectors.Select(sector => sector with { TrackId = estateTrack.Id }).ToArray(),
+            new EstateTrackDefinition(estateTrack.Id, estateTrack.Name, "QA", null, "1",
+                new EstateTimingGate(new EstateGatePoint(475, 0, 0), new EstateGatePoint(485, 0, 0), 0, 1, 0, 0, 0),
+                [], null, 90, 90, 1, estateTrack.CreatedAt, estateTrack.UpdatedAt));
+        for (var index = 0; index < 72; index++)
+        {
+            var stage = index < 6 ? 0 : index < 12 ? 1 : 2;
+            store.SaveLap(laps[index % laps.Length] with
+            {
+                Id = Guid.NewGuid(), TrackId = estateTrack.Id, SessionId = sessions[stage],
+                TrackRevision = LapTrackRevision.Create(estateTrack),
+                StartedAt = DateTimeOffset.Now.AddHours(-6).AddMinutes(index * 2),
+                IsValid = index % 11 != 3, InvalidReason = index % 11 == 3 ? "QA sample" : null,
+                SessionInfo = new LapSessionInfo(sessions[stage], stage == 0 ? LapSessionKind.EstatePractice :
+                    stage == 1 ? LapSessionKind.EstateQualifying : LapSessionKind.EstateRace, "Weekend Endurance", stage < 2 ? 1 : 0)
+            });
+        }
         store.SetAppSetting($"cornerAnalysis.v1.{track.Id:N}.{track.Direction}.{TrackAlgorithms.SectorSchemaVersion}.{LapTrackRevision.Create(track)}",
             JsonSerializer.Serialize(new[] { new ManualCorner("T1", 100, 420), new ManualCorner("T2", 760, 1100) }));
         module.SelectTrack(track.Id);
@@ -57,6 +75,7 @@ internal sealed partial class MainWindow
         {
             Width = width;
             Height = height;
+            lapAnalysisTabIndex = 0;
             module.ClearTrackSelection();
             navigation.SelectedIndex = 4;
             RenderSelectedPage();
@@ -69,6 +88,33 @@ internal sealed partial class MainWindow
                 await Capture(page, "overview");
                 if (page == 4)
                 {
+                    var archive = Descendants<TabControl>(content).First();
+                    var picker = Descendants<ComboBox>(content).Last();
+                    if (picker.Items.Count != 3) throw new InvalidOperationException("Expected three grouped race sessions.");
+                    picker.SelectedIndex = 1;
+                    await Capture(page, "other-session");
+                    module.SelectTrack(estateTrack.Id);
+                    RenderSelectedPage();
+                    await Capture(page, "estate-session");
+                    Descendants<SessionPaceChart>(content).Single().BringIntoView();
+                    await Capture(page, "estate-pace");
+                    var records = Descendants<ListBox>(content).Single();
+                    if (records.Items.Count != 60) throw new InvalidOperationException("The complete 60-lap race must be visible.");
+                    records.SelectedIndex = 59;
+                    records.ScrollIntoView(records.SelectedItem);
+                    records.BringIntoView();
+                    await Capture(page, "estate-records");
+                    Descendants<Button>(content).Single(button => Equals(button.Content, AppLocalization.Literal("分析所选圈")))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    if (selectedLapIds.Single() != ((SessionLapRow)records.SelectedItem).Lap.Id)
+                        throw new InvalidOperationException("Inspecting a race lap selected the wrong lap.");
+                    await Capture(page, "estate-inspect");
+                    module.SelectTrack(track.Id);
+                    lapAnalysisTabIndex = 0;
+                    RenderSelectedPage();
+                    archive = Descendants<TabControl>(content).First();
+                    archive.SelectedIndex = 1;
+                    await Capture(page, "lap-comparison");
                     var library = Descendants<Expander>(content).First(e => e.Header is TextBlock title && title.Text == AppLocalization.Literal("选择对比圈"));
                     library.IsExpanded = true;
                     await Capture(page, "lap-picker");
@@ -89,7 +135,7 @@ internal sealed partial class MainWindow
                     if (seek.Value != paused) throw new InvalidOperationException("Replay continued after pausing.");
                     await Capture(page, "paused");
                 }
-                var tabs = Descendants<TabControl>(content).FirstOrDefault();
+                var tabs = Descendants<TabControl>(content).LastOrDefault();
                 if (tabs is null) continue;
                 tabs.SelectedIndex = 1;
                 tabs.BringIntoView();
