@@ -817,22 +817,19 @@ internal static class BuiltInModuleCatalog
                 estate.ActiveSectorCount,
                 identity?.TrackFingerprintSha256,
                 estate.ActiveSectors);
-        }, (trackId, enabled, invalidateLapOnDriverIntervention) =>
-        {
-            if (enabled)
-            {
-                if (!estate.State.IsTimingActive)
-                    estate.StartTiming(trackId, invalidateLapOnDriverIntervention);
-                else
-                    estate.SetEstateRaceInterventionInvalidation(invalidateLapOnDriverIntervention);
-            }
-            else
-                estate.PauseTimingForEstateRace();
-        },
+        }, null,
+
         () => dashboard.Learning.Fingerprint,
         track => store.LoadEstateStrategySamples(track),
         sample => store.SaveEstateStrategySample(sample),
-        PlayerCode);
+        PlayerCode,
+        sessionTimingControl: (trackId, enabled, invalidate, info) =>
+        {
+            if (!enabled) estate.PauseTimingForEstateRace();
+            else if (!estate.State.IsTimingActive || estate.AnalysisSessionId != info?.Id)
+                estate.StartTiming(trackId, invalidate, info);
+            else estate.SetEstateRaceInterventionInvalidation(invalidate);
+        });
         return
         [
             dashboard,

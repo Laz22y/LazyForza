@@ -186,6 +186,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     private int completedLaps;
     private double? lastLapSeconds;
     private Guid timingSessionId;
+    private LapSessionInfo? timingSessionInfo;
     private DateTimeOffset? lastTelemetryArrival;
     private long minimumAcceptedFrameSequence = long.MinValue;
     private DateTimeOffset minimumAcceptedFrameArrival = DateTimeOffset.MinValue;
@@ -986,7 +987,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lock (stateGate) ResetAll("已取消地产环道录入。");
     }
 
-    public void StartTiming(Guid trackId, bool invalidateLapOnDriverIntervention = true)
+    public void StartTiming(Guid trackId, bool invalidateLapOnDriverIntervention = true, LapSessionInfo? sessionInfo = null)
     {
         lock (stateGate)
         {
@@ -1017,7 +1018,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             };
             PreparePitTimingGeometry(activeDefinition.Pit);
             activeSectors = loaded.Sectors;
-            timingSessionId = Guid.NewGuid();
+            timingSessionId = sessionInfo?.Id ?? Guid.NewGuid();
+            timingSessionInfo = sessionInfo ?? new LapSessionInfo(timingSessionId, LapSessionKind.EstateTiming);
             invalidateCurrentLapOnDriverIntervention = invalidateLapOnDriverIntervention;
             ReloadTimingHistory();
             completedLaps = 0;
@@ -1033,6 +1035,8 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
                 timingActive: true);
         }
     }
+
+    public Guid AnalysisSessionId { get { lock (stateGate) return timingSessionId; } }
 
     public void StopTiming()
     {
@@ -1364,7 +1368,11 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
             invalidReason,
             BuildSegments(total, samples),
             samples,
-            PlayerIdentitySettings.Normalize(playerCodeProvider())) { TrackRevision = LapTrackRevision.Create(activeTrack) };
+            PlayerIdentitySettings.Normalize(playerCodeProvider()))
+        {
+            TrackRevision = LapTrackRevision.Create(activeTrack),
+            SessionInfo = timingSessionInfo
+        };
         store.SaveLap(lap);
         lastCompletedLap = new EstateCircuitCompletedLap(
             lap.Id,
@@ -1924,7 +1932,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
     {
         timingHistory.Clear();
         if (activeTrack is not null)
-            timingHistory.AddRange(store.LoadLapSummaries(activeTrack.Id, LazyForzaStore.MaxLapsPerTrack));
+            timingHistory.AddRange(store.LoadLapHistory(activeTrack.Id));
     }
 
     private int CurrentSector()
@@ -1994,6 +2002,7 @@ public sealed class EstateCircuitModule : LazyForzaModuleBase, IHudContribution
         lastCompletedLap = null;
         timingHistory.Clear();
         timingSessionId = Guid.Empty;
+        timingSessionInfo = null;
         invalidateCurrentLapOnDriverIntervention = true;
         telemetryInterruptionActive = false;
         lastTelemetryArrival = null;

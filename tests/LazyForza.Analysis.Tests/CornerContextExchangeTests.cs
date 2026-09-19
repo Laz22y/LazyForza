@@ -18,17 +18,21 @@ public sealed class CornerContextExchangeTests
             var samples = Enumerable.Range(0, 25).Select(i => new LapSample(i * 5, i * .1, 50, 5000, 3, .8, 0, 0, i * 5, 0, 0)).ToArray();
             var vehicle = new VehicleProfileFingerprint(123, 5, 850, 2, 8, 8000, "learning", "learning");
             var lap = new LapRecord(Guid.NewGuid(), Guid.NewGuid(), 1, TrackAlgorithms.SectorSchemaVersion,
-                Guid.NewGuid(), vehicle, DateTimeOffset.UtcNow, 2.4, true, null, [], samples) { TrackRevision = "track-v1:test" };
+                Guid.NewGuid(), vehicle, DateTimeOffset.UtcNow, 2.4, true, null, [], samples) { TrackRevision = "track-v1:test", SessionInfo = new LapSessionInfo(Guid.NewGuid(), LapSessionKind.EstateRace, "Race") };
             await LapAnalysisExchangeFile.WriteAsync(exchange, lap.TrackId, "track", 1, lap.SectorSchemaVersion, null, [lap], CancellationToken.None);
             var loaded = (await LapAnalysisExchangeFile.ReadAsync(exchange, CancellationToken.None)).Laps.Single();
             Assert.AreEqual(lap.TrackRevision, loaded.TrackRevision);
+            Assert.AreEqual(lap.SessionInfo, loaded.SessionInfo);
             Assert.AreEqual(vehicle, loaded.Vehicle);
             await SingleLapTelemetryRecordingFile.WriteAsync(recording, "track", lap, CancellationToken.None);
             var replay = await SingleLapTelemetryRecordingFile.TryReadAsync(recording, CancellationToken.None);
             Assert.AreEqual(lap.TrackRevision, replay!.Lap.TrackRevision);
+            Assert.AreEqual(lap.SessionInfo, replay.Lap.SessionInfo);
             Assert.AreEqual(vehicle, replay.Lap.Vehicle);
             var legacy = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(lap))!.AsObject();
             legacy.Remove("TrackRevision");
+            legacy.Remove("SessionInfo");
+            Assert.IsNull(JsonSerializer.Deserialize<LapRecord>(legacy.ToJsonString())!.SessionInfo);
             Assert.IsNull(JsonSerializer.Deserialize<LapRecord>(legacy.ToJsonString())!.TrackRevision);
             Assert.AreEqual(lap.TrackRevision, LapSummary.FromRecord(lap).WithSamples(samples).TrackRevision);
         }

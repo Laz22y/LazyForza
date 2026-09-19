@@ -34,6 +34,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private static readonly TimeSpan ReconnectStabilityWindow = TimeSpan.FromSeconds(15);
     private readonly Func<EstateRaceTrackContext?> trackContext;
     private readonly Action<Guid, bool, bool>? timingControl;
+    private readonly Action<Guid, bool, bool, LapSessionInfo?>? sessionTimingControl;
+    private LapSessionInfo? analysisSession;
+    private Guid? appliedAnalysisSessionId;
     private readonly Func<VehicleProfileFingerprint?>? vehicleFingerprint;
     private readonly Func<EstateStrategyTrackIdentity, IReadOnlyList<EstateStrategySample>>? strategySampleLoader;
     private readonly Action<EstateStrategySample>? strategySampleSaver;
@@ -124,7 +127,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         Func<VehicleProfileFingerprint?>? vehicleFingerprint = null,
         Func<EstateStrategyTrackIdentity, IReadOnlyList<EstateStrategySample>>? strategySampleLoader = null,
         Action<EstateStrategySample>? strategySampleSaver = null,
-        Func<string?>? defaultDisplayNameProvider = null)
+        Func<string?>? defaultDisplayNameProvider = null,
+        Action<Guid, bool, bool, LapSessionInfo?>? sessionTimingControl = null)
         : base(new ModuleDescriptor(
             ModuleId,
             "地产赛事",
@@ -137,6 +141,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     {
         this.trackContext = trackContext;
         this.timingControl = timingControl;
+        this.sessionTimingControl = sessionTimingControl;
         this.vehicleFingerprint = vehicleFingerprint;
         this.strategySampleLoader = strategySampleLoader;
         this.strategySampleSaver = strategySampleSaver;
@@ -1589,8 +1594,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         lastRaceEventId = value.EventId;
         lock (lapEventSync)
         {
-            if (lapSendQueue.ApplySession(value, resetForConnection))
+            var changed = lapSendQueue.ApplySession(value, resetForConnection);
+            if (changed)
                 sentLapEventId = trackContext()?.LastCompletedLap?.EventId;
+            analysisSession = EstateAnalysisSession.Resolve(value, participantId, analysisSession, changed);
         }
         var qualifyingSessionBoundary = value.Phase == RaceSessionPhase.Qualifying &&
                                         lastSessionPhase == RaceSessionPhase.Qualifying &&
@@ -1828,8 +1835,11 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         if (context is null) return;
         var invalidateLapOnDriverIntervention = ShouldInvalidateLapOnDriverIntervention(session);
         if (raceTimingEnabled == enabled && context.IsTimingActive == enabled &&
-            raceTimingInvalidatesLapOnDriverIntervention == invalidateLapOnDriverIntervention) return;
+            raceTimingInvalidatesLapOnDriverIntervention == invalidateLapOnDriverIntervention &&
+            (!enabled || appliedAnalysisSessionId == analysisSession?.Id)) return;
         timingControl?.Invoke(context.Definition.TrackId, enabled, invalidateLapOnDriverIntervention);
+        sessionTimingControl?.Invoke(context.Definition.TrackId, enabled, invalidateLapOnDriverIntervention, analysisSession);
+        appliedAnalysisSessionId = enabled ? analysisSession?.Id : null;
         raceTimingEnabled = enabled;
         raceTimingInvalidatesLapOnDriverIntervention = invalidateLapOnDriverIntervention;
         if (!enabled) sentLapEventId = context.LastCompletedLap?.EventId;

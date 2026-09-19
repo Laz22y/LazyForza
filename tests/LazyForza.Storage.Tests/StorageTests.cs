@@ -69,7 +69,7 @@ public sealed class StorageTests
                 raw.Execute("ALTER TABLE Laps DROP COLUMN TrackRevision; ALTER TABLE Laps DROP COLUMN VehicleSnapshot; UPDATE SchemaVersion SET Version=12;");
             using (var migrated = new LazyForzaStore(path))
             {
-                Assert.AreEqual(13, migrated.SchemaVersion);
+                Assert.AreEqual(LazyForzaStore.CurrentSchemaVersion, migrated.SchemaVersion);
                 var old = migrated.LoadLap(lap.Id)!;
                 Assert.AreEqual(lap.TotalSeconds, old.TotalSeconds);
                 Assert.HasCount(1, old.Samples);
@@ -151,8 +151,8 @@ public sealed class StorageTests
         {
             using var first = new LazyForzaStore(firstPath);
             using var second = new LazyForzaStore(secondPath);
-            Assert.AreEqual(13, first.SchemaVersion);
-            Assert.AreEqual(13, second.SchemaVersion);
+            Assert.AreEqual(LazyForzaStore.CurrentSchemaVersion, first.SchemaVersion);
+            Assert.AreEqual(LazyForzaStore.CurrentSchemaVersion, second.SchemaVersion);
             await first.SetAsync("dashboard", "enabled", "True", CancellationToken.None);
             Assert.AreEqual("True", await first.GetAsync("dashboard", "enabled", CancellationToken.None));
             Assert.IsNull(await second.GetAsync("dashboard", "enabled", CancellationToken.None));
@@ -312,7 +312,7 @@ public sealed class StorageTests
         try
         {
             using (var initialized = new LazyForzaStore(path))
-                Assert.AreEqual(13, initialized.SchemaVersion);
+                Assert.AreEqual(LazyForzaStore.CurrentSchemaVersion, initialized.SchemaVersion);
 
             using (var raw = new WinSqliteDatabase(path))
             {
@@ -331,7 +331,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(13, migrated.SchemaVersion);
+            Assert.AreEqual(LazyForzaStore.CurrentSchemaVersion, migrated.SchemaVersion);
             var profile = migrated.ListVehicleProfiles().Single();
             Assert.AreEqual("2014 Alfa Romeo 4C", profile.CustomName);
             Assert.IsFalse(profile.ShiftRecommendationsEnabled);
@@ -421,7 +421,7 @@ public sealed class StorageTests
 
             using (var store = new LazyForzaStore(path))
             {
-                Assert.AreEqual(13, store.SchemaVersion);
+                Assert.AreEqual(LazyForzaStore.CurrentSchemaVersion, store.SchemaVersion);
                 var databaseField = typeof(LazyForzaStore).GetField(
                     "database",
                     System.Reflection.BindingFlags.Instance |
@@ -588,7 +588,7 @@ public sealed class StorageTests
             }
 
             using var migrated = new LazyForzaStore(path);
-            Assert.AreEqual(13, migrated.SchemaVersion);
+            Assert.AreEqual(LazyForzaStore.CurrentSchemaVersion, migrated.SchemaVersion);
             var migratedField = typeof(LazyForzaStore).GetField(
                 "database",
                 System.Reflection.BindingFlags.Instance |

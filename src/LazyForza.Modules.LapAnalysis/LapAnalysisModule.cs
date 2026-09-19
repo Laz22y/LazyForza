@@ -1363,7 +1363,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 lapProjectionValid ? "sector-coverage-incomplete" : $"projection-low-confidence ({projectionRatio:P0})",
             times,
             persistedSamples,
-            PlayerIdentitySettings.Normalize(playerCodeProvider())) { TrackRevision = LapTrackRevision.Create(track) };
+            PlayerIdentitySettings.Normalize(playerCodeProvider()))
+        {
+            TrackRevision = LapTrackRevision.Create(track),
+            SessionInfo = new LapSessionInfo(sessionId, LapSessionKind.GameRace)
+        };
         RegisterVisibleLap(lap);
         QueuePersistence(LapPersistenceCommand.Save(lap));
         LogIfInitialized(
@@ -1547,7 +1551,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         }
         if (trackLaps.Length == 0)
         {
-            trackLaps = store.LoadLapSummaries(trackId, LazyForzaStore.MaxLapsPerTrack).ToArray();
+            trackLaps = store.LoadLapHistory(trackId).ToArray();
         }
 
         var targetedLaps = trackLaps
@@ -2190,7 +2194,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     private void ReloadVisibleLaps()
     {
-        var loaded = track is null ? [] : store.LoadLapSummaries(track.Id, LazyForzaStore.MaxLapsPerTrack);
+        var loaded = track is null ? [] : store.LoadLapHistory(track.Id);
         lock (lapGate)
         {
             visibleLaps.Clear();
@@ -2233,25 +2237,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             visibleLapDetails[lap.Id] = lap;
             TrimVisibleLapDetails();
             visibleLaps.Sort((left, right) => left.StartedAt.CompareTo(right.StartedAt));
-            if (visibleLaps.Count <= LazyForzaStore.MaxLapsPerTrack) return;
-
-            var keep = new HashSet<Guid>();
-            foreach (var historicalBest in visibleLaps
-                         .Where(candidate => candidate.IsValid)
-                         .GroupBy(candidate => candidate.Vehicle.CarClass)
-                         .Select(group => group
-                             .OrderBy(candidate => candidate.TotalSeconds)
-                             .ThenBy(candidate => candidate.StartedAt)
-                             .ThenBy(candidate => candidate.Id)
-                             .First().Id))
-            {
-                keep.Add(historicalBest);
-            }
-            foreach (var candidate in visibleLaps.OrderByDescending(candidate => candidate.StartedAt))
-            {
-                if (keep.Count >= LazyForzaStore.MaxLapsPerTrack) break;
-                keep.Add(candidate.Id);
-            }
+            var keep = LazyForzaStore.SelectRetainedLapIds(visibleLaps);
             visibleLaps.RemoveAll(candidate => !keep.Contains(candidate.Id));
             foreach (var lapId in visibleLapDetails.Keys.Where(id => !keep.Contains(id)).ToArray())
                 visibleLapDetails.Remove(lapId);

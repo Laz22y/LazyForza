@@ -12,7 +12,9 @@ namespace LazyForza.Storage.Tests;
 public sealed class DataBackupTests
 {
     [TestMethod]
-    public void SchemaTwelvePortableBackupKeepsOldLapsWithoutInventingNewContext()
+    [DataRow(12, 3)]
+    [DataRow(13, 1)]
+    public void LegacyPortableBackupKeepsOldLapsWithoutInventingNewContext(int schemaVersion, int removedColumns)
     {
         var sourcePath = TempPath(".db");
         var destinationPath = TempPath(".db");
@@ -41,15 +43,15 @@ public sealed class DataBackupTests
                 var data = Read("data.json");
                 var laps = data["tables"]!.AsArray().Single(table => table!["name"]!.GetValue<string>() == "Laps")!;
                 var columns = laps["columns"]!.AsArray();
-                for (var i = 0; i < 2; i++) columns.RemoveAt(columns.Count - 1);
+                for (var i = 0; i < removedColumns; i++) columns.RemoveAt(columns.Count - 1);
                 foreach (var row in laps["rows"]!.AsArray())
                 {
                     var values = row!.AsArray();
-                    values.RemoveAt(values.Count - 1); values.RemoveAt(values.Count - 1);
+                    for (var i = 0; i < removedColumns; i++) values.RemoveAt(values.Count - 1);
                 }
                 var bytes = Encoding.UTF8.GetBytes(data.ToJsonString());
                 var manifest = Read("manifest.json");
-                manifest["schemaVersion"] = 12;
+                manifest["schemaVersion"] = schemaVersion;
                 manifest["files"]!["data.json"] = Convert.ToHexString(SHA256.HashData(bytes));
                 Write("data.json", bytes);
                 Write("manifest.json", Encoding.UTF8.GetBytes(manifest.ToJsonString()));
@@ -58,8 +60,9 @@ public sealed class DataBackupTests
             new DataBackupService(destination, "test").Import(backupPath, BackupImportMode.Merge);
             var lap = destination.LoadLap(lapId)!;
             Assert.HasCount(24, lap.Samples);
-            Assert.IsNull(lap.TrackRevision);
-            Assert.AreEqual(-1, lap.Vehicle.DrivetrainType);
+            if (schemaVersion == 12) Assert.IsNull(lap.TrackRevision);
+            Assert.IsNull(lap.SessionInfo);
+            if (schemaVersion == 12) Assert.AreEqual(-1, lap.Vehicle.DrivetrainType);
         }
         finally
         {
