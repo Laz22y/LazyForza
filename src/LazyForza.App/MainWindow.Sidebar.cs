@@ -327,7 +327,7 @@ internal sealed partial class MainWindow
 
     private void ApplyEngineerPreferences()
     {
-        raceEngineer?.Configure(engineerEnabled, engineerMuted, engineerVolume);
+        raceEngineer?.Configure(engineerEnabled, engineerMuted, engineerVolume, engineerPreferences);
         store.SetAppSetting("raceEngineer.enabled", engineerEnabled.ToString());
         store.SetAppSetting("raceEngineer.muted", engineerMuted.ToString());
         store.SetAppSetting("raceEngineer.volume", engineerVolume.ToString(CultureInfo.InvariantCulture));

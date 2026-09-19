@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Text.Json;
 using LazyForza.Modules.EstateRace;
 using LazyForza.Speech;
 using Microsoft.Win32;
@@ -31,6 +32,8 @@ internal sealed partial class MainWindow
     private Button? engineerServiceButton;
     private bool engineerVoiceChanging;
     private bool engineerVoicesLoaded;
+    private EngineerPreferences engineerPreferences = new();
+    private EngineerBroadcastPanel? engineerBroadcastPanel;
     private bool EngineerSpeechEnglish => engineerSpeechSettings.IsOnline
         ? engineerSpeechSettings.SpeechLanguage.StartsWith("en", StringComparison.OrdinalIgnoreCase) ||
             !engineerSpeechSettings.SpeechLanguage.StartsWith("zh", StringComparison.OrdinalIgnoreCase) && EngineerEnglish
@@ -42,6 +45,7 @@ internal sealed partial class MainWindow
     private void InitializeRaceEngineer()
     {
         engineerSpeechSettings = EngineerSpeechSettings.Load(store.GetAppSetting(EngineerSpeechSettings.StoreKey));
+        engineerPreferences = EngineerBroadcastPanel.Load(store.GetAppSetting(EngineerBroadcastPanel.StoreKey));
         engineerEnabled = bool.TryParse(store.GetAppSetting("raceEngineer.enabled"), out var enabled) && enabled;
         if (int.TryParse(store.GetAppSetting("raceEngineer.volume"), out var volume)) engineerVolume = Math.Clamp(volume, 0, 100);
         // Persist immediate mute across restarts; enabling speech remains an explicit local choice.
@@ -52,8 +56,8 @@ internal sealed partial class MainWindow
         engineerDisconnectEnabled = !bool.TryParse(store.GetAppSetting("raceEngineer.disconnectEnabled"), out var disconnect) || disconnect;
         ApplyEngineerCues();
         raceEngineer = new RaceEngineer(CreateEngineerSpeech());
-        engineerObserver = new RaceEngineerObserver(raceEngineer, EngineerSpeechEnglish);
-        raceEngineer.Configure(engineerEnabled, engineerMuted, engineerVolume);
+        engineerObserver = CreateEngineerObserver(raceEngineer);
+        raceEngineer.Configure(engineerEnabled, engineerMuted, engineerVolume, engineerPreferences);
         _ = LoadEngineerVoicesAsync();
     }
 
@@ -94,8 +98,8 @@ internal sealed partial class MainWindow
             if (token.IsCancellationRequested) return;
             engineerVoice = voice;
             raceEngineer = new RaceEngineer(CreateEngineerSpeech());
-            engineerObserver = new RaceEngineerObserver(raceEngineer, EngineerSpeechEnglish);
-            raceEngineer.Configure(engineerEnabled, engineerMuted, engineerVolume);
+            engineerObserver = CreateEngineerObserver(raceEngineer);
+            raceEngineer.Configure(engineerEnabled, engineerMuted, engineerVolume, engineerPreferences);
             if (save) engineerCueNotice = null;
         }
         catch (Exception)
@@ -107,6 +111,12 @@ internal sealed partial class MainWindow
             engineerVoiceChanging = false;
             if (!token.IsCancellationRequested) UpdateRaceEngineer();
         }
+    }
+
+    private RaceEngineerObserver CreateEngineerObserver(RaceEngineer engineer)
+    {
+        var module = moduleManager.Modules.OfType<EstateRaceModule>().FirstOrDefault();
+        return new RaceEngineerObserver(engineer, EngineerSpeechEnglish, module is null ? null : () => module.State);
     }
 
     private ISpeechOutput CreateEngineerSpeech()
@@ -139,9 +149,14 @@ internal sealed partial class MainWindow
 
     private void UpdateRaceEngineer()
     {
-        if (engineerVoicesLoaded && !engineerVoiceChanging &&
-            moduleManager.Modules.OfType<EstateRaceModule>().FirstOrDefault() is { } module)
-            engineerObserver?.Observe(module.State);
+        if (engineerVoicesLoaded && !engineerVoiceChanging)
+        {
+            if (moduleManager.Modules.OfType<EstateRaceModule>().FirstOrDefault() is { } module)
+                engineerObserver?.Observe(module.State);
+            else engineerObserver?.Disconnect();
+        }
+        engineerBroadcastPanel?.Update(raceEngineer?.History ?? [], engineerVoicesLoaded && !engineerVoiceChanging
+            ? raceEngineer?.RepeatState ?? EngineerRepeatState.Unavailable : EngineerRepeatState.Unavailable);
         if (engineerServiceSummary is not null)
             engineerServiceSummary.Text = engineerSpeechSettings.ActiveProvider == EngineerSpeechSettings.Azure
                 ? "Azure Speech · " + engineerSpeechSettings.AzureVoiceId
@@ -155,7 +170,7 @@ internal sealed partial class MainWindow
                 ? EngineerText("语音不可用。请检查语音服务和音频设备，再关闭并重新启用。", "Speech unavailable. Check Speech service and audio devices, then disable and enable again.")
                 : engineerFallback?.LastFailure is { } failure
                     ? EngineerSpeechSettingsWindow.FailureText(failure, EngineerEnglish, engineerSpeechSettings.ServiceName) + EngineerText(" 已暂时使用 Windows 本地语音。", " Temporarily using Windows speech.")
-                    : engineerCueNotice ?? EngineerText("仅播报重要变化；进站建议为预测。", "Important changes only; pit advice remains a prediction.");
+                    : engineerCueNotice ?? EngineerText("按所选密度与类别播报；进站建议为预测。", "Callouts follow your density and category choices; pit advice remains a prediction.");
         if (engineerPreviewButton is not null)
         {
             engineerPreviewButton.Content = raceEngineer?.IsPreviewing == true
@@ -262,6 +277,18 @@ internal sealed partial class MainWindow
         engineerPreviewText = Label(EngineerText("试听随机示例，无需连接赛事；使用当前语音服务、音量和提示音。", "Preview a random sample with the selected service, volume and cues. No race connection required."), 12, FontWeights.Normal, "MutedBrush");
         engineerPreviewText.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(engineerPreviewText);
+        engineerBroadcastPanel = new EngineerBroadcastPanel(engineerPreferences, EngineerEnglish, preferences =>
+        {
+            store.SetAppSetting(EngineerBroadcastPanel.StoreKey, JsonSerializer.Serialize(preferences));
+            engineerPreferences = preferences;
+            ApplyEngineerPreferences();
+        }, () =>
+        {
+            UpdateRaceEngineer(); // Refresh authority state immediately before accepting a manual repeat.
+            raceEngineer?.RepeatLast();
+            UpdateRaceEngineer();
+        });
+        panel.Children.Add(engineerBroadcastPanel);
         var cueSettings = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
         cueSettings.Children.Add(BuildEngineerCueRow(true));
         cueSettings.Children.Add(BuildEngineerCueRow(false));

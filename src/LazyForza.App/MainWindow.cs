@@ -677,6 +677,7 @@ internal sealed partial class MainWindow : Window
         var previousOffset = preserveScroll && content.Content is ScrollViewer currentScroll ? currentScroll.VerticalOffset : 0;
         refreshVisiblePage = null;
         refreshEngineerControls = null;
+        engineerBroadcastPanel = null;
         refreshShiftControls = null;
         syncHudMotionPreference = null;
         syncHudShiftPreference = null;

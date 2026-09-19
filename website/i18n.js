@@ -16,7 +16,7 @@
     "赛事识别、驾驶建议和抓地趋势由 LazyForza 推导，官方 UDP 字段单独保留。": "LazyForza derives event identification, driving advice and grip trends while preserving official UDP fields separately.",
     "开发信息": "Development",
     "GPT-5.6 Sol 参与了此前版本的开发。1.5.3 版本起由 GPT-6 Astra 开发。": "GPT-5.6 Sol contributed to earlier versions. Development from version 1.5.3 is by GPT-6 Astra.",
-    "语音工程师支持 Windows 本地语音和六家在线服务，提供独立提示音、自定义音频与即时静音。": "The race engineer supports Windows speech and six online providers, independent radio cues, custom audio and immediate mute.",
+    "语音工程师支持 Windows 本地语音和六家在线服务，可调整播报密度与类别、查看最近记录，并重复仍有效的上一条播报。": "The race engineer supports Windows speech and six online providers, adjustable callout density and categories, recent history and replay of the last callout while it remains valid.",
     "支持 Windows 本地语音及 ElevenLabs、Azure Speech、腾讯云、阿里云 NLS、千问 AI 平台和 MiniMax。通过「语音服务…」浮窗配置，提示音可独立开关，音量与静音随时调整。": "Use Windows speech or ElevenLabs, Azure Speech, Tencent Cloud, Alibaba NLS, Qianwen AI and MiniMax. Configure providers in the Speech service window, toggle each radio cue independently, and adjust volume or mute at any time.",
     "品牌顶栏显示版本号与更新名，侧栏底部提供遥测状态和自选快速设置。设置页修改后自动保存并应用；数据目录切换在自行重启后生效。": "The branded title bar shows the version and release name. Telemetry status and configurable quick settings sit at the bottom of the sidebar. Settings save and apply automatically; data-folder changes take effect when you choose to restart.",
     "选择在线语音服务后，播报与试听文本发送到所选提供商并使用账户额度；": "With an online speech service selected, race messages and previews send text to that provider and use account credits;",

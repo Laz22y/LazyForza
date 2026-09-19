@@ -13,6 +13,192 @@ public sealed class RaceEngineerTests
             TimeSpan.FromSeconds(cooldown), DateTimeOffset.UtcNow.AddMinutes(1));
 
     [TestMethod]
+    public async Task DensityAndCategoryPreferencesFilterAndCancelWithoutDelayingUrgentCallouts()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var output = new ControlledSpeech();
+        using var engineer = new RaceEngineer(output, () => now);
+        engineer.SetStage("race");
+        engineer.Configure(true, false, 70, new(EngineerDensity.Essential));
+        Assert.IsFalse(engineer.Enqueue(Message("best", category: "best")));
+        Assert.IsFalse(engineer.Enqueue(Message("pit", category: "pit")));
+        Assert.IsTrue(engineer.Enqueue(Message("red", EngineerPriority.Emergency, "flag")));
+        var red = await output.Next();
+        engineer.Enqueue(Message("penalty", EngineerPriority.Important, "penalty:1"));
+        engineer.Configure(true, false, 70, new(Flags: false, Penalties: false));
+        Assert.IsTrue(red.Token.IsCancellationRequested);
+        Assert.IsFalse(engineer.Enqueue(Message("yellow", EngineerPriority.Important, "flag")));
+        Assert.IsFalse(engineer.Enqueue(Message("another-penalty", EngineerPriority.Important, "penalty:2")));
+        engineer.Enqueue(Message("pit1", category: "pit", cooldown: 60));
+        var pit = await output.Next();
+        Assert.AreEqual("pit1", pit.Text);
+        await Finish(engineer, pit);
+        now = now.AddSeconds(31);
+        Assert.IsFalse(engineer.Enqueue(Message("pit2", category: "pit", cooldown: 60)));
+        engineer.Configure(true, false, 70, new(EngineerDensity.Detailed));
+        Assert.IsTrue(engineer.Enqueue(Message("pit3", category: "pit", cooldown: 60)));
+        Assert.AreEqual("pit3", (await output.Next()).Text);
+        Assert.IsTrue(engineer.Enqueue(Message("urgent", EngineerPriority.Emergency, "flag")));
+        Assert.AreEqual("urgent", (await output.Next()).Text);
+    }
+
+    [TestMethod]
+    public async Task HistoryIsBoundedExcludesPreviewsAndRepeatsWithoutExtendingExpiry()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var output = new ControlledSpeech();
+        using var engineer = new RaceEngineer(output, () => now);
+        engineer.Configure(true, false, 70); engineer.SetStage("race");
+        var preview = engineer.PreviewAsync("sample");
+        (await output.Next()).Finish.TrySetResult();
+        Assert.IsTrue(await preview);
+        Assert.HasCount(0, engineer.History);
+        Assert.IsFalse(engineer.RepeatLast());
+        for (var i = 0; i < 23; i++)
+        {
+            engineer.Enqueue(Message($"message-{i}", category: "flag") with { ExpiresAt = now.AddSeconds(30) });
+            var speaking = await output.Next();
+            Assert.AreEqual(EngineerDelivery.Speaking, engineer.History[0].Delivery);
+            Assert.IsFalse(engineer.RepeatLast());
+            await Finish(engineer, speaking);
+        }
+        Assert.HasCount(20, engineer.History);
+        Assert.AreEqual("message-3", engineer.History[^1].Text);
+        engineer.Configure(true, false, 43);
+        Assert.IsTrue(engineer.RepeatLast());
+        Assert.IsFalse(engineer.RepeatLast(), "Double clicks must not enqueue duplicate repeats.");
+        var repeated = await output.Next();
+        Assert.AreEqual("message-22", repeated.Text);
+        Assert.AreEqual(43, repeated.Volume);
+        await Finish(engineer, repeated);
+        Assert.IsTrue(engineer.History[0].IsRepeat);
+        now = now.AddSeconds(31);
+        Assert.AreEqual(EngineerRepeatState.Expired, engineer.RepeatState);
+        Assert.IsFalse(engineer.RepeatLast());
+    }
+
+    [TestMethod]
+    public async Task ManualRepeatsRespectMuteCategoriesStagesAndGiveWayToLiveMessages()
+    {
+        var output = new ControlledSpeech();
+        using var engineer = Enabled(output);
+        engineer.Enqueue(Message("yellow", EngineerPriority.Important, "flag"));
+        await Finish(engineer, await output.Next());
+        engineer.Configure(true, true, 70);
+        Assert.AreEqual(EngineerRepeatState.Muted, engineer.RepeatState);
+        Assert.IsFalse(engineer.RepeatLast());
+        engineer.Configure(true, false, 70, new(Flags: false));
+        Assert.AreEqual(EngineerRepeatState.CategoryDisabled, engineer.RepeatState);
+        Assert.IsFalse(engineer.RepeatLast());
+        engineer.Configure(true, false, 70, new());
+        Assert.IsTrue(engineer.RepeatLast());
+        var repeated = await output.Next();
+        engineer.Enqueue(Message("new-penalty", EngineerPriority.Important, "penalty:1"));
+        Assert.IsTrue(repeated.Token.IsCancellationRequested);
+        var penalty = await output.Next();
+        Assert.AreEqual("new-penalty", penalty.Text);
+        Assert.AreEqual(EngineerDelivery.Interrupted, engineer.History.Single(item => item.IsRepeat).Delivery);
+        await Finish(engineer, penalty);
+        engineer.SetStage("other-race");
+        Assert.AreEqual(EngineerRepeatState.StateChanged, engineer.RepeatState);
+        Assert.IsFalse(engineer.RepeatLast());
+        engineer.SetStage(null);
+        Assert.AreEqual(EngineerRepeatState.NoSession, engineer.RepeatState);
+    }
+
+    [TestMethod]
+    public async Task ChangedFlagsInvalidateCompletedHistoryEvenWhenNewCategoryIsDisabled()
+    {
+        var output = new ControlledSpeech();
+        using var engineer = Enabled(output);
+        var observer = new RaceEngineerObserver(engineer);
+        var state = State();
+        state = state with { Session = state.Session! with { Flag = RaceControlFlag.Yellow } };
+        observer.Observe(state);
+        await Finish(engineer, await output.Next());
+        engineer.Configure(true, false, 70, new(Flags: false));
+        observer.Observe(state with { Session = state.Session! with { Flag = RaceControlFlag.Green } });
+        engineer.Configure(true, false, 70, new());
+        Assert.AreEqual(EngineerRepeatState.StateChanged, engineer.RepeatState);
+        Assert.IsFalse(engineer.RepeatLast());
+        Assert.AreEqual(EngineerRepeatState.StateChanged, engineer.History[0].Validity);
+    }
+
+    [TestMethod]
+    [DataRow("served")]
+    [DataRow("revoked")]
+    [DataRow("removed")]
+    [DataRow("changed")]
+    [DataRow("disconnect")]
+    public async Task PenaltyStateChangesCancelRepeatsAndNeverResurrectOldInstructions(string change)
+    {
+        var output = new ControlledSpeech();
+        using var engineer = Enabled(output);
+        var observer = new RaceEngineerObserver(engineer);
+        var state = State(); observer.Observe(state);
+        var penalty = new EstateRacePenalty(Guid.NewGuid(), RacePenaltyKind.Time, 5, null, "test", false, false);
+        state = state with { Session = state.Session! with { Participants = [state.Session.Participants[0] with { Penalties = [penalty] }] } };
+        observer.Observe(state);
+        await Finish(engineer, await output.Next());
+        Assert.IsTrue(engineer.RepeatLast());
+        var repeat = await output.Next();
+        var changed = change switch
+        {
+            "served" => penalty with { IsServed = true },
+            "revoked" => penalty with { IsRevoked = true },
+            _ => penalty with { ValueSeconds = 10 }
+        };
+        var next = state with { Session = state.Session! with { Participants = [state.Session.Participants[0] with
+            { Penalties = change == "removed" ? [] : [changed] }] } };
+        if (change == "disconnect") observer.Disconnect(); else observer.Observe(next);
+        Assert.IsTrue(repeat.Token.IsCancellationRequested);
+        Assert.IsFalse(engineer.RepeatLast());
+        if (change == "changed")
+        {
+            var updated = await output.Next();
+            Assert.AreEqual("罚时 10 秒。", updated.Text);
+            await Finish(engineer, updated);
+            Assert.AreEqual(EngineerRepeatState.StateChanged, engineer.History.Single(item => item.Text == "罚时 5 秒。" && !item.IsRepeat).Validity);
+        }
+        else await WaitUntil(() => engineer.History[0].Delivery == EngineerDelivery.Interrupted);
+    }
+
+    private static async Task Finish(RaceEngineer engineer, Utterance utterance)
+    {
+        utterance.Finish.TrySetResult();
+        await WaitUntil(() => engineer.History[0].Delivery == EngineerDelivery.Completed);
+    }
+
+    [TestMethod]
+    public async Task LatestAuthorityIsRecheckedBeforeAndDuringRepeatWithoutWaitingForUiRefresh()
+    {
+        var output = new ControlledSpeech();
+        using var engineer = Enabled(output);
+        var initial = State();
+        var latest = initial with { Session = initial.Session! with { Flag = RaceControlFlag.Yellow } };
+        var observer = new RaceEngineerObserver(engineer, latestState: () => Volatile.Read(ref latest));
+        observer.Observe(latest);
+        await Finish(engineer, await output.Next());
+        Volatile.Write(ref latest, latest with { Session = latest.Session! with { Flag = RaceControlFlag.Green } });
+        Assert.AreEqual(EngineerRepeatState.StateChanged, engineer.RepeatState);
+        Assert.IsFalse(engineer.RepeatLast(), "A newer snapshot must block replay before the UI observer runs.");
+        observer.Observe(latest);
+        await Finish(engineer, await output.Next());
+        Assert.IsTrue(engineer.RepeatLast());
+        var repeat = await output.Next();
+        Volatile.Write(ref latest, latest with { Session = latest.Session! with { Flag = RaceControlFlag.Red } });
+        await WaitUntil(() => repeat.Token.IsCancellationRequested);
+        await WaitUntil(() => engineer.History[0].Delivery == EngineerDelivery.Interrupted);
+        Assert.IsFalse(engineer.RepeatLast());
+    }
+
+    private static async Task WaitUntil(Func<bool> predicate)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (!predicate()) await Task.Delay(5, timeout.Token);
+    }
+
+    [TestMethod]
     public async Task DisabledByDefaultAndDuplicateEventsNeverRepeat()
     {
         var output = new ControlledSpeech();
@@ -119,6 +305,9 @@ public sealed class RaceEngineerTests
         engineer.Configure(false, false, 70);
         engineer.Configure(true, false, 70);
         Assert.IsNull(engineer.Error);
+        await WaitUntil(() => engineer.History[0].Delivery == EngineerDelivery.Failed);
+        Assert.AreEqual(EngineerRepeatState.Incomplete, engineer.RepeatState);
+        Assert.IsFalse(engineer.RepeatLast(), "Re-enabling speech must not make a failed transmission repeatable.");
         Assert.IsTrue(engineer.Enqueue(Message("recovered")));
         Assert.AreEqual("recovered", (await output.Next()).Text);
     }
