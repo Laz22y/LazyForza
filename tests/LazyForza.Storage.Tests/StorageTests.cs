@@ -684,6 +684,7 @@ public sealed class StorageTests
         try
         {
             using var store = new LazyForzaStore(path);
+            store.SetLapCapacity(50);
             var raw = Enumerable.Range(0, 80)
                 .Select(index => new TrackPoint(index * 10, 0, 0, 0, 0, 0))
                 .ToArray();

@@ -7,6 +7,28 @@ namespace LazyForza.Analysis.Tests;
 public sealed class CornerDrivingAnalysisTests
 {
     [TestMethod]
+    public void PinnedReferenceWinsOnlyForCompatibleRouteAndObservedVehicleConditions()
+    {
+        var selected = Summary(90, 5) with { TrackRevision = "route-v2" };
+        var pinned = selected with { Id = Guid.NewGuid(), TotalSeconds = 100, Annotation = new(IsReference: true) };
+        var plan = LapComparisonPlanner.Resolve(selected, [selected, pinned]);
+        Assert.AreEqual(SingleLapAnalysisMode.CompareWithPinnedReference, plan.Mode);
+        Assert.AreEqual(pinned.Id, plan.ReferenceLap!.Id);
+        foreach (var incompatible in new[]
+        {
+            pinned with { TrackRevision = "old-route" }, pinned with { Direction = -1 },
+            pinned with { Vehicle = pinned.Vehicle with { CarOrdinal = 999 } },
+            pinned with { Vehicle = pinned.Vehicle with { PerformanceIndex = 899 } },
+            pinned with { IsValid = false }
+        })
+            Assert.AreNotEqual(SingleLapAnalysisMode.CompareWithPinnedReference, LapComparisonPlanner.Resolve(selected, [selected, incompatible]).Mode);
+        Assert.IsNull(LapComparisonPlanner.Resolve(pinned, [pinned]).ReferenceLap, "A pinned lap cannot reference itself.");
+        Assert.AreNotEqual(SingleLapAnalysisMode.CompareWithPinnedReference,
+            LapComparisonPlanner.Resolve(selected with { TrackRevision = null }, [pinned with { TrackRevision = null }]).Mode,
+            "Two unknown route revisions are not evidence of a compatible reference.");
+    }
+
+    [TestMethod]
     public void SingleNonFastestLapUsesValidFastestLapFromTheSamePerformanceClass()
     {
         var selected = Summary(100, performanceClass: 5);

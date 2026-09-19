@@ -1,7 +1,27 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DataTemplate x:Key="LapLibraryRow">
+        <Grid Margin="4,5" ToolTip="{Binding Tooltip}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="32"/><ColumnDefinition Width="105"/>
+                <ColumnDefinition Width="*"/><ColumnDefinition Width="40"/>
+            </Grid.ColumnDefinitions>
+            <CheckBox IsChecked="{Binding IsChosen, Mode=OneWay}" Command="{Binding SelectCommand}"
+                      VerticalAlignment="Center" AutomationProperties.Name="{Binding SelectLabel}"/>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Time}" FontWeight="SemiBold" Foreground="{Binding TimeBrush}"/>
+                <TextBlock Text="{Binding Badges}" FontSize="11" Foreground="{DynamicResource AccentBrush}" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Margin="0,0,10,0" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+            <Button Grid.Column="3" Content="···" Command="{Binding EditCommand}" Padding="6,3"
+                    ToolTip="{Binding EditLabel}" AutomationProperties.Name="{Binding EditLabel}" VerticalAlignment="Center"/>
+        </Grid>
+    </DataTemplate>
     <DataTemplate x:Key="SessionLapRow">
-        <Grid ToolTip="{Binding Lap.InvalidReason}">
+        <Grid ToolTip="{Binding Tooltip}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="64"/><ColumnDefinition Width="120"/><ColumnDefinition Width="120"/>
                 <ColumnDefinition Width="*"/><ColumnDefinition Width="64"/>
@@ -9,7 +29,10 @@
             <TextBlock Text="{Binding Number}" Foreground="{DynamicResource MutedBrush}"/>
             <TextBlock Grid.Column="1" Text="{Binding Time}" FontWeight="SemiBold"/>
             <TextBlock Grid.Column="2" Text="{Binding Delta}" Foreground="{DynamicResource MutedBrush}"/>
-            <TextBlock Grid.Column="3" Text="{Binding Vehicle}" TextTrimming="CharacterEllipsis"/>
+            <StackPanel Grid.Column="3">
+                <TextBlock Text="{Binding Vehicle}" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Text="{Binding Label}" FontSize="11" Foreground="{DynamicResource AccentBrush}" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
             <TextBlock Grid.Column="4" Text="{Binding State}" Foreground="{Binding StateBrush}"/>
         </Grid>
     </DataTemplate>

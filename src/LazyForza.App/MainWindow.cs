@@ -1211,7 +1211,7 @@ internal sealed partial class MainWindow : Window
                     AppLocalization.ApplyTo(comparison);
                     ((TabItem)archiveTabs!.Items[1]).Content = comparison;
                     archiveTabs.SelectedIndex = 1;
-                })),
+                }, lap => EditLapRecord(module, lap))),
             ("单圈对比", BuildComparisonPage));
         archiveTabs.SelectedIndex = lapAnalysisTabIndex;
         archiveTabs.SelectionChanged += (_, args) =>
@@ -1278,34 +1278,6 @@ internal sealed partial class MainWindow : Window
             var comparisonHost = new StackPanel();
             if (comparableLaps.Length > 0)
             {
-                var bestLapIds = comparableLaps
-                    .Where(lap => lap.IsValid)
-                    .GroupBy(lap => lap.Vehicle.CarClass)
-                    .Select(group => group
-                        .OrderBy(lap => lap.TotalSeconds)
-                        .ThenBy(lap => lap.StartedAt)
-                        .ThenBy(lap => lap.Id)
-                        .First().Id)
-                    .ToHashSet();
-                var focusSessionId = module.HasCurrentCompetitionSession && comparableLaps.Any(lap => lap.SessionId == module.CurrentSessionId)
-                    ? module.CurrentSessionId
-                    : comparableLaps[0].SessionId;
-                var focusSessionLabel = module.HasCurrentCompetitionSession && focusSessionId == module.CurrentSessionId
-                    ? AppLocalization.Literal("当前比赛")
-                    : AppLocalization.Literal("最近一次比赛");
-                var savedTable = new Grid { Margin = new Thickness(4) };
-                foreach (var width in new[] { 40d, 110d, 100d, 125d })
-                    savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
-                savedTable.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 140 });
-                AddSavedRow(0, null, "比赛范围", false, true);
-                for (var index = 0; index < comparableLaps.Length; index++)
-                {
-                    var savedLap = comparableLaps[index];
-                    var isHistoricalBest = savedLap.IsValid && bestLapIds.Contains(savedLap.Id);
-                    AddSavedRow(index + 1, savedLap,
-                        savedLap.SessionId == focusSessionId ? focusSessionLabel : AppLocalization.Literal("历史比赛"),
-                        isHistoricalBest, false);
-                }
                 var savedStack = new StackPanel();
                 var lapLibrary = AnalysisDisclosure("选择对比圈", savedStack);
                 var savedHeader = new Grid();
@@ -1316,7 +1288,7 @@ internal sealed partial class MainWindow : Window
                     "lap.savedTotal",
                     "已保存圈速 · {0}",
                     comparableLaps.Length), 16, FontWeights.SemiBold));
-                savedHeaderText.Children.Add(Label("勾选最多 4 圈，再加载图表；每个性能等级单独标记历史最快。", 11, FontWeights.Normal, "MutedBrush"));
+                savedHeaderText.Children.Add(Label("勾选最多 4 圈加载对比；点击行尾管理收藏、名称、备注与参考。", 11, FontWeights.Normal, "MutedBrush"));
                 savedHeader.Children.Add(savedHeaderText);
                 var displaySelectedLaps = new Button
                 {
@@ -1339,92 +1311,14 @@ internal sealed partial class MainWindow : Window
                 Grid.SetColumn(displaySelectedLaps, 1);
                 savedHeader.Children.Add(displaySelectedLaps);
                 savedStack.Children.Add(savedHeader);
-                savedStack.Children.Add(new ScrollViewer
+                savedStack.Children.Add(new LapLibraryList(comparableLaps, selectedLapIds, pointToPointTimingApproximate, () =>
                 {
-                    Content = savedTable, MaxHeight = 270, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 12, 0, 0)
-                });
+                    if (deleteSelectedLapsButton is not null) deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
+                    exportSelectedLaps.IsEnabled = selectedLapIds.Count > 0;
+                    displaySelectedLaps.IsEnabled = selectedLapIds.Count > 0;
+                }, lap => EditLapRecord(module, lap)));
                 savedStack.Margin = new Thickness(16, 0, 16, 16);
                 comparisonPage.Children.Add(lapLibrary);
-
-                void AddSavedRow(int row, LapSummary? selectableLap, string group, bool historicalBest, bool header)
-                {
-                    var cells = header
-                        ? new[] { "", "圈速", "等级 / PI", "保存时间", "详情" }
-                        : new[]
-                        {
-                            string.Empty,
-                            AnalysisTime(selectableLap!.TotalSeconds, pointToPointTimingApproximate) + "\n" + AppLocalization.Literal(selectableLap.IsValid ? "有效" : "无效"),
-                            $"{PerformanceClassName(selectableLap.Vehicle.CarClass)} {selectableLap.Vehicle.PerformanceIndex}",
-                            selectableLap.StartedAt.ToLocalTime().ToString("MM-dd HH:mm"),
-                            PlayerCodeText(selectableLap.PlayerCode) + "\n" + string.Join("  ", selectableLap.Segments.Select(segment => $"S{segment.Index + 1} {AnalysisTime(segment.TimeSeconds, pointToPointTimingApproximate)}"))
-                        };
-                    savedTable.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto, MinHeight = header ? 32 : 48 });
-                    for (var column = 0; column < cells.Length; column++)
-                    {
-                        UIElement cell;
-                        if (column == 0 && selectableLap is not null)
-                        {
-                            var check = new CheckBox
-                            {
-                                IsChecked = selectedLapIds.Contains(selectableLap.Id),
-                                HorizontalAlignment = HorizontalAlignment.Center,
-                                VerticalAlignment = VerticalAlignment.Center,
-                                ToolTip = "用于图表对比或批量删除"
-                            };
-                            check.Click += (_, _) =>
-                            {
-                                if (check.IsChecked == true)
-                                {
-                                    if (selectedLapIds.Count >= 4)
-                                    {
-                                        check.IsChecked = false;
-                                        AppDialog.Show(AppLocalization.Literal("一次最多比较 4 圈。"), AppLocalization.Literal("圈选择"), MessageBoxButton.OK, MessageBoxImage.Information);
-                                        return;
-                                    }
-                                    selectedLapIds.Add(selectableLap.Id);
-                                }
-                                else
-                                {
-                                    selectedLapIds.Remove(selectableLap.Id);
-                                }
-                                if (deleteSelectedLapsButton is not null)
-                                    deleteSelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
-                                exportSelectedLaps.IsEnabled = selectedLapIds.Count > 0;
-                                if (displaySelectedLapsButton is not null)
-                                    displaySelectedLapsButton.IsEnabled = selectedLapIds.Count > 0;
-                            };
-                            cell = check;
-                        }
-                        else
-                        {
-                            string? brush = null;
-                            if (!header && column == 4) brush = "MutedBrush";
-                            if (!header && column == 1) brush = !selectableLap!.IsValid ? "DangerBrush" : historicalBest ? "PurpleBrush" : null;
-                            var textCell = Label(cells[column], header ? 12 : 11, header ? FontWeights.SemiBold : FontWeights.Normal, brush);
-                            if (column > 0)
-                            {
-                                textCell.TextWrapping = TextWrapping.NoWrap;
-                                textCell.TextTrimming = TextTrimming.CharacterEllipsis;
-                                if (!header) textCell.ToolTip = cells[column];
-                            }
-                            if (!header && column == 4)
-                            {
-                                textCell.ToolTip = AppLocalization.Format(
-                                    "lap.playerCodeTooltip",
-                                    "{0} · 玩家代号：{1}",
-                                    AppLocalization.Literal(group),
-                                    PlayerCodeText(selectableLap!.PlayerCode)) + "\n" + cells[column];
-                            }
-                            cell = textCell;
-                        }
-                        cell.SetValue(FrameworkElement.MarginProperty, new Thickness(8, 6, 8, 6));
-                        cell.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
-                        Grid.SetRow(cell, row);
-                        Grid.SetColumn(cell, column);
-                        savedTable.Children.Add(cell);
-                    }
-                }
             }
             comparisonPage.Children.Add(comparisonHost);
             RenderComparisonVisuals();
@@ -1487,7 +1381,7 @@ internal sealed partial class MainWindow : Window
                             ? singleLapPlan.Mode == SingleLapAnalysisMode.AnalyzePersonalBest
                                 ? AppLocalization.Literal("所选圈 · 同等级个人最快")
                                 : AppLocalization.Literal("所选圈")
-                            : AppLocalization.Literal("个人参考圈 · 同等级最快");
+                            : AppLocalization.Literal(singleLapPlan.Mode == SingleLapAnalysisMode.CompareWithPinnedReference ? "固定参考" : "个人参考圈 · 同等级最快");
                     legendEntries.Add(new LapSeriesLegendEntry(
                         $"{AnalysisTime(lap.TotalSeconds, pointToPointTimingApproximate)}" +
                         $"{(role is null ? string.Empty : $" · {role}")}",
@@ -1774,7 +1668,7 @@ internal sealed partial class MainWindow : Window
         LapRecord? referenceLap,
         bool pointToPointTimingApproximate)
     {
-        if (plan.Mode == SingleLapAnalysisMode.CompareWithClassFastest && referenceLap is not null)
+        if (plan.Mode is SingleLapAnalysisMode.CompareWithClassFastest or SingleLapAnalysisMode.CompareWithPinnedReference && referenceLap is not null)
         {
             var comparisonTrack = store.LoadTrack(selectedLap.TrackId)?.Track;
             if (comparisonTrack is null || ManualCornerAnalyzer.Compatibility(comparisonTrack,
@@ -1785,8 +1679,8 @@ internal sealed partial class MainWindow : Window
                     new ManualCorner($"T{corner.Window.Number}", corner.Window.StartS, corner.Window.EndS)).Evidence == CornerEvidence.Sufficient)
                 .ToArray();
             var context = AppLocalization.Format(
-                "analysis.corner.comparisonContext",
-                "对比同等级个人最快 · 所选 {0} / 参考 {1}",
+                plan.Mode == SingleLapAnalysisMode.CompareWithPinnedReference ? "analysis.corner.pinnedContext" : "analysis.corner.comparisonContext",
+                plan.Mode == SingleLapAnalysisMode.CompareWithPinnedReference ? "对比固定参考 · 所选 {0} / 参考 {1}" : "对比同等级个人最快 · 所选 {0} / 参考 {1}",
                 AnalysisTime(selectedLap.TotalSeconds, pointToPointTimingApproximate),
                 AnalysisTime(referenceLap.TotalSeconds, pointToPointTimingApproximate));
             var footer = AppLocalization.Format(
@@ -3289,6 +3183,7 @@ internal sealed partial class MainWindow : Window
         var panel = new StackPanel();
         panel.Children.Add(BuildTelemetryListenerSettings());
         panel.Children.Add(BuildRecordingSettingsCard());
+        panel.Children.Add(AnalysisCard(new LapStoragePanel(store, AppLocalization.CurrentLanguage == "en")));
         return panel;
     }
 

@@ -6,7 +6,8 @@ public enum SingleLapAnalysisMode
 {
     CompareWithClassFastest,
     AnalyzePersonalBest,
-    AnalyzeWithoutReference
+    AnalyzeWithoutReference,
+    CompareWithPinnedReference
 }
 
 public sealed record SingleLapAnalysisPlan(
@@ -23,7 +24,14 @@ public static class LapComparisonPlanner
         ArgumentNullException.ThrowIfNull(selectedLap);
         ArgumentNullException.ThrowIfNull(availableLaps);
 
-        var classFastest = availableLaps
+        var candidates = availableLaps.ToArray();
+        var pinned = candidates.Where(lap => lap.Id != selectedLap.Id && lap.Annotation.IsReference &&
+                lap.IsValid && double.IsFinite(lap.TotalSeconds) && lap.TotalSeconds > 0 && LapReferenceContext.Matches(selectedLap, lap))
+            .OrderByDescending(lap => lap.StartedAt).ThenBy(lap => lap.Id).FirstOrDefault();
+        if (pinned is not null)
+            return new(SingleLapAnalysisMode.CompareWithPinnedReference, selectedLap, pinned);
+
+        var classFastest = candidates
             .Where(lap =>
                 lap.TrackId == selectedLap.TrackId &&
                 lap.Direction == selectedLap.Direction &&

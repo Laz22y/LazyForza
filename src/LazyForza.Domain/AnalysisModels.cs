@@ -203,6 +203,7 @@ public sealed record LapSummary(
 {
     public string? TrackRevision { get; init; }
     public LapSessionInfo? SessionInfo { get; init; }
+    public LapAnnotation Annotation { get; init; } = new();
 
     public static LapSummary FromRecord(LapRecord lap) => new(
         lap.Id,
@@ -216,7 +217,7 @@ public sealed record LapSummary(
         lap.IsValid,
         lap.InvalidReason,
         lap.Segments,
-        lap.PlayerCode) { TrackRevision = lap.TrackRevision, SessionInfo = lap.SessionInfo };
+        lap.PlayerCode) { TrackRevision = lap.TrackRevision, SessionInfo = lap.SessionInfo, Annotation = LapAnnotation.Normalize(lap.Annotation) };
 
     public LapRecord WithSamples(IReadOnlyList<LapSample> samples) => new(
         Id,
@@ -231,7 +232,7 @@ public sealed record LapSummary(
         InvalidReason,
         Segments,
         samples,
-        PlayerCode) { TrackRevision = TrackRevision, SessionInfo = SessionInfo };
+        PlayerCode) { TrackRevision = TrackRevision, SessionInfo = SessionInfo, Annotation = Annotation };
 }
 
 public sealed record LapRecord(
@@ -251,6 +252,7 @@ public sealed record LapRecord(
 {
     public string? TrackRevision { get; init; }
     public LapSessionInfo? SessionInfo { get; init; }
+    public LapAnnotation Annotation { get; init; } = new();
 }
 
 public enum SectorColorState

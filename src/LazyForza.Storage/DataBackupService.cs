@@ -111,7 +111,7 @@ public sealed class DataBackupService
         new("Laps",
             ["Id", "TrackId", "Direction", "SectorSchemaVersion", "SessionId",
                 "VehicleFingerprint", "StartedAt", "TotalSeconds", "IsValid", "InvalidReason",
-                "CarClass", "PerformanceIndex", "PlayerCode", "TrackRevision", "VehicleSnapshot", "SessionInfo"],
+                "CarClass", "PerformanceIndex", "PlayerCode", "TrackRevision", "VehicleSnapshot", "SessionInfo", "Annotation"],
             ["Id"]),
         new("LapSegments",
             ["LapId", "SectorIndex", "TimeSeconds", "IsValid"],
@@ -703,7 +703,8 @@ public sealed class DataBackupService
             if (string.Equals(table.Name, "Laps", StringComparison.Ordinal) &&
                 (table.Columns.SequenceEqual(legacyLapColumns, StringComparer.Ordinal) ||
                  table.Columns.SequenceEqual(legacyLapColumns.Append("PlayerCode"), StringComparer.Ordinal) ||
-                 table.Columns.SequenceEqual(legacyLapColumns.Concat(["PlayerCode", "TrackRevision", "VehicleSnapshot"]), StringComparer.Ordinal)))
+                 table.Columns.SequenceEqual(legacyLapColumns.Concat(["PlayerCode", "TrackRevision", "VehicleSnapshot"]), StringComparer.Ordinal) ||
+                 table.Columns.SequenceEqual(legacyLapColumns.Concat(["PlayerCode", "TrackRevision", "VehicleSnapshot", "SessionInfo"]), StringComparer.Ordinal)))
                 return new BackupTableData(
                     table.Name,
                     Spec("Laps").Columns,

@@ -89,10 +89,12 @@ public sealed class ManualCornerPanelTests
                     store.SaveLap(selected with { Id = Guid.NewGuid(), StartedAt = selected.StartedAt.AddMinutes(i),
                         Vehicle = selected.Vehicle with { PerformanceIndex = 900 } });
                 Assert.IsFalse(store.LoadLapSummaries(track.Id).Any(lap => lap.Id == oldReference.Id));
+                store.UpdateLapAnnotation(oldReference.Id, new(IsReference: true));
                 var card = MainWindow.BuildManualCornerAnalysisCard(store, track, [selected]);
                 SaveInterval(card);
                 var reference = Descendants<ComboBox>(card).ElementAt(1);
                 var oldItem = reference.Items.OfType<ComboBoxItem>().Single(item => Equals(item.Tag, oldReference.Id));
+                Assert.AreSame(oldItem, reference.SelectedItem, "A compatible pinned reference outside the recent page must be selected automatically.");
                 reference.SelectedItem = oldItem;
                 Assert.IsTrue(Descendants<TextBlock>(card).Any(text => text.Text == "6.400 s"), "A missing reference interval must not hide this lap's metrics.");
                 Assert.IsTrue(Descendants<TextBlock>(card).Any(text => text.Text.Contains("参考圈在此区间缺少可用样本")));

@@ -32,7 +32,7 @@ public sealed class LapSessionStorageTests
                 raw.Execute("ALTER TABLE Laps DROP COLUMN SessionInfo; UPDATE SchemaVersion SET Version=13;");
             using (var store = new LazyForzaStore(path))
             {
-                Assert.AreEqual(14, store.SchemaVersion);
+                Assert.AreEqual(LazyForzaStore.CurrentSchemaVersion, store.SchemaVersion);
                 Assert.IsNull(store.LoadLap(lap.Id)!.SessionInfo);
                 Assert.AreEqual("yes", store.GetAppSetting("kept"));
                 for (var i = 1; i <= 70; i++)

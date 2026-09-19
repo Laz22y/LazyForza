@@ -114,6 +114,13 @@ public sealed partial class LapAnalysisBehaviorTests
             Assert.HasCount(1, details);
             Assert.HasCount(samples.Length, details[0].Samples);
 
+            module.FlushPendingLapsAsync().GetAwaiter().GetResult();
+            store.UpdateLapAnnotation(lapId, new("Named lap", "Keep this braking reference", true, true));
+            module.RefreshSelectedTrackHistory();
+            Assert.AreEqual("Named lap", module.VisibleLaps.Single().Annotation.Name);
+            Assert.IsTrue(module.LoadLapDetails([lapId]).Single().Annotation.IsReference,
+                "Saving library metadata must invalidate any previously cached lap details.");
+
             store.DeleteLap(lapId);
             var cached = module.LoadLapDetails([lapId]);
             Assert.HasCount(1, cached);

@@ -1407,6 +1407,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         if (track?.TimingKind == TrackTimingKind.EstateGeometry) PublishSelectedEstateHistory();
     }
 
+    public Task FlushPendingLapsAsync() => persistence.FlushAsync();
+
     public TrackCorrectionResult CorrectTrackMatch(Guid trackId)
     {
         if (!competitionActive)
@@ -2237,7 +2239,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             visibleLapDetails[lap.Id] = lap;
             TrimVisibleLapDetails();
             visibleLaps.Sort((left, right) => left.StartedAt.CompareTo(right.StartedAt));
-            var keep = LazyForzaStore.SelectRetainedLapIds(visibleLaps);
+            var keep = LazyForzaStore.SelectRetainedLapIds(visibleLaps, store.LapCapacity);
             visibleLaps.RemoveAll(candidate => !keep.Contains(candidate.Id));
             foreach (var lapId in visibleLapDetails.Keys.Where(id => !keep.Contains(id)).ToArray())
                 visibleLapDetails.Remove(lapId);

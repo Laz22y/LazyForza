@@ -36,7 +36,7 @@ internal sealed class LapBulkDeleteDialog : Window
         var root = new StackPanel { Margin = new Thickness(24) };
         root.Children.Add(Text("删除赛道记录", 21, FontWeights.SemiBold));
         root.Children.Add(Text(
-            AppLocalization.Format("lap.delete.summary", "{0} · {1}/50 圈", trackName, laps.Count),
+            AppLocalization.Format("lap.delete.savedCount", "{0} · {1} 圈", trackName, laps.Count),
             12,
             FontWeights.Normal,
             Color.FromRgb(155, 170, 188),

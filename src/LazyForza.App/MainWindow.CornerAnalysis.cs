@@ -98,7 +98,7 @@ internal sealed partial class MainWindow
             var eligibility = ManualCornerAnalyzer.ComparisonEligibility(track, summary);
             var excludedReasons = new HashSet<string>();
             if (eligibility is null && track is not null)
-                foreach (var lap in candidates.Where(lap => lap.Id != selected.Id).OrderByDescending(lap => lap.StartedAt))
+                foreach (var lap in candidates.Where(lap => lap.Id != selected.Id).OrderByDescending(lap => lap.Annotation.IsReference).ThenByDescending(lap => lap.StartedAt))
                 {
                     var reason = ManualCornerAnalyzer.Compatibility(track, summary, lap);
                     if (reason is null) reference.Items.Add(new ComboBoxItem { Content = LapCaption(lap), Tag = lap.Id });
@@ -139,7 +139,8 @@ internal sealed partial class MainWindow
             mapHost.Child = intervalMap;
             if (corners.Count == 0) BeginPicking();
             else UpdateMapInterval();
-            reference.SelectedIndex = 0;
+            reference.SelectedItem = reference.Items.OfType<ComboBoxItem>().FirstOrDefault(item => item.Tag is Guid id &&
+                candidates.Any(lap => lap.Id == id && lap.Annotation.IsReference)) ?? reference.Items[0];
         };
         reference.SelectionChanged += (_, _) =>
         {
@@ -328,6 +329,7 @@ internal sealed partial class MainWindow
             }
         }
         static string Meters(double? value) => value is double s ? $"{s:0.0} m" : "—";
-        static string LapCaption(LapSummary lap) => $"{AnalysisTime(lap.TotalSeconds, false)} · {lap.StartedAt.ToLocalTime():MM-dd HH:mm}";
+        static string LapCaption(LapSummary lap) => $"{(lap.Annotation.IsReference ? AppLocalization.Literal("固定参考") + " · " : "")}" +
+            $"{(lap.Annotation.Name is { } title ? title + " · " : "")}{AnalysisTime(lap.TotalSeconds, false)} · {lap.StartedAt.ToLocalTime():MM-dd HH:mm}";
     }
 }

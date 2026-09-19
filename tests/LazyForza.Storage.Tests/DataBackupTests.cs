@@ -12,8 +12,9 @@ namespace LazyForza.Storage.Tests;
 public sealed class DataBackupTests
 {
     [TestMethod]
-    [DataRow(12, 3)]
-    [DataRow(13, 1)]
+    [DataRow(12, 4)]
+    [DataRow(13, 2)]
+    [DataRow(14, 1)]
     public void LegacyPortableBackupKeepsOldLapsWithoutInventingNewContext(int schemaVersion, int removedColumns)
     {
         var sourcePath = TempPath(".db");
@@ -62,6 +63,7 @@ public sealed class DataBackupTests
             Assert.HasCount(24, lap.Samples);
             if (schemaVersion == 12) Assert.IsNull(lap.TrackRevision);
             Assert.IsNull(lap.SessionInfo);
+            Assert.AreEqual(new LapAnnotation(), lap.Annotation);
             if (schemaVersion == 12) Assert.AreEqual(-1, lap.Vehicle.DrivetrainType);
         }
         finally

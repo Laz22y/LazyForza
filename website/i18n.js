@@ -10,7 +10,7 @@
     "语音比赛工程师": "Race engineer",
     "窗口与快速设置": "Window and quick settings",
     "1.5.3 · Radio Check 带来语音比赛工程师、弯道级对比、无边框主窗口和自选快速设置，并改进维修区计圈与地产 HUD。推荐搭配 RaceServer 0.6.0，使用协议 v2。": "1.5.3 · Radio Check adds a race engineer, corner comparisons, a borderless main window and configurable quick settings, with improved pit timing and estate HUDs. RaceServer 0.6.0 is recommended, using protocol v2.",
-    "查看速度、驾驶输入和走线，标记弯道区间分析单圈，也可选择兼容参考圈比较差异。": "Review speed, driving inputs and racing lines. Mark corners to inspect a single lap, or choose a compatible reference lap to compare differences.",
+    "圈记录可收藏、命名、备注和固定参考，自定义保存数量；结合速度、输入、走线和弯道分析比较差异。": "Favorite, name and annotate laps, pin references and choose how many to keep. Compare speed, inputs, racing lines and corner data.",
     "按车型、性能等级和可观测调校特征保存换挡学习结果。": "Save learned shift targets by vehicle, performance class and observable tune traits.",
     "遥测与推导分开": "Telemetry and inference",
     "赛事识别、驾驶建议和抓地趋势由 LazyForza 推导，官方 UDP 字段单独保留。": "LazyForza derives event identification, driving advice and grip trends while preserving official UDP fields separately.",

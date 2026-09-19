@@ -52,6 +52,13 @@ internal sealed class LapPersistenceWorker
         workerTask = null;
     }
 
+    public Task FlushAsync()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Enqueue(default(LapPersistenceCommand) with { Completion = completion });
+        return completion.Task;
+    }
+
     private async Task RunAsync(ChannelReader<LapPersistenceCommand> reader)
     {
         await foreach (var command in reader.ReadAllAsync().ConfigureAwait(false))
@@ -70,6 +77,7 @@ internal sealed class LapPersistenceWorker
 
     private void Execute(LapPersistenceCommand command)
     {
+        if (command.Completion is { } completion) { completion.TrySetResult(); return; }
         if (command.Lap is { } lap)
         {
             store.SaveLap(lap);
@@ -102,6 +110,7 @@ internal readonly record struct LapPersistenceCommand(
     int[]? PerformanceClasses,
     Guid[]? PreserveLapIds)
 {
+    public TaskCompletionSource? Completion { get; init; }
     public static LapPersistenceCommand Save(LapRecord lap) => new(lap, null, null, null, null);
     public static LapPersistenceCommand Delete(Guid lapId) => new(null, lapId, null, null, null);
     public static LapPersistenceCommand DeleteTrack(

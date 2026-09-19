@@ -15,7 +15,7 @@ internal sealed partial class MainWindow
     private int lapAnalysisTabIndex;
 
     private UIElement BuildLapSessionHistory(TrackTemplate? track, IReadOnlyList<LapSummary> laps,
-        IReadOnlySet<int> classes, bool approximate, Action<LapSummary> inspect)
+        IReadOnlySet<int> classes, bool approximate, Action<LapSummary> inspect, Action<LapSummary>? edit = null)
     {
         if (track is null) return AnalysisEmptyState("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。");
         if (classes.Count == 0) return AnalysisEmptyState("未选择性能等级", "选择至少一个性能等级。");
@@ -44,7 +44,7 @@ internal sealed partial class MainWindow
         {
             if (selector.SelectedItem is not ComboBoxItem { Tag: LapSessionAnalysis selected }) return;
             selectedAnalysisSession = selected.Key;
-            detail.Content = BuildLapSessionDetail(selected, approximate, inspect);
+            detail.Content = BuildLapSessionDetail(selected, approximate, inspect, edit);
             AppLocalization.ApplyTo(detail);
         };
         selector.SelectedItem = selector.Items.OfType<ComboBoxItem>()
@@ -62,7 +62,7 @@ internal sealed partial class MainWindow
         _ => track.TimingKind == TrackTimingKind.EstateGeometry ? "地产历史记录" : "普通比赛"
     }) + (info?.Number is > 0 ? $" · {info.Number}" : string.Empty);
 
-    internal static UIElement BuildLapSessionDetail(LapSessionAnalysis session, bool approximate, Action<LapSummary> inspect)
+    internal static UIElement BuildLapSessionDetail(LapSessionAnalysis session, bool approximate, Action<LapSummary> inspect, Action<LapSummary>? edit = null)
     {
         var panel = new StackPanel();
         var overview = new StackPanel();
@@ -121,6 +121,11 @@ internal sealed partial class MainWindow
         open.HorizontalAlignment = HorizontalAlignment.Right;
         DockPanel.SetDock(open, Dock.Right);
         header.Children.Add(open);
+        var manage = AnalysisButton("管理圈记录");
+        manage.IsEnabled = false;
+        manage.Visibility = edit is null ? Visibility.Collapsed : Visibility.Visible;
+        DockPanel.SetDock(manage, Dock.Right); if (edit is not null) header.Children.Add(manage);
+        manage.Click += (_, _) => { if (lapList.SelectedItem is SessionLapRow selected) edit?.Invoke(selected.Lap); };
         var title = Label("本场圈记录", 16, FontWeights.SemiBold);
         title.VerticalAlignment = VerticalAlignment.Center;
         header.Children.Add(title);
@@ -136,7 +141,7 @@ internal sealed partial class MainWindow
         }
         records.Children.Add(columns);
         records.Children.Add(lapList);
-        lapList.SelectionChanged += (_, _) => open.IsEnabled = lapList.SelectedItem is SessionLapRow;
+        lapList.SelectionChanged += (_, _) => open.IsEnabled = manage.IsEnabled = lapList.SelectedItem is SessionLapRow;
         void OpenSelected() { if (lapList.SelectedItem is SessionLapRow row) inspect(row.Lap); }
         open.Click += (_, _) => OpenSelected();
         lapList.MouseDoubleClick += (_, _) => OpenSelected();
@@ -155,4 +160,9 @@ internal sealed partial class MainWindow
     }
 }
 
-internal sealed record SessionLapRow(int Number, string Time, string Delta, string Vehicle, string State, Brush StateBrush, LapSummary Lap);
+internal sealed record SessionLapRow(int Number, string Time, string Delta, string Vehicle, string State, Brush StateBrush, LapSummary Lap)
+{
+    public string Label => string.Join(" · ", new[] { Lap.Annotation.IsFavorite ? AppLocalization.Literal("收藏") : null,
+        Lap.Annotation.IsReference ? AppLocalization.Literal("固定参考") : null, Lap.Annotation.Name }.Where(value => value is not null));
+    public string? Tooltip => Lap.Annotation.Notes ?? Lap.InvalidReason;
+}
