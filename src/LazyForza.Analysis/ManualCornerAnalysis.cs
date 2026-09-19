@@ -16,28 +16,51 @@ public static class ManualCornerAnalyzer
 {
     public const double MaximumSampleGapMeters = 25;
     public const double MaximumSampleGapSeconds = .75;
+    private const string MissingSamples = "样本不足或不连续：需要覆盖区间边界，至少 8 个样本，相邻不超过 25 米及 0.75 秒；不外推缺失数据。";
+
+    /// <summary>Inspect a lap's own distance samples without requiring comparison metadata.</summary>
+    public static ManualCornerResult Analyze(LapRecord lap, ManualCorner corner)
+    {
+        if (!double.IsFinite(lap.TotalSeconds) || lap.TotalSeconds <= 0)
+            return new(corner, CornerEvidence.Insufficient, "本圈缺少有效的计时数据，无法计算弯道指标。");
+        var length = lap.Samples.Where(sample => double.IsFinite(sample.S)).Select(sample => sample.S).DefaultIfEmpty(0).Max();
+        if (!IsValid(corner, length))
+            return new(corner, CornerEvidence.Insufficient, "区间需位于本圈已记录的距离范围内，且至少长 30 米；跨终点弯请分开标记。");
+        var samples = Window(lap, corner);
+        if (samples is null) return new(corner, CornerEvidence.Insufficient, MissingSamples);
+        var grid = samples.Select(sample => sample.S).Where(s => s >= corner.StartS && s <= corner.EndS)
+            .Append(corner.StartS).Append(corner.EndS).Distinct().Order().ToArray();
+        var metrics = Metrics(samples, grid);
+        return new(corner, metrics.BrakeStartS is not null && metrics.ThrottleRecoveryS is not null
+            ? CornerEvidence.Sufficient : CornerEvidence.Partial, "按本圈已记录的距离与输入计算。", metrics);
+    }
+
+    public static string? ComparisonEligibility(TrackTemplate? track, LapSummary lap)
+    {
+        if (track is null) return "缺少保存的赛道信息，无法确认两圈使用同一路线。";
+        if (track.Id == Guid.Empty || lap.TrackId != track.Id || lap.Direction != track.Direction || lap.SectorSchemaVersion <= 0)
+            return "赛道、方向或分段版本不兼容。";
+        if (string.IsNullOrWhiteSpace(lap.TrackRevision))
+            return "缺少路线修订信息，无法确认两圈使用同一路线。";
+        if (lap.TrackRevision != LapTrackRevision.Create(track))
+            return "记录的路线修订与当前赛道不一致。";
+        if (!lap.IsValid || !double.IsFinite(lap.TotalSeconds) || lap.TotalSeconds <= 0)
+            return "仅比较已保存的有效完整圈。";
+        if (lap.Vehicle.CarOrdinal <= 0 || lap.Vehicle.CarClass < 0 || lap.Vehicle.PerformanceIndex <= 0 ||
+            lap.Vehicle.RoundedMaxRpm <= 0 || lap.Vehicle.DrivetrainType is < 0 or > 2 || lap.Vehicle.NumCylinders < 0 ||
+            string.IsNullOrWhiteSpace(lap.Vehicle.GearSlopeSignature) || string.IsNullOrWhiteSpace(lap.Vehicle.CurveSignature))
+            return "缺少完整车辆信息，无法确认车辆条件是否兼容。";
+        return null;
+    }
 
     public static string? Compatibility(TrackTemplate track, LapSummary selected, LapSummary reference)
     {
         if (selected.Id == reference.Id) return "请选择另一条已记录的完整参考圈。";
-        if (track.Id == Guid.Empty || selected.TrackId != track.Id || reference.TrackId != track.Id ||
-            selected.Direction != track.Direction || reference.Direction != track.Direction ||
-            selected.SectorSchemaVersion != reference.SectorSchemaVersion || selected.SectorSchemaVersion <= 0)
+        if (ComparisonEligibility(track, selected) is { } selectedReason) return selectedReason;
+        if (ComparisonEligibility(track, reference) is { } referenceReason) return referenceReason;
+        if (selected.SectorSchemaVersion != reference.SectorSchemaVersion)
             return "赛道、方向或分段版本不兼容。";
-        if (string.IsNullOrWhiteSpace(selected.TrackRevision) || selected.TrackRevision != reference.TrackRevision ||
-            selected.TrackRevision != LapTrackRevision.Create(track))
-            return "缺少圈对应的路线修订标识，或路线修订不一致；无法进行弯道比较。";
-        if (!selected.IsValid || !reference.IsValid ||
-            !double.IsFinite(selected.TotalSeconds) || selected.TotalSeconds <= 0 ||
-            !double.IsFinite(reference.TotalSeconds) || reference.TotalSeconds <= 0)
-            return "仅比较已保存的有效完整圈。";
-        if (selected.Vehicle.CarOrdinal <= 0 || selected.Vehicle.CarClass < 0 ||
-            selected.Vehicle.PerformanceIndex <= 0 || selected.Vehicle.RoundedMaxRpm <= 0 ||
-            selected.Vehicle.DrivetrainType is < 0 or > 2 || selected.Vehicle.NumCylinders < 0 ||
-            reference.Vehicle.DrivetrainType is < 0 or > 2 || reference.Vehicle.NumCylinders < 0 ||
-            string.IsNullOrWhiteSpace(selected.Vehicle.GearSlopeSignature) || string.IsNullOrWhiteSpace(selected.Vehicle.CurveSignature) ||
-            string.IsNullOrWhiteSpace(reference.Vehicle.GearSlopeSignature) || string.IsNullOrWhiteSpace(reference.Vehicle.CurveSignature) ||
-            !VehicleTuneCompatibility.AreCompatible(selected.Vehicle, reference.Vehicle))
+        if (!VehicleTuneCompatibility.AreCompatible(selected.Vehicle, reference.Vehicle))
             return "车辆型号、性能等级、PI、驱动或可观察配置不兼容。";
         return null;
     }
@@ -56,7 +79,7 @@ public static class ManualCornerAnalyzer
         var left = Window(selected, corner);
         var right = Window(reference, corner);
         if (left is null || right is null)
-            return new(corner, CornerEvidence.Insufficient, "样本不足或不连续：需要覆盖区间边界，至少 8 个样本，相邻不超过 25 米及 0.75 秒；不外推缺失数据。");
+            return new(corner, CornerEvidence.Insufficient, MissingSamples);
 
         // Both series are linearly interpolated on the same distance grid. Include original
         // knots so speed minima are preserved instead of being lost to uniform resampling.

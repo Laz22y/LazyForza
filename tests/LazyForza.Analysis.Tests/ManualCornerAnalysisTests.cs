@@ -11,6 +11,54 @@ public sealed class ManualCornerAnalysisTests
     private static readonly ManualCorner Corner = new("T1", 80, 400);
 
     [TestMethod]
+    public void LegacyAndInvalidLapsCanBeInspectedWithoutComparisonMetadata()
+    {
+        var original = Lap();
+        var legacy = original with { TrackRevision = null, IsValid = false,
+            Vehicle = original.Vehicle with { DrivetrainType = -1, NumCylinders = -1, GearSlopeSignature = "", CurveSignature = "" } };
+        var result = ManualCornerAnalyzer.Analyze(legacy, Corner);
+        Assert.AreEqual(CornerEvidence.Sufficient, result.Evidence);
+        Assert.AreEqual(6.4, result.Selected!.Seconds, 1e-9);
+        Assert.AreEqual(72, result.Selected.MinimumSpeedKph, 1e-9);
+        Assert.IsNotNull(result.Selected.BrakeStartS);
+        Assert.IsNotNull(result.Selected.ThrottleRecoveryS);
+        Assert.IsNull(result.Reference);
+        Assert.IsEmpty(ManualCornerAnalyzer.Describe([result]), "A single lap must not invent comparison advice.");
+        Assert.AreEqual(CornerEvidence.Incompatible, ManualCornerAnalyzer.Compare(Track(), legacy, Lap(), Corner).Evidence);
+        Assert.IsNull(legacy.TrackRevision, "Inspection must not manufacture missing historical context.");
+    }
+
+    [TestMethod]
+    public void SingleLapAnalysisKeepsUnknownInputsPartialAndRejectsOnlyUnusableIntervals()
+    {
+        var lap = Lap();
+        var constantInputs = lap with { Samples = lap.Samples.Select(sample => sample with { Brake = 0, Accel = 1 }).ToArray() };
+        var partial = ManualCornerAnalyzer.Analyze(constantInputs, Corner);
+        Assert.AreEqual(CornerEvidence.Partial, partial.Evidence);
+        Assert.AreEqual(6.4, partial.Selected!.Seconds, 1e-9);
+        Assert.IsNull(partial.Selected.BrakeStartS);
+        Assert.IsNull(partial.Selected.ThrottleRecoveryS);
+        var gap = lap with { Samples = lap.Samples.Where(sample => sample.S < 150 || sample.S > 200).ToArray() };
+        Assert.AreEqual(CornerEvidence.Insufficient, ManualCornerAnalyzer.Analyze(gap, Corner).Evidence);
+        Assert.IsNotNull(ManualCornerAnalyzer.Analyze(gap, new("T2", 250, 400)).Selected);
+        foreach (var missing in new[] { lap with { Samples = [] }, Lap(step: 50), lap with { TotalSeconds = double.NaN } })
+            Assert.IsNull(ManualCornerAnalyzer.Analyze(missing, Corner).Selected);
+        Assert.IsNull(ManualCornerAnalyzer.Analyze(lap, new("T", 0, 501)).Selected);
+    }
+
+    [TestMethod]
+    public void ComparisonReasonsDistinguishMissingRouteVehicleAndChangedConfiguration()
+    {
+        var lap = Lap();
+        static LapSummary Summary(LapRecord value) => LapSummary.FromRecord(value);
+        StringAssert.Contains(ManualCornerAnalyzer.ComparisonEligibility(null, LapSummary.FromRecord(lap))!, "缺少保存的赛道信息");
+        StringAssert.Contains(ManualCornerAnalyzer.Compatibility(Track(), Summary(lap with { TrackRevision = null }), Summary(Lap()))!, "缺少路线修订信息");
+        StringAssert.Contains(ManualCornerAnalyzer.Compatibility(Track(), Summary(lap), Summary(Lap() with { TrackRevision = "old" }))!, "路线修订与当前赛道不一致");
+        StringAssert.Contains(ManualCornerAnalyzer.Compatibility(Track(), Summary(lap), Summary(Lap() with { Vehicle = lap.Vehicle with { DrivetrainType = -1 } }))!, "缺少完整车辆信息");
+        StringAssert.Contains(ManualCornerAnalyzer.Compatibility(Track(), Summary(lap), Summary(Lap() with { Vehicle = lap.Vehicle with { PerformanceIndex = 900 } }))!, "车辆型号");
+    }
+
+    [TestMethod]
     public void DistanceAlignmentIgnoresAbsoluteTimeOffsetAndDifferentSamplingRates()
     {
         var reference = Lap(step: 5);
