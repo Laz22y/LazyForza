@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -7,6 +8,7 @@ using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Shell;
 using System.Windows.Threading;
 using LazyForza.App;
@@ -79,6 +81,67 @@ public sealed class BrandWindowFrameTests
             Assert.AreEqual(1, Hit(buttons[CaptionAction.Close].PointToScreen(new Point(23, 24))), "Close is an accessible client button.");
             Assert.AreEqual(13, Hit(window.PointToScreen(new Point(1, 1))), "Corner resizing must remain native.");
             Assert.IsFalse(release.IsAnimationScheduled, "An inactive window must not animate its branding.");
+
+            var maximize = buttons[CaptionAction.Maximize];
+            var source = HwndSource.FromHwnd(hwnd)!;
+            var nativeMaximizeCommands = 0;
+            IntPtr ObserveCommand(IntPtr handle, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+            {
+                if (message == 0x112 && (wParam.ToInt64() & 0xfff0) == 0xf030)
+                { nativeMaximizeCommands++; handled = true; }
+                return IntPtr.Zero;
+            }
+            source.AddHook(ObserveCommand);
+            try
+            {
+                var center = maximize.PointToScreen(new Point(23, 24));
+                var outside = maximize.PointToScreen(new Point(-20, 24));
+                IntPtr ClientAt(Point screen)
+                {
+                    var point = new NativePoint { X = (int)screen.X, Y = (int)screen.Y };
+                    Assert.IsTrue(ScreenToClient(hwnd, ref point));
+                    return At(new Point(point.X, point.Y));
+                }
+                void Down(int message = 0xA1)
+                {
+                    SendMessage(hwnd, message, new IntPtr(9), At(center));
+                    Assert.AreEqual(hwnd, GetCapture(), "The custom button must own capture instead of entering native caption painting.");
+                    Assert.IsTrue(maximize.NativePressed);
+                }
+                Down();
+                SendMessage(hwnd, 0x200, new IntPtr(1), ClientAt(outside));
+                Assert.IsFalse(maximize.NativePressed, "Dragging out must remove pressed feedback.");
+                SendMessage(hwnd, 0x200, new IntPtr(1), ClientAt(center));
+                Assert.IsTrue(maximize.NativePressed, "Dragging back in must restore pressed feedback.");
+                SendMessage(hwnd, 0x202, IntPtr.Zero, ClientAt(outside)); Pump();
+                Assert.AreEqual(0, nativeMaximizeCommands, "Releasing outside must cancel.");
+                Assert.AreEqual(IntPtr.Zero, GetCapture());
+
+                foreach (var cancel in new[] { 0x1F, 0x100, 0x215 })
+                {
+                    Down();
+                    if (cancel == 0x215) ReleaseCapture();
+                    else SendMessage(hwnd, cancel, new IntPtr(0x1B), IntPtr.Zero);
+                    Assert.IsFalse(maximize.NativePressed);
+                    Assert.IsFalse(maximize.NativeHover);
+                    Assert.AreEqual(IntPtr.Zero, GetCapture());
+                    SendMessage(hwnd, 0xA2, new IntPtr(9), At(center)); Pump();
+                    Assert.AreEqual(0, nativeMaximizeCommands, "A canceled press must not execute on a late release.");
+                }
+                Down(); window.IsEnabled = false;
+                Assert.IsFalse(maximize.NativePressed);
+                Assert.AreEqual(IntPtr.Zero, GetCapture());
+                window.IsEnabled = true;
+
+                Down();
+                SendMessage(hwnd, 0x202, IntPtr.Zero, ClientAt(center)); Pump();
+                Assert.AreEqual(1, nativeMaximizeCommands, "A native caption click must execute exactly once.");
+                Assert.IsFalse(maximize.NativePressed);
+                Down(0xA3);
+                SendMessage(hwnd, 0xA2, new IntPtr(9), At(center)); Pump();
+                Assert.AreEqual(2, nativeMaximizeCommands, "A double-click message must use the same custom press path.");
+            }
+            finally { source.RemoveHook(ObserveCommand); }
             window.Hide();
             void Invoke(CaptionAction action)
             {
@@ -111,6 +174,89 @@ public sealed class BrandWindowFrameTests
             window.Close(); Pump();
         }
     });
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void CaptionStatesKeepSmallGlyphsAndDoNotPaintAMouseFocusBox() => EstateHudRenderingTests.Sta(() =>
+    {
+        var window = new Window { Width = 960, Height = 640, Left = -16000, Top = -16000,
+            ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual };
+        try
+        {
+            var frame = new BrandWindowFrame(window, new ReleaseBrandLine("v1.5.4-dev", "Radio Check"));
+            window.Content = frame.TitleBar;
+            window.Show(); Pump(); window.UpdateLayout();
+            var buttons = Descendants<CaptionButton>(frame.TitleBar).ToArray();
+            var sheet = new DrawingVisual();
+            using (var dc = sheet.RenderOpen())
+            {
+                dc.DrawRectangle((Brush)window.FindResource("SidebarBrush"), null, new Rect(0, 0, 520, 308));
+                var labels = new[] { "默认", "悬停", "按下", "不可用" };
+                for (var state = 0; state < labels.Length; state++)
+                {
+                    dc.DrawText(new FormattedText(labels[state], System.Globalization.CultureInfo.GetCultureInfo("zh-CN"),
+                        FlowDirection.LeftToRight, new Typeface("Microsoft YaHei UI"), 13, Brushes.LightSlateGray, 1), new Point(20, 35 + state * 72));
+                    for (var column = 0; column < 4; column++)
+                    {
+                        var button = buttons[column == 3 ? 2 : Math.Min(column, 1)];
+                        button.Restore = column == 2;
+                        button.Active = true;
+                        button.NativeHover = state is 1 or 2;
+                        button.NativePressed = state == 2;
+                        button.IsEnabled = state != 3;
+                        button.InvalidateVisual(); button.UpdateLayout();
+                        var before = Render(button);
+                        if (state == 0)
+                        {
+                            Assert.IsTrue(button.Focus());
+                            button.UpdateLayout();
+                            CollectionAssert.AreEqual(Pixels(before), Pixels(Render(button)),
+                                "Acquiring focus after a click must not draw a white rectangle into the caption surface.");
+                            Assert.AreSame(window.FindResource("KeyboardFocusVisual"), button.FocusVisualStyle,
+                                "Keyboard navigation keeps the shared accent focus adorner.");
+                        }
+                        // Native and WPF input share the same drawing at 100%, 150%, and 200% scale.
+                        foreach (var dpi in new[] { 96d, 144d, 192d })
+                        {
+                            var scaled = Render(button, dpi);
+                            var pixel = new byte[4];
+                            scaled.CopyPixels(new Int32Rect((int)(8 * dpi / 96), (int)(8 * dpi / 96), 1, 1), pixel, 4, 0);
+                            Assert.AreEqual(state is 1 or 2 ? (byte)255 : (byte)0, pixel[3],
+                                $"Unexpected caption surface: state {state}, glyph {column}, DPI {dpi}.");
+                        }
+                        dc.DrawImage(before, new Rect(112 + column * 88, 10 + state * 72, 69, 70.5));
+                    }
+                }
+            }
+            if (Environment.GetEnvironmentVariable("LAZYFORZA_CAPTION_QA") is { Length: > 0 } path)
+            {
+                Directory.CreateDirectory(path);
+                var bitmap = new RenderTargetBitmap(520, 308, 96, 96, PixelFormats.Pbgra32); bitmap.Render(sheet);
+                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                using var output = File.Create(Path.Combine(path, "caption-states.png")); encoder.Save(output);
+            }
+        }
+        finally { window.Close(); Pump(); }
+    });
+
+    private static RenderTargetBitmap Render(CaptionButton button, double dpi = 96)
+    {
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(button.ActualWidth * dpi / 96),
+            (int)Math.Ceiling(button.ActualHeight * dpi / 96), dpi, dpi, PixelFormats.Pbgra32);
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+            dc.DrawRectangle(new VisualBrush(button), null, new Rect(0, 0, button.ActualWidth, button.ActualHeight));
+        bitmap.Render(visual);
+        Assert.IsTrue(Pixels(bitmap).Any(value => value != 0), "The rendered caption must include its glyph.");
+        return bitmap;
+    }
+
+    private static byte[] Pixels(BitmapSource bitmap)
+    {
+        var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+        bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
+        return pixels;
+    }
 
     [TestMethod]
     [DataRow(1, 1, 13)]
@@ -153,6 +299,16 @@ public sealed class BrandWindowFrameTests
 
     [DllImport("user32.dll", EntryPoint = "SendMessageW")]
     private static extern IntPtr SendMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetCapture();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ScreenToClient(IntPtr hwnd, ref NativePoint point);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)]

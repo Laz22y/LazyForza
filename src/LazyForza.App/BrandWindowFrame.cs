@@ -19,6 +19,7 @@ internal sealed class BrandWindowFrame
     private readonly Image logo;
     private HwndSource? source;
     private bool tracking;
+    private bool maximizeCaptured;
     internal Border TitleBar { get; }
 
     internal BrandWindowFrame(Window window, ReleaseBrandLine release)
@@ -106,11 +107,13 @@ internal sealed class BrandWindowFrame
 
     private void UpdateState(object? sender, EventArgs args)
     {
+        if (!window.IsActive || !window.IsEnabled || maximize.Restore != (window.WindowState == WindowState.Maximized))
+            CancelMaximizePress();
         maximize.Restore = window.WindowState == WindowState.Maximized;
         foreach (var button in new[] { minimize, maximize, close })
         {
             button.Active = window.IsActive;
-            if (!window.IsActive) button.NativeHover = false;
+            if (!window.IsActive || !window.IsEnabled) button.NativeHover = false;
             button.RefreshLabel();
             button.InvalidateVisual();
         }
@@ -136,7 +139,8 @@ internal sealed class BrandWindowFrame
             }
         }
         // Only the maximize button is a native caption hit. This exposes Windows 11 Snap Layouts.
-        // Windows tracks its non-client click and executes SC_MAXIMIZE / SC_RESTORE normally.
+        // Keep the hover path native for Snap Layouts, but own the click to prevent DefWindowProc
+        // from painting a second, system caption glyph over our WPF button during its tracking loop.
         if (message == 0x84 && window.IsEnabled && maximize.IsVisible) // WM_NCHITTEST
         {
             var screen = ScreenPoint(lParam);
@@ -150,6 +154,43 @@ internal sealed class BrandWindowFrame
             if (new Rect(maximize.RenderSize).Contains(point))
             { handled = true; return new IntPtr(9); }
         }
+        if (message is 0xA1 or 0xA3 && wParam.ToInt32() == 9 && window.IsEnabled) // NC left down / double click
+        {
+            window.Activate();
+            maximizeCaptured = true;
+            SetCapture(hwnd);
+            maximize.NativeHover = maximize.NativePressed = GetCapture() == hwnd;
+            if (!maximize.NativePressed) maximizeCaptured = false;
+            handled = true;
+            return IntPtr.Zero;
+        }
+        if (maximizeCaptured && message is 0x200 or 0xA0 or 0x202 or 0xA2) // captured move / left up
+        {
+            var point = ScreenPoint(lParam);
+            if (message is 0x200 or 0x202)
+            {
+                var client = new NativePoint((int)point.X, (int)point.Y);
+                ClientToScreen(hwnd, ref client);
+                point = new Point(client.X, client.Y);
+            }
+            var inside = window.IsEnabled && new Rect(maximize.RenderSize).Contains(maximize.PointFromScreen(point));
+            maximize.NativeHover = maximize.NativePressed = inside;
+            if (message is 0x202 or 0xA2)
+            {
+                CancelMaximizePress();
+                maximize.NativeHover = inside;
+                if (inside) Execute(CaptionAction.Maximize);
+            }
+            handled = true;
+            return IntPtr.Zero;
+        }
+        if (message == 0xA2 && wParam.ToInt32() == 9) // A canceled native press must not fall back to system painting.
+        {
+            handled = true;
+            return IntPtr.Zero;
+        }
+        if (message is 0x1F or 0x215 || message == 0x100 && wParam.ToInt32() == 0x1B) // CANCELMODE, CAPTURECHANGED, Escape
+            CancelMaximizePress();
         if (message == 0xA0) // WM_NCMOUSEMOVE
         {
             maximize.NativeHover = wParam.ToInt32() == 9 && window.IsEnabled;
@@ -159,12 +200,20 @@ internal sealed class BrandWindowFrame
                 tracking = TrackMouseEvent(ref request);
             }
         }
-        else if (message is 0x2A2 or 0x215 or 0x200) // NCLEAVE, CAPTURECHANGED, client MOUSEMOVE
+        else if (message is 0x2A2 or 0x200) // NCLEAVE, client MOUSEMOVE
         {
-            maximize.NativeHover = false;
+            if (!maximizeCaptured) maximize.NativeHover = false;
             if (message == 0x2A2) tracking = false;
         }
         return IntPtr.Zero;
+    }
+
+    private void CancelMaximizePress()
+    {
+        var wasCaptured = maximizeCaptured;
+        maximizeCaptured = false;
+        maximize.NativePressed = maximize.NativeHover = false;
+        if (wasCaptured && source is not null && GetCapture() == source.Handle) ReleaseCapture();
     }
 
     internal static Point ScreenPoint(IntPtr value) => new(unchecked((short)(value.ToInt64() & 0xffff)),
@@ -182,6 +231,7 @@ internal sealed class BrandWindowFrame
 
     private void Detach(object? sender, EventArgs args)
     {
+        CancelMaximizePress();
         source?.RemoveHook(WndProc);
         source = null;
         window.SourceInitialized -= Attach;
@@ -210,6 +260,16 @@ internal sealed class BrandWindowFrame
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool TrackMouseEvent(ref TrackMouse request);
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetCapture(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetCapture();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ClientToScreen(IntPtr hwnd, ref NativePoint point);
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
 }
@@ -224,6 +284,8 @@ internal sealed class CaptionButton : Button
     internal bool Active { get; set; }
     private bool nativeHover;
     internal bool NativeHover { get => nativeHover; set { if (nativeHover != value) { nativeHover = value; InvalidateVisual(); } } }
+    private bool nativePressed;
+    internal bool NativePressed { get => nativePressed; set { if (nativePressed != value) { nativePressed = value; InvalidateVisual(); } } }
 
     internal CaptionButton(CaptionAction action)
     {
@@ -233,6 +295,8 @@ internal sealed class CaptionButton : Button
         Background = Brushes.Transparent;
         Style = null;
         Template = new ControlTemplate(typeof(Button));
+        // WPF shows this adorner for keyboard navigation only, unlike IsKeyboardFocused after a mouse click.
+        SetResourceReference(FocusVisualStyleProperty, "KeyboardFocusVisual");
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
         RefreshLabel();
@@ -254,18 +318,22 @@ internal sealed class CaptionButton : Button
     protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
-        if (e.Property == IsMouseOverProperty || e.Property == IsPressedProperty || e.Property == IsKeyboardFocusedProperty ||
+        if (e.Property == IsMouseOverProperty || e.Property == IsPressedProperty ||
             e.Property == IsEnabledProperty) InvalidateVisual();
     }
 
     protected override void OnRender(DrawingContext dc)
     {
         var hover = IsEnabled && (IsMouseOver || NativeHover);
-        var fill = hover ? Action == CaptionAction.Close ? Color.FromRgb(196, 43, 59)
-            : Color.FromRgb(38, 48, 60) : Colors.Transparent;
-        if (IsPressed && hover) fill.A = 185;
-        dc.DrawRectangle(new SolidColorBrush(fill), null, new Rect(RenderSize));
-        var foreground = hover || Active ? Colors.White : Color.FromRgb(154, 164, 178);
+        var pressed = IsEnabled && (IsPressed || NativePressed);
+        var fill = pressed ? Action == CaptionAction.Close ? Color.FromRgb(169, 35, 50) : Color.FromRgb(48, 65, 84)
+            : hover ? Action == CaptionAction.Close ? Color.FromRgb(196, 43, 59) : Color.FromRgb(38, 48, 60)
+            : Colors.Transparent;
+        // The transparent full target remains clickable; only the inset surface changes between states.
+        dc.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
+        dc.DrawRoundedRectangle(new SolidColorBrush(fill), null,
+            new Rect(2, 2, Math.Max(0, ActualWidth - 4), Math.Max(0, ActualHeight - 4)), 5, 5);
+        var foreground = hover || pressed || Active ? Colors.White : Color.FromRgb(154, 164, 178);
         if (!IsEnabled) foreground.A = 95;
         var pen = new Pen(new SolidColorBrush(foreground), 1);
         var x = Math.Floor((ActualWidth - 10) / 2) + .5;
@@ -289,6 +357,5 @@ internal sealed class CaptionButton : Button
             dc.DrawRectangle(null, pen, new Rect(x, y + 2, 8, 8));
         }
         else dc.DrawRectangle(null, pen, new Rect(x, y, 10, 10));
-        if (IsKeyboardFocused) dc.DrawRectangle(null, pen, new Rect(4.5, 4.5, Math.Max(0, ActualWidth - 9), Math.Max(0, ActualHeight - 9)));
     }
 }
