@@ -33,7 +33,8 @@ public sealed record EstateRaceConnectionProfile(
     string ThemeColor,
     string? TeamName,
     string? TeamId = null,
-    EstateRaceConnectionRole Role = EstateRaceConnectionRole.Driver)
+    EstateRaceConnectionRole Role = EstateRaceConnectionRole.Driver,
+    LazyForza.EstatePeer.PeerConnection? Peer = null)
 {
     public bool IsObserver => Role == EstateRaceConnectionRole.Observer;
 }

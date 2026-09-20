@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="LazyForza.RaceServer.Core" />
+    <PackageReference Include="LazyForza.RaceServer.Control" />
+    <ProjectReference Include="../LazyForza.EstatePeer/LazyForza.EstatePeer.csproj" />
+  </ItemGroup>
+</Project>

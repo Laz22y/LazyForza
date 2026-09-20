@@ -21,6 +21,7 @@
     <Resource Include="Assets\LazyForza.png" />
     <Resource Include="Assets\LazyForzaWordmark.png" />
     <EmbeddedResource Include="Localization\*.json" />
+    <EmbeddedResource Include="Assets\estate-peer-component.json" LogicalName="LazyForza.EstatePeer.ComponentCatalog" Condition="Exists('Assets\estate-peer-component.json')" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" />

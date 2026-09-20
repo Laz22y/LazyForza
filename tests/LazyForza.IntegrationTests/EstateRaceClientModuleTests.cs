@@ -19,7 +19,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LazyForza.IntegrationTests;
 
 [TestClass]
-public sealed class EstateRaceClientModuleTests
+public sealed partial class EstateRaceClientModuleTests
 {
     [TestMethod]
     public async Task PlayerCodeOnlyPrefillsEstateRaceBeforeARepresentativeNameHasBeenSaved()

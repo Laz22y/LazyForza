@@ -1,4 +1,83 @@
 {
+  "literal:直连房间 · 实验": "Direct room · Experimental",
+  "literal:直连房间": "Direct room",
+  "literal:房主承载比赛，玩家直接连接。无需房间目录或中继服务。": "The host runs the race; players connect directly. No room directory or relay service is used.",
+  "literal:加入房间": "Join room",
+  "literal:创建房间": "Host room",
+  "literal:邀请代码": "Invitation code",
+  "literal:请粘贴完整代码；短房间编号仅用于核对。": "Paste the full code. The short room number is only for identification.",
+  "literal:房间密码": "Room password",
+  "literal:显示名称": "Display name",
+  "literal:以 OB 身份加入": "Join as an observer",
+  "literal:请先退出当前赛事房间。": "Leave the current race room first.",
+  "literal:正在寻找可达地址并验证房主…": "Finding a reachable address and verifying the host…",
+  "literal:房主身份已验证，正在同步赛道并加入…": "Host verified. Syncing the track and joining…",
+  "literal:此客户端尚未配置房主组件，请等待匹配的组件版本。": "This client has no host component catalog yet. A matching component is required.",
+  "literal:加入房间不需要下载房主组件。": "Joining a room does not require the host component.",
+  "literal:房主组件": "Host component",
+  "literal:房主组件 · 已安装": "Host component · Installed",
+  "literal:按需安装房主组件": "Install the optional host component",
+  "literal:下载组件": "Download component",
+  "literal:导入离线包": "Import offline package",
+  "literal:卸载组件": "Uninstall component",
+  "literal:组件管理": "Manage component",
+  "literal:房主组件已安装，可以创建房间。": "Host component installed. You can now create a room.",
+  "literal:组件已卸载，房间项目仍然保留。": "Component uninstalled. Your room projects have been kept.",
+  "literal:此实验组件尚未发布下载，可导入匹配的离线包。": "This experimental component has not been published. You can import a matching offline package.",
+  "literal:安装后即可离线建房。加入他人房间不需要此组件。": "Host offline after installation. Joining other rooms does not require this component.",
+  "literal:新建房间项目": "New room project",
+  "literal:房间项目": "Room project",
+  "literal:房间名称": "Room name",
+  "literal:地产赛道": "Estate track",
+  "literal:监听端口（TCP）": "Listening port (TCP)",
+  "literal:外部或指定网卡 IP（可选）": "External or selected interface IP (optional)",
+  "literal:外部端口": "External port",
+  "literal:局域网与可用 IPv6 地址自动加入邀请。公网 IPv4 经路由器连接时，请手动映射 TCP 端口并填写外部地址。": "LAN and available IPv6 addresses are added automatically. For public IPv4 behind a router, map the TCP port manually and enter the external address.",
+  "literal:比赛与网络设置": "Race and network settings",
+  "literal:创建并加入": "Create and join",
+  "literal:请填写有效圈数与端口；监听端口范围为 1024–65535。": "Enter valid laps and ports. The listening port must be between 1024 and 65535.",
+  "literal:请先录入或导入一条地产赛道。": "Record or import an estate track first.",
+  "literal:正在校验组件并创建房间…": "Verifying the component and creating the room…",
+  "literal:房间已创建。请将完整邀请代码和密码分享给其他玩家。": "Room created. Share the full invitation code and password with other players.",
+  "literal:复制邀请代码": "Copy invitation",
+  "literal:刷新邀请代码": "Refresh invitation",
+  "literal:邀请已刷新。旧代码不能用于新加入，已加入成员可以继续比赛和重连。": "Invitation refreshed. Old codes no longer admit new members; existing members can continue and reconnect.",
+  "literal:加入本机房间": "Join local room",
+  "literal:开始练习": "Start practice",
+  "literal:绿旗／确认续赛": "Green / resume",
+  "literal:强制发车": "Force start",
+  "literal:跳过赛前检查警告并发车？": "Start despite pre-race check warnings?",
+  "literal:结束本场": "Finish event",
+  "literal:更多比赛控制": "More race controls",
+  "literal:关闭房间": "Close room",
+  "literal:关闭房间会断开所有成员。比赛项目会保留，之后可选择原项目恢复。": "Closing disconnects all members. The project is kept and can be selected again to resume.",
+  "literal:房间已关闭，比赛项目已保留。": "Room closed. The race project has been kept.",
+  "literal:关闭此窗口仍会保持房间运行；退出 LazyForza 才会关闭房主组件。": "The room stays open when this window closes. Exiting LazyForza stops the host component.",
+  "literal:连接条件与诊断": "Connection requirements",
+  "literal:优先使用同一局域网或双方可达的 IPv6。房主使用公网 IPv4 时需开放 TCP 入站与路由器端口映射。双方都在不可映射的 NAT 后且没有 IPv6 时无法直连，请更换房主或网络。此功能仅同步 LazyForza 赛事，不建立游戏车队连接。": "Use the same LAN or mutually reachable IPv6. Public IPv4 hosting needs inbound TCP access and router port forwarding. If both sides are behind unmappable NAT without IPv6, choose another host or network. This synchronizes LazyForza race data; it does not establish a game convoy.",
+  "literal:监听已就绪；其他设备连入后才代表对应路径可达。": "Listener ready. A connection from another device is needed to verify reachability.",
+  "literal:房主组件已退出。重新创建时可选择原项目恢复比赛。": "The host component has stopped. Select the original project to recover the race.",
+  "literal:操作已生效。": "Command applied.",
+  "literal:房间密码需要 6–128 个字符。": "Room passwords must contain 6–128 characters.",
+  "literal:房间名需要 1–64 个字符。": "Room names must contain 1–64 characters.",
+  "literal:邀请代码已过期，请房主重新分享。": "The invitation has expired. Ask the host for a new one.",
+  "literal:邀请代码无效或损坏，请复制完整代码。": "The invitation is invalid or damaged. Copy the complete code.",
+  "literal:未找到可达的房主。请检查双方 IPv6、房主端口映射和防火墙；此模式没有中继后备。": "No reachable host found. Check IPv6, the host's port forwarding and firewall. This mode has no relay fallback.",
+  "literal:房间密码不正确，或尝试过于频繁。请核对密码后稍后重试。": "Incorrect room password or too many attempts. Check the password and try again later.",
+  "literal:恢复房间的密码不正确。": "The password for the saved room is incorrect.",
+  "literal:恢复房间必须使用原赛道版本。": "Restoring a room requires the original track version.",
+  "literal:外部地址必须是有效 IP，端口范围为 1–65535。": "Enter a valid IP address and a port from 1 to 65535.",
+  "literal:未找到可分享的网络地址，请连接局域网或填写可达 IP。": "No shareable address found. Connect to a LAN or enter a reachable IP.",
+  "literal:请先安装或修复房主组件。": "Install or repair the host component first.",
+  "literal:请先关闭当前直连房间。": "Close the current direct room first.",
+  "literal:组件包与当前客户端要求的版本或 SHA-256 不一致。": "The package does not match the version or SHA-256 required by this client.",
+  "literal:该组件版本已存在；请先卸载损坏的组件再安装。": "This component version already exists. Uninstall the damaged component before reinstalling.",
+  "literal:房主组件尚未发布下载，请使用与此客户端匹配的离线包。": "The host component has not been published. Import an offline package matching this client.",
+  "peer.componentSize": "Download {0:0.0} MiB · Installed {1:0.0} MiB · {2}",
+  "peer.downloadProgress": "Downloading host component · {0:P0}",
+  "peer.roomNumber": "Room {0}",
+  "peer.hostPort": "Local TCP port {0} · Invitation expires {1:g}",
+  "peer.members": "{0} drivers joined · {1}",
   "literal:无效": "Invalid",
   "analysis.session.option": "{0:MM-dd HH:mm} · {1} · {2} laps",
   "analysis.session.count": "Saved sessions · {0}",
@@ -2907,4 +2986,32 @@
   ,"literal:勾选最多 4 圈加载对比；点击行尾管理收藏、名称、备注与参考。": "Select up to 4 laps to compare. Use the row menu to manage favorites, names, notes and references."
   ,"lap.delete.savedCount": "{0} · {1} laps"
   ,"analysis.corner.pinnedContext": "Compare with pinned reference · Selected {0} / Reference {1}"
+  ,"literal:打开项目": "Open project"
+  ,"literal:新建项目": "New project"
+  ,"literal:打开并加入": "Open and join"
+  ,"literal:创建独立的比赛项目，赛道与赛果分别保存。": "Create a separate event project with its own track and results."
+  ,"literal:继续原有比赛，保留车手、阶段和赛果。": "Resume the existing event with its drivers, stages and results."
+  ,"literal:请填写房间名称。": "Enter a room name."
+  ,"literal:打开 Web 总控": "Open race control"
+  ,"literal:与服务端相同的总控界面，仅在房主本机开放。": "The full RaceServer control console, available on the host computer."
+  ,"literal:无法打开本机总控。": "Could not open local race control."
+  ,"literal:快捷比赛控制": "Quick race controls"
+  ,"literal:通过回执连接": "Connect with a receipt"
+  ,"literal:连接回执": "Connection receipt"
+  ,"literal:复制连接回执": "Copy receipt"
+  ,"literal:添加连接回执": "Add receipt"
+  ,"literal:继续连接": "Continue connecting"
+  ,"literal:将回执发给房主。房主添加后，点击继续连接。回执十分钟内有效。": "Send this receipt to the host. Once they add it, continue connecting. The receipt expires in ten minutes."
+  ,"literal:玩家无法直接加入时，将连接回执粘贴到这里，再通知对方继续连接。": "If a player cannot join directly, paste their receipt here and ask them to continue connecting."
+  ,"literal:回执已添加，请对方点击继续连接。": "Receipt added. Ask the player to continue connecting."
+  ,"literal:TCP 地址不可达，已准备 UDP 连接回执。": "TCP is unreachable. A UDP connection receipt is ready."
+  ,"literal:正在建立加密 UDP 连接…": "Establishing an encrypted UDP connection…"
+  ,"literal:监听端口（TCP／UDP）": "Listening port (TCP / UDP)"
+  ,"literal:自动收集局域网与 IPv6 地址。使用公网 IPv4 端口映射时，TCP 与 UDP 应映射到相同端口。": "LAN and IPv6 addresses are collected automatically. For public IPv4 forwarding, map TCP and UDP to the same port."
+  ,"literal:连接代码无效或损坏，请复制完整代码。": "Invalid or damaged connection code. Copy the complete code."
+  ,"literal:UDP 连接数量已达上限，请关闭不再使用的连接。": "The UDP connection limit has been reached. Close unused connections."
+  ,"literal:此回执已添加，无需重复导入。": "This receipt has already been added."
+  ,"literal:UDP 直连需要双方使用支持 QUIC 的 Windows 11 和新版房主组件。": "UDP connections require QUIC support on Windows 11 and the updated host component."
+  ,"literal:未找到可用于回执的网络地址。": "No network address is available for the receipt."
+  ,"literal:房主身份已变更，请索取新的邀请代码。": "The host identity has changed. Request a new invitation."
 }

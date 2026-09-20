@@ -11,9 +11,11 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\..\src\LazyForza.App\Themes\Controls.xaml" LogicalName="LazyForzaTheme.xaml" />
+    <EmbeddedResource Include="..\..\src\LazyForza.App\App.xaml" LogicalName="LazyForzaApp.xaml" />
   </ItemGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\..\src\LazyForza.EstatePeer.Host\LazyForza.EstatePeer.Host.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Domain\LazyForza.Domain.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Telemetry\LazyForza.Telemetry.csproj" />
     <ProjectReference Include="..\..\src\LazyForza.Analysis\LazyForza.Analysis.csproj" />

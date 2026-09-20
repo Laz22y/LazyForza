@@ -92,12 +92,19 @@ internal sealed partial class MainWindow
         };
         enterRoom.HorizontalAlignment = HorizontalAlignment.Stretch;
         statusActions.Children.Add(enterRoom);
+        var peerRoom = new Button
+        {
+            Content = "直连房间 · 实验", Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(14, 8, 14, 8)
+        };
+        statusActions.Children.Add(peerRoom);
+        peerRoom.Click += async (_, _) => await OpenEstatePeerWindowAsync();
         Grid.SetColumn(statusActions, 1);
         statusCard.Children.Add(statusActions);
         stack.Children.Add(Card(statusCard));
 
         enterRoom.Click += async (_, _) =>
         {
+            if (estatePeerHost is { IsRunning: true }) { await OpenEstatePeerWindowAsync(); return; }
             if (module.State.IsConnected ||
                 module.State.ConnectionState == EstateRaceConnectionState.Reconnecting &&
                 module.State.Session is not null)
@@ -150,52 +157,7 @@ internal sealed partial class MainWindow
             enterRoom.IsEnabled = false;
             try
             {
-                var descriptor = await EstateRaceModule.ReadServerDescriptorAsync(profile.ServerAddress, lifetimeCancellation.Token);
-                if (descriptor.ProtocolVersion != EstateRaceModule.ProtocolVersion)
-                    throw new InvalidOperationException("服务端协议版本与当前 LazyForza 不兼容。");
-                if (profile.IsObserver && !descriptor.SupportsObservers)
-                    throw new InvalidOperationException("该服务端版本不支持 OB 身份，请让房主更新服务端。");
-                if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackId))
-                {
-                    if (!Guid.TryParse(descriptor.ActiveTrackId, out var trackId))
-                        throw new InvalidOperationException("服务端配置的赛道标识不是有效 UUID，请房主在总控中重新填写。");
-                    var localTrack = store.LoadTrack(trackId);
-                    if (localTrack is null)
-                    {
-                        await DownloadHostedEstateTrackAsync(
-                            profile.ServerAddress, descriptor, packageService, estate,
-                            replaceExisting: false, lifetimeCancellation.Token);
-                    }
-                    else if (string.Equals(localTrack.Value.Track.Source, "EstateRaceServer", StringComparison.Ordinal))
-                    {
-                        store.UpdateTrackSource(trackId, CurrentTrackSource);
-                        trackPreviewCache.Clear();
-                    }
-                    var identity = packageService.Identify(trackId);
-                    if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackPackageHash) &&
-                        !identity.Matches(descriptor.ActiveTrackPackageHash))
-                    {
-                        await DownloadHostedEstateTrackAsync(
-                            profile.ServerAddress, descriptor, packageService, estate,
-                            replaceExisting: true, lifetimeCancellation.Token);
-                        identity = packageService.Identify(trackId);
-                    }
-                    if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackPackageHash) &&
-                        !identity.Matches(descriptor.ActiveTrackPackageHash))
-                        throw new InvalidOperationException(AppLocalization.Literal("下载后的赛道摘要仍与服务端不一致，已阻止连接。请房主重新上传赛道文件并核对 SHA-256。"));
-                    if (estate.ActiveDefinition?.TrackId != trackId || !estate.State.IsTimingActive)
-                        estate.StartTiming(trackId);
-                }
-                else if (!estate.State.IsTimingActive || estate.ActiveDefinition is null)
-                {
-                    throw new InvalidOperationException(AppLocalization.Literal("服务端尚未指定赛道。请先在“赛道”页面手动选择地产环道并开始计时，或请房主在总控中填写赛道标识和 SHA-256。"));
-                }
-                if (module.Status.State != ModuleRuntimeState.Running)
-                    await moduleActivation.SetEnabledAsync(EstateRaceModule.ModuleId, true, lifetimeCancellation.Token);
-                await module.ConnectAsync(
-                    profile,
-                    lifetimeCancellation.Token,
-                    descriptor.ActiveTrackPackageHash);
+                await JoinEstateRaceProfileAsync(profile, lifetimeCancellation.Token);
                 if (module.State.IsConnected) savedProfile = profile with { Password = string.Empty };
             }
             catch (Exception exception)
@@ -403,6 +365,7 @@ internal sealed partial class MainWindow
         void UpdateRacePageState()
         {
             var state = module.State;
+            peerRoom.IsEnabled = !state.IsConnected || estatePeerHost is not null;
             var roomAttached = state.IsConnected ||
                                state.ConnectionState == EstateRaceConnectionState.Reconnecting &&
                                state.Session is not null;
@@ -559,13 +522,68 @@ internal sealed partial class MainWindow
         return Scroll(stack);
     }
 
+    private async Task JoinEstateRaceProfileAsync(EstateRaceConnectionProfile profile, CancellationToken cancellationToken)
+    {
+        var module = moduleManager.Modules.OfType<EstateRaceModule>().Single();
+        var estate = moduleManager.Modules.OfType<EstateCircuitModule>().Single();
+        var packageService = new LazyForza.Storage.EstateTrackPackageService(store, CurrentApplicationVersion());
+        var descriptor = await EstateRaceModule.ReadServerDescriptorAsync(profile.ServerAddress, cancellationToken, profile.Peer, profile.Password);
+        if (descriptor.ProtocolVersion != EstateRaceModule.ProtocolVersion)
+            throw new InvalidOperationException("服务端协议版本与当前 LazyForza 不兼容。");
+        if (profile.IsObserver && !descriptor.SupportsObservers)
+            throw new InvalidOperationException("该服务端版本不支持 OB 身份，请让房主更新服务端。");
+        if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackId))
+        {
+            if (!Guid.TryParse(descriptor.ActiveTrackId, out var trackId))
+                throw new InvalidOperationException("服务端配置的赛道标识不是有效 UUID，请房主在总控中重新填写。");
+            var localTrack = store.LoadTrack(trackId);
+            if (localTrack is null)
+            {
+                await DownloadHostedEstateTrackAsync(
+                    profile.ServerAddress, descriptor, packageService, estate,
+                    replaceExisting: false, cancellationToken, profile.Peer, profile.Password);
+            }
+            else if (string.Equals(localTrack.Value.Track.Source, "EstateRaceServer", StringComparison.Ordinal))
+            {
+                store.UpdateTrackSource(trackId, CurrentTrackSource);
+                trackPreviewCache.Clear();
+            }
+            var identity = packageService.Identify(trackId);
+            if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackPackageHash) &&
+                !identity.Matches(descriptor.ActiveTrackPackageHash))
+            {
+                await DownloadHostedEstateTrackAsync(
+                    profile.ServerAddress, descriptor, packageService, estate,
+                    replaceExisting: true, cancellationToken, profile.Peer, profile.Password);
+                identity = packageService.Identify(trackId);
+            }
+            if (!string.IsNullOrWhiteSpace(descriptor.ActiveTrackPackageHash) &&
+                !identity.Matches(descriptor.ActiveTrackPackageHash))
+                throw new InvalidOperationException(AppLocalization.Literal("下载后的赛道摘要仍与服务端不一致，已阻止连接。请房主重新上传赛道文件并核对 SHA-256。"));
+            if (estate.ActiveDefinition?.TrackId != trackId || !estate.State.IsTimingActive)
+                estate.StartTiming(trackId);
+        }
+        else if (!estate.State.IsTimingActive || estate.ActiveDefinition is null)
+        {
+            throw new InvalidOperationException(AppLocalization.Literal("服务端尚未指定赛道。请先在“赛道”页面手动选择地产环道并开始计时，或请房主在总控中填写赛道标识和 SHA-256。"));
+        }
+        if (module.Status.State != ModuleRuntimeState.Running)
+            await moduleActivation.SetEnabledAsync(EstateRaceModule.ModuleId, true, lifetimeCancellation.Token);
+        await module.ConnectAsync(
+            profile,
+            lifetimeCancellation.Token,
+            descriptor.ActiveTrackPackageHash);
+    }
+
     private async Task DownloadHostedEstateTrackAsync(
         string serverAddress,
         EstateRaceServerDescriptor descriptor,
         LazyForza.Storage.EstateTrackPackageService packageService,
         EstateCircuitModule estate,
         bool replaceExisting,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        LazyForza.EstatePeer.PeerConnection? peer = null,
+        string? password = null)
     {
         if (!descriptor.TrackPackageAvailable ||
             string.IsNullOrWhiteSpace(descriptor.TrackPackageDownloadPath))
@@ -591,7 +609,8 @@ internal sealed partial class MainWindow
         try
         {
             var downloadUri = EstateRaceHttpUri(serverAddress, descriptor.TrackPackageDownloadPath);
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            using var client = peer?.CreateHttpClient(password) ?? new HttpClient();
+            client.Timeout = TimeSpan.FromSeconds(30);
             using var response = await client.GetAsync(
                 downloadUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();

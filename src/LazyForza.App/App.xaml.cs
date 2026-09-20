@@ -358,6 +358,12 @@ public partial class App : Application
         {
             mainWindow.IsEnabled = false;
             await mainWindow.FlushSettingsAsync();
+            try { await mainWindow.StopEstatePeerAsync(); }
+            catch (Exception exception)
+            {
+                // Cleanup already closes the control pipe; a failed leave must not strand app exit.
+                log?.Write($"Peer host shutdown failed: {exception.GetType().Name}");
+            }
         }
         exitRequested = true;
         Shutdown(exitCode);

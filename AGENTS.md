@@ -35,6 +35,8 @@ LazyForza 是 Windows 10/11 x64 的 .NET 9 WPF 应用。它接收 FH6 官方 324
 | `LazyForza.Modules.Dashboard` | 仪表盘状态与车辆学习编排 | WPF 窗口实现 |
 | `LazyForza.Modules.LapAnalysis` | 普通赛道与圈状态、分析数据编排 | 第二套 UDP 接收器 |
 | `LazyForza.Modules.EstateRace` | 地产几何、计时、维修区、赛事网络客户端和生成的协议模型 | 服务端权威排名/处罚 |
+| `LazyForza.EstatePeer` | 无发现／中继服务的直连邀请和回执、证书固定、UDP／QUIC 通路、组件安装与本机管道 | ASP.NET 或权威赛事规则 |
+| `LazyForza.EstatePeer.Host` | 可选房主进程、固定版本 RaceServer Core 与本机 Web 总控的适配、加密恢复状态 | 主客户端必需运行时依赖、第二份手写赛事规则 |
 | `LazyForza.Overlay` | WPF HUD、布局持久化映射、Win32 无焦点/穿透行为 | UDP 解析、赛事计算 |
 | `LazyForza.Update` | 更新检查、下载与包完整性验证 | 主窗口业务 |
 | `LazyForza.App` | WPF 主壳、页面、设置、模块装配和进程生命周期 | 可复用纯算法 |

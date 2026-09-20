@@ -3,6 +3,8 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
+    <PackageVersion Include="LazyForza.RaceServer.Core" Version="0.1.0-peer.b6909f8bb260" />
+    <PackageVersion Include="LazyForza.RaceServer.Control" Version="0.1.0-peer.b6909f8bb260" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="MSTest.TestAdapter" Version="3.9.3" />
     <PackageVersion Include="MSTest.TestFramework" Version="3.9.3" />

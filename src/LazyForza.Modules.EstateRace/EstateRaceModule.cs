@@ -67,6 +67,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     private Task? reconnectTask;
     private ClientWebSocket? socket;
     private EstateRaceConnectionProfile? activeProfile;
+    private LazyForza.EstatePeer.PeerConnection? ownedPeerConnection;
     private EstateRaceHudState snapshot = EmptySnapshot();
     private Guid? participantId;
     private string? resumeToken;
@@ -282,6 +283,13 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
     public static async Task<EstateRaceServerDescriptor> ReadServerDescriptorAsync(
         string serverAddress,
         CancellationToken cancellationToken)
+        => await ReadServerDescriptorAsync(serverAddress, cancellationToken, null, null).ConfigureAwait(false);
+
+    public static async Task<EstateRaceServerDescriptor> ReadServerDescriptorAsync(
+        string serverAddress,
+        CancellationToken cancellationToken,
+        LazyForza.EstatePeer.PeerConnection? peer,
+        string? password)
     {
         var websocket = ServerWebSocketUri(serverAddress);
         var builder = new UriBuilder(websocket)
@@ -290,8 +298,13 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             Path = "/.well-known/lazyforza-race.json",
             Query = string.Empty
         };
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
-        await using var stream = await client.GetStreamAsync(builder.Uri, cancellationToken).ConfigureAwait(false);
+        using var client = peer?.CreateHttpClient(password) ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        client.MaxResponseContentBufferSize = 64 * 1024;
+        using var response = await client.GetAsync(builder.Uri, cancellationToken).ConfigureAwait(false);
+        if (peer is not null && response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            throw new InvalidOperationException("房间密码不正确，或尝试过于频繁。请核对密码后稍后重试。");
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         return await JsonSerializer.DeserializeAsync<EstateRaceServerDescriptor>(
                    stream,
                    EstateRaceWireProtocol.JsonOptions,
@@ -352,6 +365,11 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 throw new InvalidOperationException("请先启用地产赛事模块。");
             ValidateProfile(profile);
             await DisconnectCoreAsync(preserveSessionState: isReconnectAttempt).ConfigureAwait(false);
+            if (!ReferenceEquals(ownedPeerConnection, profile.Peer))
+            {
+                if (ownedPeerConnection is not null) await ownedPeerConnection.DisposeAsync().ConfigureAwait(false);
+                ownedPeerConnection = profile.Peer;
+            }
             Interlocked.Exchange(ref connectionInterruptionHandled, 0);
             if (!isReconnectAttempt)
             {
@@ -366,7 +384,9 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 ThemeColor = NormalizeColor(profile.ThemeColor),
                 TeamName = NullIfWhiteSpace(profile.TeamName)
             };
-            resumeToken = activeProfile.IsObserver ? observerResumeToken : driverResumeToken;
+            resumeToken = activeProfile.Peer is not null
+                ? await Context.Settings.GetAsync(ModuleId, ResumeSetting(activeProfile), cancellationToken).ConfigureAwait(false)
+                : activeProfile.IsObserver ? observerResumeToken : driverResumeToken;
             SetConnectionState(
                 isReconnectAttempt ? EstateRaceConnectionState.Reconnecting : EstateRaceConnectionState.Connecting,
                 isReconnectAttempt ? "正在恢复赛事连接…" : "正在连接赛事服务…");
@@ -374,11 +394,12 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 runCancellation?.Token ?? CancellationToken.None,
                 cancellationToken);
             socket = new ClientWebSocket();
+            activeProfile.Peer?.Configure(socket);
             socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
             socket.Options.KeepAliveTimeout = TimeSpan.FromSeconds(10);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(connectionCancellation.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(12));
-            await socket.ConnectAsync(ServerWebSocketUri(activeProfile.ServerAddress), timeout.Token).ConfigureAwait(false);
+            await socket.ConnectAsync(activeProfile.Peer?.WebSocketUri ?? ServerWebSocketUri(activeProfile.ServerAddress), timeout.Token).ConfigureAwait(false);
 
             var context = trackContext();
             await SendAsync("login", new RaceLoginRequest(
@@ -403,12 +424,15 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
                 var rejected = loginEnvelope.Payload.Deserialize<RaceLoginRejected>(EstateRaceWireProtocol.JsonOptions);
                 if (string.Equals(rejected?.Code, "disconnectedByControl", StringComparison.Ordinal))
                 {
-                    if (activeProfile.IsObserver) observerResumeToken = null;
-                    else driverResumeToken = null;
+                    if (activeProfile.Peer is null)
+                    {
+                        if (activeProfile.IsObserver) observerResumeToken = null;
+                        else driverResumeToken = null;
+                    }
                     resumeToken = null;
                     await Context.Settings.SetAsync(
                         ModuleId,
-                        activeProfile.IsObserver ? ObserverResumeTokenSetting : ResumeTokenSetting,
+                        ResumeSetting(activeProfile),
                         string.Empty,
                         CancellationToken.None).ConfigureAwait(false);
                 }
@@ -428,8 +452,11 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             participantId = accepted.ParticipantId;
             resumeToken = accepted.ResumeToken;
             connectionIsObserver = accepted.IsObserver;
-            if (connectionIsObserver) observerResumeToken = accepted.ResumeToken;
-            else driverResumeToken = accepted.ResumeToken;
+            if (activeProfile.Peer is null)
+            {
+                if (connectionIsObserver) observerResumeToken = accepted.ResumeToken;
+                else driverResumeToken = accepted.ResumeToken;
+            }
             connectionAuthenticated = true;
             Interlocked.Exchange(ref connectedAtMonotonicMilliseconds, monotonicClock.ElapsedMilliseconds);
             ApplySessionSnapshot(NormalizeSession(accepted.Snapshot), resetForConnection: !isReconnectAttempt || participantChanged);
@@ -486,6 +513,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             intentionalDisconnect = true;
             await LeaveRoomAsync().ConfigureAwait(false);
             await DisconnectCoreAsync().ConfigureAwait(false);
+            if (ownedPeerConnection is not null) await ownedPeerConnection.DisposeAsync().ConfigureAwait(false);
+            ownedPeerConnection = null;
             activeProfile = null;
             requestedTrackPackageHash = null;
             lastSessionPhase = null;
@@ -532,6 +561,8 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             await LeaveRoomAsync().ConfigureAwait(false);
             runCancellation?.Cancel();
             await DisconnectCoreAsync().ConfigureAwait(false);
+            if (ownedPeerConnection is not null) await ownedPeerConnection.DisposeAsync().ConfigureAwait(false);
+            ownedPeerConnection = null;
         }
         finally { connectionLock.Release(); }
         if (subscription is not null) await subscription.DisposeAsync().ConfigureAwait(false);
@@ -1214,11 +1245,14 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             await SendAsync(EstateRaceMessageTypes.Leave, new { }, timeout.Token).ConfigureAwait(false);
             await completion.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
             // Only discard identity after a server confirms its durable release.
-            if (connectionIsObserver) observerResumeToken = null;
-            else driverResumeToken = null;
+            if (activeProfile?.Peer is null)
+            {
+                if (connectionIsObserver) observerResumeToken = null;
+                else driverResumeToken = null;
+            }
             resumeToken = null;
             await Context.Settings.SetAsync(ModuleId,
-                connectionIsObserver ? ObserverResumeTokenSetting : ResumeTokenSetting,
+                activeProfile is { } profile ? ResumeSetting(profile) : connectionIsObserver ? ObserverResumeTokenSetting : ResumeTokenSetting,
                 string.Empty, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -1424,7 +1458,7 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         try
         {
             var uri = ServerHttpUri(activeProfile?.ServerAddress, received.OrganizerLogoDownloadPath);
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            using var client = activeProfile?.Peer?.CreateHttpClient(activeProfile.Password) ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
             using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
@@ -1482,14 +1516,15 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
         string token,
         CancellationToken cancellationToken)
     {
-        await Context.Settings.SetAsync(ModuleId, ServerAddressSetting, profile.ServerAddress, cancellationToken).ConfigureAwait(false);
+        if (profile.Peer is null)
+            await Context.Settings.SetAsync(ModuleId, ServerAddressSetting, profile.ServerAddress, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(ModuleId, DisplayNameSetting, profile.DisplayName, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(ModuleId, ThemeColorSetting, profile.ThemeColor, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(ModuleId, TeamNameSetting, profile.TeamName ?? string.Empty, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(ModuleId, TeamIdSetting, profile.TeamId ?? string.Empty, cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(
             ModuleId,
-            profile.IsObserver ? ObserverResumeTokenSetting : ResumeTokenSetting,
+            ResumeSetting(profile),
             token,
             cancellationToken).ConfigureAwait(false);
         await Context.Settings.SetAsync(
@@ -1498,6 +1533,10 @@ public sealed partial class EstateRaceModule : LazyForzaModuleBase, IHudContribu
             profile.IsObserver ? "observer" : "driver",
             cancellationToken).ConfigureAwait(false);
     }
+
+    private static string ResumeSetting(EstateRaceConnectionProfile profile) => profile.Peer is { } peer
+        ? $"peerResume.{peer.RecoveryScope}.{(profile.IsObserver ? "observer" : "driver")}"
+        : profile.IsObserver ? ObserverResumeTokenSetting : ResumeTokenSetting;
 
     internal static Uri ServerWebSocketUri(string value)
     {
