@@ -13,6 +13,7 @@ namespace LazyForza.EstatePeer;
 public sealed class PeerQuicHost : IAsyncDisposable
 {
     internal static readonly SslApplicationProtocol Protocol = new("lazyforza-peer-1");
+    internal static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(20);
     private readonly QuicListener listener;
     private readonly PeerUdpPath path;
     private readonly int tcpPort;
@@ -38,7 +39,7 @@ public sealed class PeerQuicHost : IAsyncDisposable
                 {
                     DefaultCloseErrorCode = 1, DefaultStreamErrorCode = 1,
                     MaxInboundBidirectionalStreams = 8, MaxInboundUnidirectionalStreams = 0,
-                    IdleTimeout = TimeSpan.FromSeconds(45), HandshakeTimeout = TimeSpan.FromSeconds(8),
+                    IdleTimeout = TimeSpan.FromSeconds(45), HandshakeTimeout = HandshakeTimeout,
                     ServerAuthenticationOptions = new SslServerAuthenticationOptions
                     { ApplicationProtocols = [Protocol], ServerCertificate = certificate }
                 })
@@ -156,6 +157,8 @@ public sealed class PeerQuicJoin : IAsyncDisposable
 
     public async Task<PeerConnection> ConnectAsync(CancellationToken token)
     {
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
+        token = attempt.Token;
         await EnsureConnectionAsync(token).ConfigureAwait(false);
         if (Connection is null)
         {
@@ -176,12 +179,13 @@ public sealed class PeerQuicJoin : IAsyncDisposable
         try
         {
             if (connection is not null) return connection;
+            await path.PrepareClientAttemptAsync(Receipt.Nonce, token).ConfigureAwait(false);
             var pin = new PeerConnection(invitation, new PeerEndpoint(IPAddress.Loopback, 1));
             connection = await QuicConnection.ConnectAsync(new QuicClientConnectionOptions
             {
                 RemoteEndPoint = target, DefaultCloseErrorCode = 1, DefaultStreamErrorCode = 1,
                 MaxInboundBidirectionalStreams = 0, MaxInboundUnidirectionalStreams = 0,
-                IdleTimeout = TimeSpan.FromSeconds(45), HandshakeTimeout = TimeSpan.FromSeconds(8),
+                IdleTimeout = TimeSpan.FromSeconds(45), HandshakeTimeout = PeerQuicHost.HandshakeTimeout,
                 ClientAuthenticationOptions = new SslClientAuthenticationOptions
                 {
                     TargetHost = "LazyForza Peer", ApplicationProtocols = [PeerQuicHost.Protocol],
@@ -190,6 +194,10 @@ public sealed class PeerQuicJoin : IAsyncDisposable
             }, token).ConfigureAwait(false);
             path.Authenticate(Receipt.Nonce);
             return connection;
+        }
+        catch (QuicException error) when (error.QuicError == QuicError.ConnectionTimeout)
+        {
+            throw new IOException("已收到 UDP 探测，但加密握手超时。请确认双方使用新版客户端和房主组件，再点击继续连接；若仍失败，请检查防火墙或更换直连路径。", error);
         }
         finally { connecting.Release(); }
     }

@@ -193,7 +193,10 @@ public sealed class PeerRoom : IAsyncDisposable
         RaceCommandResult result;
         switch (command.Action)
         {
-            case "openControl": return webControl is null ? new(false, "总控尚未就绪。") : new(true, ControlUrl: webControl.OpenUrl());
+            case "openControl": return webControl is null ? new(false, "总控尚未就绪。") :
+                new(true, ControlUrl: webControl.OpenUrl(), ControlPassword: webControl.Password);
+            case "controlAccess": return webControl is null ? new(false, "总控尚未就绪。") :
+                new(true, ControlPassword: webControl.Password);
             case "acceptReceipt":
                 if (!OperatingSystem.IsWindows() || udp is null) return new(false, "当前系统不支持 UDP 直连。");
                 try { udp.Admit(PeerReceipt.Parse(command.Value ?? string.Empty, Invitation)); return new(true); }

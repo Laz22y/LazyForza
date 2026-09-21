@@ -63,6 +63,47 @@ public sealed class PeerTests
     }
 
     [TestMethod]
+    public async Task LocalControlPasswordWorksForNewAndExistingProjectsWithoutChangingStoredAccounts()
+    {
+        using var files = new TestDirectory();
+        var settings = Settings(files.Path);
+        string previousPassword;
+        byte[] storedAccounts;
+        await using (var room = new PeerRoom(settings))
+        {
+            await room.StartAsync(default);
+            var access = room.Control(new("openControl"));
+            Assert.IsNotNull(access.ControlPassword);
+            previousPassword = access.ControlPassword;
+            Assert.AreNotEqual(settings.Password, previousPassword);
+            Assert.AreEqual(previousPassword, room.Control(new("controlAccess")).ControlPassword);
+            await CheckLogin(access, previousPassword, HttpStatusCode.OK);
+            await CheckLogin(access, settings.Password, HttpStatusCode.Unauthorized);
+            storedAccounts = File.ReadAllBytes(Path.Combine(files.Path, "Control", "server-settings.json"));
+            Assert.IsFalse(System.Text.Encoding.UTF8.GetString(storedAccounts).Contains(previousPassword, StringComparison.Ordinal));
+        }
+        await using var restored = new PeerRoom(settings with { Resume = true });
+        await restored.StartAsync(default);
+        var next = restored.Control(new("openControl"));
+        Assert.IsNotNull(next.ControlPassword);
+        Assert.AreNotEqual(previousPassword, next.ControlPassword);
+        await CheckLogin(next, previousPassword, HttpStatusCode.Unauthorized);
+        await CheckLogin(next, next.ControlPassword, HttpStatusCode.OK);
+        CollectionAssert.AreEqual(storedAccounts, File.ReadAllBytes(Path.Combine(files.Path, "Control", "server-settings.json")));
+
+        static async Task CheckLogin(PeerHostReply access, string password, HttpStatusCode expected)
+        {
+            using var browser = new HttpClient(new HttpClientHandler { UseProxy = false })
+                { BaseAddress = new Uri(new Uri(access.ControlUrl!).GetLeftPart(UriPartial.Authority)) };
+            browser.DefaultRequestHeaders.Add("Origin", browser.BaseAddress.GetLeftPart(UriPartial.Authority));
+            using var login = await browser.PostAsJsonAsync("/api/admin/login", new { password });
+            Assert.AreEqual(expected, login.StatusCode);
+            using var me = await browser.GetAsync("/api/admin/me");
+            Assert.AreEqual(expected, me.StatusCode);
+        }
+    }
+
+    [TestMethod]
     public async Task NativeWebControlSharesAuthorityRequiresLocalSessionAndRejectsCrossOriginActions()
     {
         using var files = new TestDirectory();
@@ -325,6 +366,8 @@ public sealed class PeerTests
             Assert.IsTrue(process.IsRunning);
             var control = await process.CommandAsync(new("openControl"), default);
             Assert.IsTrue(control.Success);
+            Assert.IsNotNull(control.ControlPassword);
+            Assert.AreEqual(control.ControlPassword, (await process.CommandAsync(new("controlAccess"), default)).ControlPassword);
             Assert.AreEqual("127.0.0.1", new Uri(control.ControlUrl!).Host);
             Assert.IsTrue((await process.CommandAsync(new("phase", "Practice"), default)).Success);
             Assert.IsTrue((await process.CommandAsync(new("refreshInvitation"), default)).Success);

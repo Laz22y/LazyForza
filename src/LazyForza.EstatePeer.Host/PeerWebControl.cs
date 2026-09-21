@@ -21,10 +21,12 @@ internal sealed class PeerWebControl : IAsyncDisposable
     private string? bootstrap;
     private DateTimeOffset bootstrapExpires;
     internal Uri Origin => new(app.Urls.Single());
+    internal string Password { get; }
 
-    private PeerWebControl(WebApplication app, RaceCoordinator coordinator, RaceServerConfigurationStore configuration)
+    private PeerWebControl(WebApplication app, RaceCoordinator coordinator, RaceServerConfigurationStore configuration, string password)
     {
         this.app = app; this.coordinator = coordinator; this.configuration = configuration;
+        Password = password;
         tracks = app.Services.GetRequiredService<HostedTrackPackageStore>();
         logos = app.Services.GetRequiredService<HostedOrganizerLogoStore>();
         broadcasts = app.Services.GetRequiredService<RaceBroadcastService>();
@@ -65,10 +67,20 @@ internal sealed class PeerWebControl : IAsyncDisposable
         builder.Services.AddSingleton<RaceBroadcastService>();
         builder.Services.AddSingleton<RaceWebSocketHandler>();
         builder.Services.AddSingleton(new IngressProtection(new IngressOptions()));
-        builder.Services.AddSingleton(new AdminSessionStore(configuration.AuthenticateControlAccount));
+        // Local host access lasts for this process only. Existing control accounts and their
+        // passwords remain intact, including projects created before credentials were shown.
+        var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        builder.Services.AddSingleton(new AdminSessionStore(value =>
+        {
+            if (!CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(value),
+                    System.Text.Encoding.UTF8.GetBytes(password)))
+                return configuration.AuthenticateControlAccount(value);
+            var account = configuration.ListControlAccounts().First(item => item.Role == RaceControlRole.SuperAdmin);
+            return new(account.Id, account.Name, RaceControlRole.SuperAdmin);
+        }));
         builder.Services.AddHostedService<RaceEventProjectSyncService>();
         var app = builder.Build();
-        var control = new PeerWebControl(app, coordinator, configuration);
+        var control = new PeerWebControl(app, coordinator, configuration, password);
         try
         {
             if (control.tracks.Current is null)

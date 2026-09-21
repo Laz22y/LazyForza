@@ -17,5 +17,6 @@ public sealed record PeerHostStart(
     int RaceLaps,
     bool Resume);
 
-public sealed record PeerHostReply(bool Success, string? Error = null, string? Invitation = null, int Port = 0, string? ControlUrl = null);
+public sealed record PeerHostReply(bool Success, string? Error = null, string? Invitation = null, int Port = 0,
+    string? ControlUrl = null, string? ControlPassword = null);
 public sealed record PeerHostCommand(string Action, string? Value = null, bool Force = false);

@@ -40,13 +40,37 @@ internal sealed class PeerUdpPath : IAsyncDisposable
         return route.LocalEndpoint;
     }
 
+    internal async Task PrepareClientAttemptAsync(string nonce, CancellationToken token)
+    {
+        if (!routes.TryGetValue(nonce, out var route) || route.Closed ||
+            (!route.Connected && route.Receipt.ExpiresAt <= DateTimeOffset.UtcNow))
+            throw new IOException("连接回执已过期，请重新加入并将新回执交给房主。");
+        // A new MsQuic connection uses a new local UDP port. Never pin retries to the
+        // failed connection's port; retain the public socket and the admitted receipt.
+        route.Target = null;
+        route.LastRemote = null;
+        try { await route.PeerSeen.Task.WaitAsync(TimeSpan.FromSeconds(12), token).ConfigureAwait(false); }
+        catch (TimeoutException error)
+        {
+            throw new IOException("未收到房主的 UDP 响应。请确认房主已添加本次回执并保持房间开启，双方允许 UDP 通信；然后点击继续连接。", error);
+        }
+    }
+
     private async Task ReceiveAsync()
     {
         try
         {
             while (!lifetime.IsCancellationRequested)
             {
-                var packet = await socket.ReceiveAsync(lifetime.Token).ConfigureAwait(false);
+                UdpReceiveResult packet;
+                try { packet = await socket.ReceiveAsync(lifetime.Token).ConfigureAwait(false); }
+                catch (SocketException) when (!lifetime.IsCancellationRequested)
+                {
+                    // Windows can surface ICMP errors from an unreachable candidate here.
+                    // Keep the receive pump alive for the remaining candidates and retries.
+                    await Task.Delay(100, lifetime.Token).ConfigureAwait(false);
+                    continue;
+                }
                 var bytes = packet.Buffer;
                 if (bytes.Length < HeaderSize || bytes.Length > HeaderSize + 6 + FragmentBytes ||
                     !bytes.AsSpan(0, 4).SequenceEqual("LFZQ"u8)) continue;
@@ -55,12 +79,14 @@ internal sealed class PeerUdpPath : IAsyncDisposable
                 if (!route.Destinations.Any(candidate => candidate.Port == remote.Port && candidate.Address.Equals(remote.Address))) continue;
                 // Probe packets carry no authority and cannot extend admission indefinitely.
                 if (!route.Connected && route.Receipt.ExpiresAt <= DateTimeOffset.UtcNow) continue;
-                if (bytes[4] == 0 && bytes.Length == HeaderSize) continue;
+                if (bytes[4] == 0 && bytes.Length == HeaderSize)
+                { route.PeerSeen.TrySetResult(); continue; }
                 byte[]? payload;
                 if (bytes[4] == 1) payload = bytes[HeaderSize..];
                 else if (bytes[4] == 2) payload = route.Reassemble(bytes.AsSpan(HeaderSize));
                 else continue;
                 if (payload is null || payload.Length == 0) continue;
+                route.PeerSeen.TrySetResult();
                 route.LastActivity = Environment.TickCount64;
                 route.LastRemote = remote;
                 if (route.Target is { } target)
@@ -80,7 +106,13 @@ internal sealed class PeerUdpPath : IAsyncDisposable
         {
             while (!lifetime.IsCancellationRequested)
             {
-                var packet = await route.Local.ReceiveAsync(lifetime.Token).ConfigureAwait(false);
+                UdpReceiveResult packet;
+                try { packet = await route.Local.ReceiveAsync(lifetime.Token).ConfigureAwait(false); }
+                catch (SocketException) when (!route.Closed && !lifetime.IsCancellationRequested)
+                {
+                    await Task.Delay(100, lifetime.Token).ConfigureAwait(false);
+                    continue;
+                }
                 if (!IPAddress.IsLoopback(packet.RemoteEndPoint.Address) || packet.Buffer.Length > MaximumQuicDatagram) continue;
                 if (route.Target is null) route.Target = packet.RemoteEndPoint;
                 if (!packet.RemoteEndPoint.Equals(route.Target)) continue;
@@ -186,8 +218,9 @@ internal sealed class PeerUdpPath : IAsyncDisposable
         internal readonly IReadOnlyList<PeerEndpoint> Destinations;
         internal readonly UdpClient Local = new(new IPEndPoint(IPAddress.Loopback, 0));
         internal readonly IPEndPoint LocalEndpoint;
-        internal IPEndPoint? Target;
-        internal IPEndPoint? LastRemote;
+        internal volatile IPEndPoint? Target;
+        internal volatile IPEndPoint? LastRemote;
+        internal readonly TaskCompletionSource PeerSeen = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal volatile bool Connected;
         internal volatile bool Closed;
         internal long LastActivity = Environment.TickCount64;

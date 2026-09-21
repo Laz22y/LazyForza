@@ -35,17 +35,20 @@ internal sealed class EstatePeerWindow : Window
     private Guid? selectedProjectId;
     private bool newProject;
     private PeerQuicJoin? pendingJoin;
+    private readonly Action<string>? clipboardWriter;
 
     public EstatePeerWindow(EstateRaceConnectionProfile saved, IReadOnlyList<PeerTrackChoice> tracks,
         IReadOnlyList<PeerProjectInfo> projects, PeerComponentStore? component, Func<PeerHostProcess?> host,
         Func<PeerRoomDraft, CancellationToken, Task<PeerHostProcess>> create,
         Func<EstateRaceConnectionProfile, CancellationToken, Task> join, Func<Task> stop, Func<bool> connected, Func<string> roomStatus,
-        bool componentInstalled = false, Guid? recentProjectId = null, PeerComponentUpdateManager? componentUpdates = null)
+        bool componentInstalled = false, Guid? recentProjectId = null, PeerComponentUpdateManager? componentUpdates = null,
+        Action<string>? clipboardWriter = null)
     {
         this.saved = saved; this.tracks = tracks; this.projects = projects; this.component = component;
         this.host = host; this.create = create; this.join = join; this.stop = stop; this.connected = connected; this.roomStatus = roomStatus;
         this.componentInstalled = componentInstalled;
         this.componentUpdates = componentUpdates;
+        this.clipboardWriter = clipboardWriter;
         selectedProjectId = projects.FirstOrDefault(item => item.Id == recentProjectId)?.Id ?? projects.FirstOrDefault()?.Id;
         newProject = projects.Count == 0;
         Title = AppLocalization.Literal("直连房间 · 实验");
@@ -69,8 +72,9 @@ internal sealed class EstatePeerWindow : Window
         Closed += async (_, _) =>
         {
             timer.Stop(); cancellation.Cancel();
-            if (pendingJoin is not null) await pendingJoin.DisposeAsync();
-            cancellation.Dispose();
+            try { if (pendingJoin is not null) await pendingJoin.DisposeAsync(); }
+            catch (Exception error) when (error is IOException or System.Net.Sockets.SocketException or OperationCanceledException) { }
+            finally { cancellation.Dispose(); }
         };
         Render();
     }
@@ -103,23 +107,24 @@ internal sealed class EstatePeerWindow : Window
         {
             if (connected()) throw new InvalidOperationException("请先退出当前赛事房间。");
             ValidateIdentity(name.Text, password.Password);
+            receiptPanel.Children.Clear();
+            if (pendingJoin is not null) { await pendingJoin.DisposeAsync(); pendingJoin = null; }
             message.Text = AppLocalization.Literal("正在寻找可达地址并验证房主…");
             var invitation = PeerInvitation.Parse(code.Text);
             PeerConnection connection;
             try { connection = await PeerConnection.FindAsync(invitation, cancellation.Token); }
             catch (IOException) when (invitation.SupportsUdp && PeerQuicHost.IsSupported)
             {
-                if (pendingJoin is not null) await pendingJoin.DisposeAsync();
                 pendingJoin = new PeerQuicJoin(invitation);
                 var pending = pendingJoin;
                 var receipt = Input(pending.Receipt.Encode()); receipt.IsReadOnly = true; receipt.TextWrapping = TextWrapping.Wrap;
                 receiptPanel.Children.Clear();
                 receiptPanel.Children.Add(Text("将回执发给房主。房主添加后，点击继续连接。回执十分钟内有效。", 12));
                 Field(receiptPanel, "连接回执", receipt);
-                receiptPanel.Children.Add(ActionButton("复制连接回执", () => Clipboard.SetText(receipt.Text)));
+                receiptPanel.Children.Add(CopyButton("复制连接回执", receipt));
                 receiptPanel.Children.Add(AsyncButton("继续连接", async () =>
                 {
-                    message.Text = AppLocalization.Literal("正在建立加密 UDP 连接…");
+                    message.Text = AppLocalization.Literal("正在等待房主 UDP 响应并建立加密连接…");
                     var verified = await pending.ConnectAsync(cancellation.Token);
                     await join(Profile(verified, password.Password, name.Text, observer.IsChecked == true), cancellation.Token);
                     pendingJoin = null; // The connected module now owns the tunnel.
@@ -305,18 +310,40 @@ internal sealed class EstatePeerWindow : Window
         summary.Children.Add(liveStatus);
         summary.Children.Add(Text(AppLocalization.Format("peer.hostPort", "本机 TCP 端口 {0} · 邀请有效至 {1:g}", running.Port, running.Invitation.ExpiresAt.LocalDateTime), 11));
         body.Children.Add(Surface(summary));
+        var access = new StackPanel();
+        var controlPassword = Input(string.Empty); controlPassword.IsReadOnly = true;
+        controlPassword.TextWrapping = TextWrapping.Wrap;
+        Field(access, "本次总控密码", controlPassword);
+        access.Children.Add(Text("仅用于房主本机总控，与房间密码不同；重新打开房间后会更换。", 11));
+        var accessActions = new WrapPanel();
+        accessActions.Children.Add(AsyncButton("查看总控密码", async () =>
+        {
+            var reply = await running.CommandAsync(new("controlAccess"), cancellation.Token);
+            if (!reply.Success || string.IsNullOrEmpty(reply.ControlPassword))
+                throw new IOException("当前房主组件不支持显示总控密码，请关闭房间并更新组件。");
+            controlPassword.Text = reply.ControlPassword;
+        }));
+        accessActions.Children.Add(CopyButton("复制总控密码", controlPassword));
+        access.Children.Add(accessActions);
+        var accessDisclosure = Disclosure("总控登录", access);
         body.Children.Add(AsyncButton("打开 Web 总控", async () =>
         {
             var reply = await running.CommandAsync(new("openControl"), cancellation.Token);
             if (!reply.Success || !Uri.TryCreate(reply.ControlUrl, UriKind.Absolute, out var url) ||
                 url.Scheme != "http" || url.Host != "127.0.0.1") throw new IOException(reply.Error ?? "无法打开本机总控。");
+            if (string.IsNullOrEmpty(reply.ControlPassword))
+                throw new IOException("当前房主组件不支持显示总控密码，请关闭房间并更新组件。");
+            controlPassword.Text = reply.ControlPassword;
+            accessDisclosure.IsExpanded = true;
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true });
+            message.Text = AppLocalization.Literal("若总控要求登录，请复制上方的本次总控密码。");
         }, primary: true));
+        body.Children.Add(accessDisclosure);
         body.Children.Add(Text("与服务端相同的总控界面，仅在房主本机开放。", 11));
         var code = Input(running.Invitation.Encode()); code.IsReadOnly = true; code.TextWrapping = TextWrapping.Wrap; code.MinHeight = 90;
         Field(body, "邀请代码", code);
         var invitationActions = new WrapPanel();
-        invitationActions.Children.Add(ActionButton("复制邀请代码", () => Clipboard.SetText(code.Text)));
+        invitationActions.Children.Add(CopyButton("复制邀请代码", code));
         invitationActions.Children.Add(AsyncButton("刷新邀请代码", async () =>
         {
             await CommandAsync(running, new("refreshInvitation"));
@@ -399,6 +426,21 @@ internal sealed class EstatePeerWindow : Window
         };
         return button;
     }
+
+    internal Button CopyButton(string caption, TextBox source) => AsyncButton(caption, async () =>
+    {
+        if (string.IsNullOrEmpty(source.Text)) return;
+        if (await ClipboardTransfer.TryCopyAsync(source.Text, cancellation.Token, clipboardWriter))
+            message.Text = AppLocalization.Literal("已复制。");
+        else
+        {
+            // AsyncButton disables the form during retries; restore it before requesting
+            // focus so Ctrl+C targets this selected text when the operation finishes.
+            body.IsEnabled = true;
+            source.Focus(); source.SelectAll();
+            message.Text = AppLocalization.Literal("剪贴板暂时不可用，内容已选中。请按 Ctrl+C 或稍后重试。");
+        }
+    });
 
     private void CloseAfterOperation() { busy = false; Close(); }
     private static void ValidateIdentity(string name, string password)
