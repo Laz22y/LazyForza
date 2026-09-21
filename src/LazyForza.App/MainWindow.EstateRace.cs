@@ -41,7 +41,6 @@ internal sealed partial class MainWindow
             FontWeight = FontWeights.SemiBold
         };
         stack.Children.Add(header);
-        stack.Children.Add(BuildRaceEngineerControls());
 
         var statusCard = new Grid();
         statusCard.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -359,6 +358,7 @@ internal sealed partial class MainWindow
         connectedContent.Children.Add(gripNotice);
         connectedContent.Children.Add(BuildEstateRaceHudSettingsEntry());
         stack.Children.Add(connectedContent);
+        stack.Children.Add(BuildRaceEngineerControls());
         hostingGuide = BuildEstateRaceHostingGuide();
         stack.Children.Add(hostingGuide);
 

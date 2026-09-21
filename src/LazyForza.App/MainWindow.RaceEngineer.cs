@@ -221,7 +221,6 @@ internal sealed partial class MainWindow
     private UIElement BuildRaceEngineerControls()
     {
         var panel = new StackPanel();
-        panel.Children.Add(Label(EngineerText("语音比赛工程师", "Race engineer"), 17, FontWeights.SemiBold));
         var controls = new WrapPanel { Margin = new Thickness(0, 8, 0, 8) };
         var enabled = new CheckBox { Content = EngineerText("启用语音", "Enable speech"), IsChecked = engineerEnabled, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 18, 0) };
         var mute = new Button { Content = EngineerText(engineerMuted ? "恢复声音" : "立即静音", engineerMuted ? "Unmute" : "Mute now"), Padding = new Thickness(12, 5, 12, 5) };
@@ -309,7 +308,14 @@ internal sealed partial class MainWindow
         engineerStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(engineerStatus);
         UpdateRaceEngineer();
-        return Card(panel);
+        return new Expander
+        {
+            Header = Label(EngineerText("语音比赛工程师", "Race engineer"), 17, FontWeights.SemiBold),
+            Style = (Style)Application.Current.Resources["SettingsSectionExpander"],
+            Content = panel,
+            IsExpanded = false,
+            Margin = new Thickness(0, 8, 10, 4)
+        };
     }
 
     private UIElement BuildEngineerCueRow(bool connect)

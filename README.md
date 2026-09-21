@@ -44,7 +44,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 弯道比较要求路线修订、方向、分段版本及车辆条件兼容。旧圈缺少路线修订、保存的赛道或完整车辆信息时，仍可按本圈遥测查看曲线、输入与弯道指标；界面说明无法比较的具体原因，不补造历史信息。参考圈区间样本不足时保留本圈指标；缺少输入事件的位置显示「—」。差异说明描述已记录的操作与耗时差异；判断原因还需结合调校、天气等条件。
 
-地产赛事页提供默认关闭的「语音比赛工程师」，播报旗语变化、新处罚、个人最快圈和关键进站预测。可调整音量或立即静音；静音会停止当前语音及提示音并清空待播消息，恢复后不补播。红旗优先打断普通播报，重复事件与频繁预测会被去重和冷却。进站建议保留「预计」「可能」等不确定性表述。
+地产赛事页提供默认关闭的「语音比赛工程师」，播报旗语变化、新处罚、个人最快圈和关键进站预测。设置区域位于赛事信息下方，默认收起，点击标题可展开全部语音设置。可调整音量或立即静音；静音会停止当前语音及提示音并清空待播消息，恢复后不补播。红旗优先打断普通播报，重复事件与频繁预测会被去重和冷却。进站建议保留「预计」「可能」等不确定性表述。
 
 播报密度可选精简、均衡或详细，四类播报可分别开关，设置自动保存。类别与最近播报记录默认折叠，展开可查看最近 20 次播报及完成、中断或失效状态。「重复上一条」只重播仍有效且完整播出的最新一条；旗语变化、处罚修改／撤销／执行、断线或赛事切换后，旧消息不可重播。记录仅保留在当前语音会话中，试听不计入。
 
@@ -173,7 +173,7 @@ Lap analysis groups saved laps into sessions by default. Estate practice, qualif
 
 Corner comparisons require compatible route revisions, directions, sector versions and vehicle conditions. Older laps remain viewable and replayable. Intervals with sufficient samples provide observations; other intervals explain the missing evidence. Observations describe recorded inputs and time differences; interpreting causes also requires considering tune, weather and other conditions.
 
-The Estate racing page includes an optional race engineer, disabled by default. It announces flag changes, new penalties, personal bests and important pit predictions, with priority, deduplication and cooldowns. Red flags interrupt routine speech. Volume and immediate mute controls apply to speech and the locally synthesized radio cues before and after each complete transmission. Mute clears pending messages; unmuting does not replay them. Pit advice explicitly remains an estimate.
+The Estate racing page includes an optional race engineer, disabled by default. Its settings sit below the race information and are collapsed by default; click the heading to expand all speech controls. It announces flag changes, new penalties, personal bests and important pit predictions, with priority, deduplication and cooldowns. Red flags interrupt routine speech. Volume and immediate mute controls apply to speech and the locally synthesized radio cues before and after each complete transmission. Mute clears pending messages; unmuting does not replay them. Pit advice explicitly remains an estimate.
 
 Speech defaults to an installed Windows SAPI voice for the selected language, without a network service. Original radio connect/disconnect cues combine short pulses, subtle frequency sweeps and brief squelch tails. The radio opens only once speech is ready; muting or interrupting stops the transmission. Missing voices or audio failures disable speech without affecting the race. After installing a compatible voice, disable and enable the engineer to retry. Synthesis and playback have separate interfaces; Windows speech remains the default, with ElevenLabs, Azure Speech, Tencent Cloud, Alibaba Cloud NLS, Qianwen AI and MiniMax as optional providers. See the [speech integration guide](docs/RACE_ENGINEER_SPEECH.md).
 
