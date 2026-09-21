@@ -6,6 +6,7 @@ $revision = (& git -c "safe.directory=$($serverPath.Replace('\', '/'))" -C $serv
 if ($LASTEXITCODE -ne 0) { throw 'Cannot read RaceServer revision.' }
 if (& git -c "safe.directory=$($serverPath.Replace('\', '/'))" -C $serverPath status --porcelain) { throw 'RaceServer must be clean.' }
 $version = '0.1.0-peer.' + $revision.Substring(0, 12)
+$serverVersion = ([xml](Get-Content -LiteralPath (Join-Path $serverPath 'src/LazyForza.RaceServer.Web/LazyForza.RaceServer.Web.csproj') -Raw)).Project.PropertyGroup.Version
 $stage = Join-Path $clientRoot "artifacts/estate-peer-control/$revision"
 $feed = Join-Path $clientRoot 'vendor/estate-peer-engine'
 New-Item -ItemType Directory -Force -Path $stage, $feed | Out-Null
@@ -59,5 +60,5 @@ foreach ($asset in Get-ChildItem -LiteralPath (Join-Path $webRoot 'wwwroot') -Fi
 "@ | Set-Content -LiteralPath (Join-Path $stage 'LazyForza.RaceServer.Control.csproj') -Encoding utf8
 & dotnet pack (Join-Path $stage 'LazyForza.RaceServer.Control.csproj') -c Release -o $feed --configfile (Join-Path $clientRoot 'NuGet.Config') -p:ManagePackageVersionsCentrally=false
 if ($LASTEXITCODE -ne 0) { throw 'Packing native Web control failed.' }
-[ordered]@{ version = $version; revision = $revision; sources = $hashes; adapter = 'Verbatim middleware/routes/helpers wrapped in PeerControlApplication.Map; startup supplied by peer host.' } |
+[ordered]@{ version = $version; serverVersion = [string]$serverVersion; revision = $revision; sources = $hashes; adapter = 'Verbatim middleware/routes/helpers wrapped in PeerControlApplication.Map; startup supplied by peer host.' } |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $feed 'control-provenance.json') -Encoding utf8

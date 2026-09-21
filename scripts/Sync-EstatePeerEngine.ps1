@@ -8,6 +8,7 @@ if (& git -c "safe.directory=$($serverPath.Replace('\', '/'))" -C $serverPath st
     throw 'Commit RaceServer changes before generating a pinned engine.'
 }
 $version = '0.1.0-peer.' + $revision.Substring(0, 12)
+$serverVersion = ([xml](Get-Content -LiteralPath (Join-Path $serverPath 'src/LazyForza.RaceServer.Web/LazyForza.RaceServer.Web.csproj') -Raw)).Project.PropertyGroup.Version
 $stage = Join-Path $clientRoot ('artifacts/estate-peer-engine/' + $revision)
 $feed = Join-Path $clientRoot 'vendor/estate-peer-engine'
 New-Item -ItemType Directory -Force -Path $stage, $feed | Out-Null
@@ -41,6 +42,6 @@ $packages = [ordered]@{}
 foreach ($package in Get-ChildItem -LiteralPath $feed -Filter "*.$version.nupkg") {
     $packages[$package.Name] = (Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash
 }
-[ordered]@{ version = $version; revision = $revision; sources = $hashes; packages = $packages } |
+[ordered]@{ version = $version; serverVersion = [string]$serverVersion; revision = $revision; sources = $hashes; packages = $packages } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $feed 'provenance.json') -Encoding utf8
 Write-Output "Pinned engine: $version. Update Directory.Packages.props when changing the revision."

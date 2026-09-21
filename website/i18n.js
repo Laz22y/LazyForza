@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "lazyforza.website.language";
   const ENGLISH = {
+    "1.5.4-alpha-1 预览版提供实验性直连房间。房主组件按需下载并独立更新，版本号跟随所封装的服务端并附组件修订号；支持签名校验、离线导入、项目备份与恢复上一版。加入者无需安装组件，比赛仍需参与者之间存在可达网络路径。": "The 1.5.4-alpha-1 preview includes experimental direct rooms. The optional host component updates independently; its version follows the bundled RaceServer with a separate host revision. Signed updates support offline import, project backups and rollback. Players joining a room need no extra component, but peers still require a reachable network path.",
     "主动退出释放、阶段归属和换胎区计圈修复需要客户端 1.5.3。原生服务端升级前请备份数据目录；0.5.0 的公开快照无法续赛，应完成并归档赛事后移走旧快照，再启动 0.6.0。新版恢复中的赛事先以红旗暂停，管理员核对后发布全场绿旗续赛。": "Explicit departure, stage ownership and the service-box lap fix require client 1.5.3. Back up native server data before upgrading. A 0.5.0 public snapshot cannot resume a race: finish and archive the event, then move the old snapshot aside before starting 0.6.0. Restored active events pause under a red flag until an administrator checks the state and issues a full green flag.",
     "1.5.3 · Radio Check 更新说明": "1.5.3 · Radio Check release notes",
     "RaceServer 0.6.0 改进项目与规则管理、逐场记录和主动退出释放，并支持原生服务端重启后恢复赛事。": "RaceServer 0.6.0 improves event and rule management, per-event records and slot release on departure, and restores native races after a restart.",

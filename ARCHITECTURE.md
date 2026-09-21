@@ -31,7 +31,7 @@ EstateRaceModule <-> LazyForza.RaceServer protocol v2
 - `LazyForza.Modules.Dashboard`：Dashboard 生命周期、状态快照和学习器编排；
 - `LazyForza.Modules.LapAnalysis`：路线/圈状态机、存储与 Lap HUD 状态；
 - `LazyForza.Modules.EstateRace`：地产环道几何、计时、维修区、赛事网络客户端与赛事 HUD 状态；
-- `LazyForza.EstatePeer`：轻量直连邀请与回执、固定 TLS 指纹、候选连接、UDP／QUIC 适配、本机管道和可选房主组件校验；不引用 ASP.NET 或赛事权威引擎；
+- `LazyForza.EstatePeer`：轻量直连邀请与回执、固定 TLS 指纹、候选连接、UDP／QUIC 适配、本机管道和可选房主组件的签名验证、兼容版本选择、安装与回退；复用 `Update` 的来源与版本语义，不引用 ASP.NET 或赛事权威引擎；
 - `LazyForza.EstatePeer.Host`：独立可选进程，复用固定版本 RaceServer Core / Protocol 离线包，承载 HTTPS/WSS、权威状态与用户级加密恢复文件；主客户端通过当前用户命名管道管理；
 - `LazyForza.Overlay`：WPF 矢量 HUD 和 Win32 窗口样式；不解析 UDP、不计算业务算法；
 - `LazyForza.Update`：更新查询、下载和更新包完整性验证；

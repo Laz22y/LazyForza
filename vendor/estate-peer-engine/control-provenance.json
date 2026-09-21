@@ -1,5 +1,6 @@
 {
   "version": "0.1.0-peer.b6909f8bb260",
+  "serverVersion": "0.6.0",
   "revision": "b6909f8bb260231bca51e35e175918fd0841c4df",
   "sources": {
     "AdminSessionStore.cs": "C0DE764CCEBE47F67D2B3041E801D8898B38892E5C2318AD04E4046AD112267E",

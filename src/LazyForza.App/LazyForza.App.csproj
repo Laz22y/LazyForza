@@ -24,6 +24,7 @@
     <Resource Include="..\..\website\assets\gitcode.png" Link="Assets\gitcode.png" />
     <EmbeddedResource Include="Localization\*.json" />
     <EmbeddedResource Include="Assets\estate-peer-component.json" LogicalName="LazyForza.EstatePeer.ComponentCatalog" Condition="Exists('Assets\estate-peer-component.json')" />
+    <EmbeddedResource Include="Assets\estate-peer-signing-public.pem" LogicalName="LazyForza.EstatePeer.ComponentPublicKey" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" />

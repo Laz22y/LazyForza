@@ -1,15 +1,27 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using LazyForza.Update;
 
 namespace LazyForza.EstatePeer;
 
 public sealed record PeerComponentFile(string Name, long Size, string Sha256);
 public sealed record PeerComponentCatalog(int FormatVersion, int ControlVersion, string Version, string Runtime,
-    long DownloadBytes, string ArchiveSha256, string? DownloadUrl, IReadOnlyList<PeerComponentFile> Files);
+    long DownloadBytes, string ArchiveSha256, string? DownloadUrl, IReadOnlyList<PeerComponentFile> Files,
+    IReadOnlyList<string>? DownloadUrls = null, int Revision = 1, string? ServerRevision = null)
+{
+    [JsonIgnore] public string ReleaseId => $"{Version}-r{Revision}";
 
-/// <summary>Only installs the component hash shipped with this client; imported archives cannot choose code to trust.</summary>
-public sealed class PeerComponentStore(string root, PeerComponentCatalog catalog)
+    public int CompareVersionTo(PeerComponentCatalog other)
+    {
+        var version = UpdateSemanticVersion.Parse(Version).CompareTo(UpdateSemanticVersion.Parse(other.Version));
+        return version != 0 ? version : Revision.CompareTo(other.Revision);
+    }
+}
+
+/// <summary>Installs only a caller-authenticated catalog: embedded in the client or verified by its signing key.</summary>
+public sealed class PeerComponentStore(string root, PeerComponentCatalog catalog, UpdateSourceKind? preferredSource = null)
 {
     public const string ExecutableName = "LazyForza.EstatePeer.Host.exe";
     public string InstallDirectory => Path.Combine(root, catalog.ArchiveSha256);
@@ -81,16 +93,32 @@ public sealed class PeerComponentStore(string root, PeerComponentCatalog catalog
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); }
     }
 
-    public async Task DownloadAndInstallAsync(IProgress<double>? progress, CancellationToken token)
+    public async Task DownloadAndInstallAsync(IProgress<double>? progress, CancellationToken token, HttpClient? httpClient = null)
     {
         ValidateCatalog();
-        if (catalog.DownloadUrl is null) throw new InvalidOperationException("房主组件尚未发布下载，请使用与此客户端匹配的离线包。");
-        var uri = new Uri(catalog.DownloadUrl, UriKind.Absolute);
-        if (uri.Scheme != "https" || uri.Host != "github.com" || !uri.AbsolutePath.StartsWith("/Laz22y/LazyForza/releases/download/", StringComparison.Ordinal))
-            throw new InvalidDataException("组件下载来源无效。");
+        var urls = catalog.DownloadUrls ?? (catalog.DownloadUrl is null ? [] : new[] { catalog.DownloadUrl });
+        if (urls.Count == 0) throw new InvalidOperationException("房主组件尚未发布下载，请使用与此客户端匹配的离线包。");
+        using var ownedClient = httpClient is null ? new HttpClient { Timeout = TimeSpan.FromMinutes(5) } : null;
+        Exception? failure = null;
+        var sources = urls.Distinct(StringComparer.Ordinal).Take(2).Select(PeerComponentDistribution.ValidateAssetUri);
+        if (preferredSource is { } preferred)
+            sources = sources.OrderBy(uri => preferred == UpdateSourceKind.GitHub ? uri.Host != "github.com" : uri.Host != "api.gitcode.com");
+        foreach (var uri in sources)
+        {
+            try { await DownloadFromAsync(httpClient ?? ownedClient!, uri, progress, token); return; }
+            catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or OperationCanceledException)
+            {
+                token.ThrowIfCancellationRequested();
+                failure = error;
+            }
+        }
+        throw new IOException("房主组件下载失败，请稍后重试或导入离线包。", failure);
+    }
+
+    private async Task DownloadFromAsync(HttpClient client, Uri uri, IProgress<double>? progress, CancellationToken token)
+    {
         Directory.CreateDirectory(root);
         var download = Path.Combine(root, ".download-" + Guid.NewGuid().ToString("N"));
-        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         try
         {
             using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
@@ -128,9 +156,9 @@ public sealed class PeerComponentStore(string root, PeerComponentCatalog catalog
         Directory.Delete(InstallDirectory, recursive: true);
     }
 
-    private void ValidateCatalog()
+    internal void ValidateCatalog()
     {
-        if (catalog.FormatVersion != 1 || catalog.ControlVersion != 1 || catalog.Runtime != "win-x64" ||
+        if (catalog.FormatVersion != 1 || catalog.ControlVersion != 1 || catalog.Runtime != "win-x64" || catalog.Revision < 1 ||
             !ValidHash(catalog.ArchiveSha256) || catalog.DownloadBytes is < 1 or > 268_435_456 ||
             catalog.Files.Count is < 1 or > 512 || catalog.Files.Sum(file => file.Size) > 536_870_912 ||
             catalog.Files.Select(file => file.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != catalog.Files.Count ||

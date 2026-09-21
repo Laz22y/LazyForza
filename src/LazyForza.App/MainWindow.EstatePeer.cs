@@ -61,9 +61,23 @@ internal sealed partial class MainWindow
                 }
             }
             PeerComponentStore? component = null;
+            PeerComponentUpdateManager? componentUpdates = null;
             using (var catalog = typeof(MainWindow).Assembly.GetManifestResourceStream("LazyForza.EstatePeer.ComponentCatalog"))
                 if (catalog is not null && PeerComponentStore.ReadCatalog(catalog) is { } manifest)
                     component = new PeerComponentStore(Path.Combine(EstatePeerRoot, "Components"), manifest);
+            using (var key = typeof(MainWindow).Assembly.GetManifestResourceStream("LazyForza.EstatePeer.ComponentPublicKey"))
+            {
+                if (component is not null && key is not null)
+                {
+                    using var reader = new StreamReader(key);
+                    var distribution = new PeerComponentDistribution(await reader.ReadToEndAsync(lifetimeCancellation.Token),
+                        ApplicationVersionInfo.Informational, updateManager.IsUpdateMandatory);
+                    componentUpdates = new PeerComponentUpdateManager(Path.Combine(EstatePeerRoot, "Components"), roomRoot,
+                        component.Catalog, distribution, updateManager.PreferredSource);
+                    await componentUpdates.RestoreAsync(lifetimeCancellation.Token);
+                    component = componentUpdates.Current;
+                }
+            }
             var installed = component is not null && await component.FindVerifiedExecutableAsync(lifetimeCancellation.Token) is not null;
             projects.Sort((left, right) => right.CreatedAt.CompareTo(left.CreatedAt));
             var recentPath = Path.Combine(EstatePeerRoot, "last-project.txt");
@@ -72,8 +86,9 @@ internal sealed partial class MainWindow
                 () => estatePeerHost,
                 async (draft, token) =>
                 {
-                    if (component is null) throw new InvalidOperationException("此客户端尚未配置房主组件，请等待匹配的组件版本。");
-                    var executable = await component.FindVerifiedExecutableAsync(token)
+                    var activeComponent = componentUpdates?.Current ?? component;
+                    if (activeComponent is null) throw new InvalidOperationException("此客户端尚未配置房主组件，请等待匹配的组件版本。");
+                    var executable = await activeComponent.FindVerifiedExecutableAsync(token)
                         ?? throw new InvalidOperationException("请先安装或修复房主组件。");
                     if (estatePeerHost is { IsRunning: true }) throw new InvalidOperationException("请先关闭当前直连房间。");
                     if (estatePeerHost is not null) await StopEstatePeerAsync();
@@ -120,7 +135,7 @@ internal sealed partial class MainWindow
                 () => module.State.IsConnected,
                 () => module.State.Session is { } session
                     ? AppLocalization.Format("peer.members", "已加入 {0} 位车手 · {1}", session.Participants.Count(item => item.IsConnected), RacePhaseLabel(session.Phase))
-                    : AppLocalization.Literal("监听已就绪；其他设备连入后才代表对应路径可达。"), installed, recentProject);
+                    : AppLocalization.Literal("监听已就绪；其他设备连入后才代表对应路径可达。"), installed, recentProject, componentUpdates);
             estatePeerWindow = dialog;
             dialog.Closed += (_, _) => estatePeerWindow = null;
             dialog.Show();

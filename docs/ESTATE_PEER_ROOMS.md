@@ -18,9 +18,15 @@ Web 总控仅监听房主的 `127.0.0.1` 地址，客户端通过短时、一次
 
 房主组件单独安装，不进入默认客户端包。窗口使用内嵌清单显示下载与安装大小。组件包含原生服务端的固定版本赛事核心与 Web 总控，自带运行时，无需额外安装 ASP.NET。
 
-此组件尚未发布线上资产，当前下载按钮不可用，可导入与客户端内嵌 SHA-256 清单匹配的离线 ZIP。已有完整的下载／校验／安装路径；发布后下载服务只负责获取程序，不参与建房、寻址或比赛。安装后可在下载站离线时使用。
+组件通过独立的 [GitHub 分发仓库](https://github.com/Laz22y/LazyForza.Components/releases)与 [GitCode 分发仓库](https://gitcode.com/Laz22y/LazyForza.Components/releases)下载。下载服务只负责获取程序，不参与建房、寻址或比赛；组件安装后可离线使用。加入房间无需下载组件。
 
-组件位于用户数据目录的 `EstatePeer/Components/<SHA-256>`；项目位于 `EstatePeer/Rooms/<项目 ID>`。项目包含赛道包、项目描述及 Windows 当前用户加密的房间身份／比赛状态；`Control` 子目录保存 Web 总控的配置、素材和赛事项目。卸载组件保留项目；移到另一 Windows 用户或电脑的加密身份不能直接解密。
+在「创建房间 → 房主组件」展开区中选择「检查组件更新」，即可独立更新房主功能，无需等待客户端发布。组件编号采用「服务端版本-r组件修订」，例如 `0.6.0-r1`：升级服务端时跟随其版本，仅修改房主适配时递增 `r2`、`r3`。发布清单同时记录实际封装的服务端提交。组件更新沿用客户端的 GitCode／GitHub 来源偏好，失败时尝试另一来源；正式客户端不接受预览组件。
+
+更新必须通过客户端内置公钥的 ECDSA 签名校验，以及 ZIP 和每个文件的 SHA-256 校验。客户端只提供版本范围、本机控制协议、赛事协议和项目格式均兼容的更新。需先关闭房间才能安装；新版完整安装并备份项目后才切换版本，中断或备份失败保留原版本。已有可用旧版本时可选择「恢复上一版本」，回退程序不会覆盖更新后的比赛结果。
+
+离线首次安装客户端内嵌版本时，可直接导入配套 ZIP。离线升级到其他版本时，将该版 ZIP 与 `estate-peer-component.signed.json` 放在同一个文件夹，再选择「导入离线包」。首次接受更新需要有效且未过期的签名清单；已经验证并保存的版本可继续离线运行或修复。
+
+组件位于用户数据目录的 `EstatePeer/Components/<SHA-256>`，当前版本选择保存在 `component-selection.json`；项目位于 `EstatePeer/Rooms/<项目 ID>`，更新和回退前的项目备份位于 `EstatePeer/Backups/Components`。项目包含赛道包、项目描述及 Windows 当前用户加密的房间身份／比赛状态；`Control` 子目录保存 Web 总控的配置、素材和赛事项目。卸载组件保留项目；移到另一 Windows 用户或电脑的加密身份不能直接解密。
 
 ## 网络条件
 
@@ -79,6 +85,19 @@ curl.exe --noproxy '*' -6 -k -sS --connect-timeout 5 --max-time 10 -o NUL -w 'HT
 
 - 架构与网络矩阵：[ADR-0002](adr/ADR-0002-estate-peer-hosting.md)。
 - 权威引擎固定依赖：[离线包说明](../vendor/estate-peer-engine/README.md)。
-- 生成独立组件：`scripts/New-EstatePeerComponent.ps1 -WriteClientCatalog`。它只生成本地组件和校验清单，不发布客户端或上传资产。
-- 组件与清单必须成对保留。对外分发时，显式指定组件版本与下载 URL，发布脚本输出的原始 ZIP；客户端编译嵌入同一份清单。更换字节、重新压缩或升级组件后必须重新生成清单。
-- 本机测试覆盖认证、容量、邀请兼容与刷新、项目启动事务、原生总控、UDP 内的赛道传输和赛事连接、可靠事件确认、模块接线及恢复；WPF 离屏测试覆盖中英文及 520／680 宽窗口。跨网络双向 UDP 路径已有小范围检查结果，完整 QUIC 加入、长期比赛和真实 FH6 多机仍待验证。
+- 本机测试覆盖认证、容量、邀请兼容与刷新、项目启动事务、原生总控、UDP 内的赛道传输和赛事连接、可靠事件确认、模块接线及恢复；组件测试覆盖签名、兼容版本、独立修订、来源回退、项目备份、回退和中断重试。WPF 离屏测试覆盖中英文及 520／680 宽窗口。跨网络双向 UDP 路径已有小范围检查结果，完整 QUIC 加入、长期比赛和真实 FH6 多机仍待验证。
+
+### 发布独立组件
+
+所有构建和签名在本机完成，不依赖 CI。服务端变更先在 RaceServer 两套实现验证并提交，再运行 `Sync-EstatePeerEngine.ps1` 和 `Sync-EstatePeerControl.ps1`，同步更新中央包版本。两份 provenance 的服务端版本与提交必须一致；打包脚本从中读取版本，拒绝手动指定不匹配的版本。
+
+```powershell
+pwsh scripts/New-EstatePeerComponent.ps1 -Revision 1
+pwsh scripts/New-EstatePeerUpdateManifest.ps1 -CatalogPath '<输出目录>/estate-peer-component.json' `
+  -MinimumClientVersion '1.5.4-alpha-1' -MaximumClientVersionExclusive '1.6.0' `
+  -Channel preview -Sequence 2026092101
+```
+
+`Sequence` 每次发布递增；客户端范围与协议／项目格式要以实际兼容检查为准。清单默认六个月有效，发布前可以指定 `ExpiresAt`。将原始 ZIP、对应 `.sha256` 和 `estate-peer-component.signed.json` 上传到双平台分发仓库同名 Release，例如 `estate-peer-host-v0.6.0-r1`；预览组件标为预发布。不能重新压缩已签名的包。客户端首次配置下载时，将生成的 `estate-peer-component.downloads.json` 作为内嵌清单；后续兼容组件更新不需要重新发行客户端。
+
+签名使用当前 Windows 用户 CNG 密钥 `LazyForza.ComponentSigning.v1`，由 `Initialize-EstatePeerSigningKey.ps1` 初始化；只把公钥提交到源码，私钥不可导出且不上传。后续发布需在拥有该密钥的用户环境中签名。密钥丢失或更换时，需要通过客户端更新分发新的信任公钥，不能直接替换分发仓库中的签名。

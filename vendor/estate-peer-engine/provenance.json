@@ -1,5 +1,6 @@
 {
   "version": "0.1.0-peer.b6909f8bb260",
+  "serverVersion": "0.6.0",
   "revision": "b6909f8bb260231bca51e35e175918fd0841c4df",
   "sources": {
     "src/LazyForza.RaceServer.Protocol/RaceProtocolJson.cs": "F5E605C95D9A9989F10FCBED23164353EC8EDF46DDD7293261197A920003882E",

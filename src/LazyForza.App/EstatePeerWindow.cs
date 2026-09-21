@@ -14,7 +14,9 @@ internal sealed class EstatePeerWindow : Window
     private readonly EstateRaceConnectionProfile saved;
     private readonly IReadOnlyList<PeerTrackChoice> tracks;
     private readonly IReadOnlyList<PeerProjectInfo> projects;
-    private readonly PeerComponentStore? component;
+    private PeerComponentStore? component;
+    private readonly PeerComponentUpdateManager? componentUpdates;
+    private PeerComponentCandidate? componentCandidate;
     private readonly Func<PeerHostProcess?> host;
     private readonly Func<PeerRoomDraft, CancellationToken, Task<PeerHostProcess>> create;
     private readonly Func<EstateRaceConnectionProfile, CancellationToken, Task> join;
@@ -38,11 +40,12 @@ internal sealed class EstatePeerWindow : Window
         IReadOnlyList<PeerProjectInfo> projects, PeerComponentStore? component, Func<PeerHostProcess?> host,
         Func<PeerRoomDraft, CancellationToken, Task<PeerHostProcess>> create,
         Func<EstateRaceConnectionProfile, CancellationToken, Task> join, Func<Task> stop, Func<bool> connected, Func<string> roomStatus,
-        bool componentInstalled = false, Guid? recentProjectId = null)
+        bool componentInstalled = false, Guid? recentProjectId = null, PeerComponentUpdateManager? componentUpdates = null)
     {
         this.saved = saved; this.tracks = tracks; this.projects = projects; this.component = component;
         this.host = host; this.create = create; this.join = join; this.stop = stop; this.connected = connected; this.roomStatus = roomStatus;
         this.componentInstalled = componentInstalled;
+        this.componentUpdates = componentUpdates;
         selectedProjectId = projects.FirstOrDefault(item => item.Id == recentProjectId)?.Id ?? projects.FirstOrDefault()?.Id;
         newProject = projects.Count == 0;
         Title = AppLocalization.Literal("直连房间 · 实验");
@@ -144,38 +147,81 @@ internal sealed class EstatePeerWindow : Window
         var install = new StackPanel();
         install.Children.Add(Text(componentInstalled ? "房主组件 · 已安装" : "按需安装房主组件", 16, "TextBrush"));
         install.Children.Add(Text(AppLocalization.Format("peer.componentSize", "下载 {0:0.0} MiB · 安装后 {1:0.0} MiB · {2}",
-            component.Catalog.DownloadBytes / 1048576d, component.InstalledBytes / 1048576d, component.Catalog.Version), 12));
+            component.Catalog.DownloadBytes / 1048576d, component.InstalledBytes / 1048576d, component.Catalog.ReleaseId), 12));
         var installActions = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
         var download = AsyncButton("下载组件", async () =>
         {
-            await component.DownloadAndInstallAsync(new Progress<double>(value => message.Text = AppLocalization.Format("peer.downloadProgress", "正在下载房主组件 · {0:P0}", value)), cancellation.Token);
+            var progress = new Progress<double>(value => message.Text = AppLocalization.Format("peer.downloadProgress", "正在下载房主组件 · {0:P0}", value));
+            if (componentUpdates is null) await component.DownloadAndInstallAsync(progress, cancellation.Token);
+            else await componentUpdates.InstallCurrentAsync(null, () => host() is { IsRunning: true }, progress, cancellation.Token);
             componentInstalled = true; Render();
             message.Text = AppLocalization.Literal("房主组件已安装，可以创建房间。");
         });
-        download.IsEnabled = component.Catalog.DownloadUrl is not null;
+        download.IsEnabled = component.Catalog.DownloadUrl is not null || component.Catalog.DownloadUrls is { Count: > 0 };
         installActions.Children.Add(download);
         installActions.Children.Add(AsyncButton("导入离线包", async () =>
         {
             var picker = new Microsoft.Win32.OpenFileDialog { Filter = "LazyForza component (*.zip)|*.zip", CheckFileExists = true };
             if (picker.ShowDialog(this) != true) return;
-            await component.InstallAsync(picker.FileName, cancellation.Token);
+            if (componentUpdates is null) await component.InstallAsync(picker.FileName, cancellation.Token);
+            else
+            {
+                await componentUpdates.ImportAsync(picker.FileName, () => host() is { IsRunning: true }, cancellation.Token);
+                component = componentUpdates.Current;
+            }
             componentInstalled = true; Render();
             message.Text = AppLocalization.Literal("房主组件已安装，可以创建房间。");
         }));
         if (componentInstalled)
         {
             install.Children.RemoveAt(0);
-            installActions.Children.Clear();
+            installActions.Children.Remove(download);
             installActions.Children.Add(AsyncButton("卸载组件", () => { component.Uninstall(); componentInstalled = false; Render(); message.Text = AppLocalization.Literal("组件已卸载，房间项目仍然保留。"); return Task.CompletedTask; }));
             install.Children.Add(installActions);
         }
         else
         {
             install.Children.Add(installActions);
-            install.Children.Add(Text(component.Catalog.DownloadUrl is null
+            install.Children.Add(Text(component.Catalog.DownloadUrl is null && component.Catalog.DownloadUrls is not { Count: > 0 }
                 ? "此实验组件尚未发布下载，可导入匹配的离线包。" : "安装后即可离线建房。加入他人房间不需要此组件。", 11));
         }
-        body.Children.Add(componentInstalled ? Disclosure("房主组件 · 已安装", install) : Surface(install));
+        if (componentUpdates is not null)
+        {
+            installActions.Children.Insert(0, AsyncButton("检查组件更新", async () =>
+            {
+                componentCandidate = await componentUpdates.CheckAsync(cancellation.Token);
+                Render();
+                message.Text = AppLocalization.Literal(componentCandidate is null
+                    ? "没有适用于当前客户端的房主组件更新。" : "发现兼容的房主组件更新，关闭房间后即可安装。");
+            }));
+            if (componentCandidate is { } candidate)
+            {
+                install.Children.Add(Text(AppLocalization.Format("peer.componentUpdate", "可更新至 {0} · 下载 {1:0.0} MiB",
+                    candidate.Release.Catalog.ReleaseId, candidate.Release.Catalog.DownloadBytes / 1048576d), 12, "AccentBrush"));
+                install.Children.Add(AsyncButton("更新房主组件", async () =>
+                {
+                    await componentUpdates.InstallAsync(candidate, null, () => host() is { IsRunning: true },
+                        new Progress<double>(value => message.Text = AppLocalization.Format("peer.downloadProgress", "正在下载房主组件 · {0:P0}", value)), cancellation.Token);
+                    component = componentUpdates.Current;
+                    componentInstalled = true; componentCandidate = null; Render();
+                    message.Text = AppLocalization.Literal("房主组件已更新，下次建房使用新版本。项目备份已保留。");
+                }, primary: true));
+            }
+            if (componentUpdates.CanRollback)
+                installActions.Children.Add(AsyncButton("恢复上一组件版本", async () =>
+                {
+                    await componentUpdates.RollbackAsync(() => host() is { IsRunning: true }, cancellation.Token);
+                    component = componentUpdates.Current; componentInstalled = true; componentCandidate = null; Render();
+                    message.Text = AppLocalization.Literal("已恢复上一组件版本，房间项目保持不变。");
+                }));
+        }
+        if (componentInstalled)
+        {
+            var disclosure = Disclosure("房主组件 · 已安装", install);
+            disclosure.IsExpanded = componentCandidate is not null;
+            body.Children.Add(disclosure);
+        }
+        else body.Children.Add(Surface(install));
         if (!componentInstalled) return;
 
         var projectActions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
