@@ -102,6 +102,76 @@ public sealed class PeerComponentUpdateTests
     }
 
     [TestMethod]
+    [DataRow(UpdateSourceKind.GitCode)]
+    [DataRow(UpdateSourceKind.GitHub)]
+    public async Task DiscoveryIgnoresOtherComponentsAndFindsHostOnLaterPages(UpdateSourceKind source)
+    {
+        using var fixture = new Fixture();
+        var requests = new List<Uri>();
+        var tag = PeerComponentDistribution.TagPrefix + fixture.NewCatalog.ReleaseId;
+        var unrelated = JsonSerializer.Serialize(Enumerable.Range(1, 100).Select(index => new
+        {
+            tag_name = $"other-component-v99.0.{index}",
+            assets = new[] { new { name = PeerComponentDistribution.ManifestName }, new { name = "other-file.zip" } }
+        }));
+        using var http = new HttpClient(new Handler((request, _) =>
+        {
+            var uri = request.RequestUri!;
+            requests.Add(uri);
+            if (uri.AbsolutePath.EndsWith("/releases", StringComparison.Ordinal))
+            {
+                Assert.AreEqual(source == UpdateSourceKind.GitHub ? "api.github.com" : "api.gitcode.com", uri.Host);
+                return Task.FromResult(Json(uri.Query.Contains("page=1&", StringComparison.Ordinal) ? unrelated
+                    : JsonSerializer.Serialize(new[]
+                    {
+                        new { tag_name = tag, assets = new[] { new { name = "unrelated-asset.zip" } } },
+                        new { tag_name = "other-component-v999.0.0", assets = new[] { new { name = PeerComponentDistribution.ManifestName } } }
+                    })));
+            }
+            StringAssert.Contains(uri.AbsolutePath, $"/{tag}/");
+            StringAssert.Contains(uri.AbsolutePath, PeerComponentDistribution.ManifestName);
+            return Task.FromResult(Json(JsonSerializer.Serialize(fixture.Sign(fixture.Release))));
+        }));
+        var result = await fixture.Distribution.CheckAsync(source, 0, fixture.Baseline.Version, http, default);
+        Assert.AreEqual(fixture.NewCatalog.ReleaseId, result?.Release.Catalog.ReleaseId);
+        Assert.AreEqual(3, requests.Count);
+        Assert.AreEqual("?page=1&per_page=100", requests[0].Query);
+        Assert.AreEqual("?page=2&per_page=100", requests[1].Query);
+    }
+
+    [TestMethod]
+    public async Task UnrelatedReleasesDoNotTriggerManifestOrAssetDownloads()
+    {
+        using var fixture = new Fixture();
+        var requests = new List<Uri>();
+        using var http = new HttpClient(new Handler((request, _) =>
+        {
+            requests.Add(request.RequestUri!);
+            Assert.IsTrue(request.RequestUri!.AbsolutePath.EndsWith("/releases", StringComparison.Ordinal));
+            return Task.FromResult(Json("[{\"tag_name\":\"other-component-v99.0.0\"},{\"tag_name\":\"files-2026\"}]"));
+        }));
+        Assert.IsNull(await fixture.Distribution.CheckAsync(UpdateSourceKind.GitCode, 0, fixture.Baseline.Version, http, default));
+        CollectionAssert.AreEqual(new[] { "api.gitcode.com", "api.github.com" }, requests.Select(uri => uri.Host).ToArray());
+    }
+
+    [TestMethod]
+    public async Task IncompleteMixedRepositoryListingDoesNotReportHostUpToDate()
+    {
+        using var fixture = new Fixture();
+        var requests = 0;
+        var fullPage = JsonSerializer.Serialize(Enumerable.Range(1, 100).Select(index => new { tag_name = $"files-{index}" }));
+        using var http = new HttpClient(new Handler((request, _) =>
+        {
+            requests++;
+            return Task.FromResult(request.RequestUri!.Query.Contains("page=1&", StringComparison.Ordinal)
+                ? Json(fullPage) : new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        }));
+        await Assert.ThrowsExactlyAsync<IOException>(() => fixture.Distribution.CheckAsync(
+            UpdateSourceKind.GitCode, 0, fixture.Baseline.Version, http, default));
+        Assert.AreEqual(4, requests);
+    }
+
+    [TestMethod]
     [DataRow("0.6.0", 2)]
     [DataRow("0.7.0", 1)]
     public async Task ServerVersionsAndHostRevisionsUpdateIndependently(string nextVersion, int nextRevision)

@@ -71,27 +71,7 @@ public sealed class PeerComponentDistribution(string publicKeyPem, string client
             timeout.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var api = source == UpdateSourceKind.GitHub
-                    ? $"https://api.github.com/repos/{Repository}/releases?per_page=20"
-                    : $"https://api.gitcode.com/api/v5/repos/{Repository}/releases?per_page=20";
-                using var document = JsonDocument.Parse(await ReadAsync(client, new Uri(api), 512 * 1024, timeout.Token));
-                if (document.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException("组件版本列表无效。");
-                var tags = new List<(string Tag, UpdateSemanticVersion Version, int Revision)>();
-                foreach (var item in document.RootElement.EnumerateArray().Take(20))
-                {
-                    if (item.ValueKind != JsonValueKind.Object ||
-                        item.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True ||
-                        !item.TryGetProperty("tag_name", out var name) || name.ValueKind != JsonValueKind.String) continue;
-                    var tag = name.GetString()!;
-                    var revisionOffset = tag.LastIndexOf("-r", StringComparison.Ordinal);
-                    if (tag.StartsWith(TagPrefix, StringComparison.Ordinal) && tag.Length < 160 &&
-                        revisionOffset > TagPrefix.Length && int.TryParse(tag[(revisionOffset + 2)..], out var revision) && revision > 0 &&
-                        UpdateSemanticVersion.TryParse(tag[TagPrefix.Length..revisionOffset], out var version) &&
-                        (allowPreview || !version.IsPrerelease) &&
-                        (version.CompareTo(UpdateSemanticVersion.Parse(installedVersion)) > 0 ||
-                         version.CompareTo(UpdateSemanticVersion.Parse(installedVersion)) == 0 && revision > installedRevision))
-                        tags.Add((tag, version, revision));
-                }
+                var tags = await ReadCandidateTagsAsync(source, installedVersion, installedRevision, client, timeout.Token);
                 foreach (var (tag, _, _) in tags.OrderByDescending(item => item.Version).ThenByDescending(item => item.Revision).Take(8))
                 {
                     try
@@ -118,6 +98,43 @@ public sealed class PeerComponentDistribution(string publicKeyPem, string client
         }
         if (checkedSource) return null;
         throw new IOException("暂时无法检查房主组件更新，请稍后重试。", failure);
+    }
+
+    private async Task<List<(string Tag, UpdateSemanticVersion Version, int Revision)>> ReadCandidateTagsAsync(
+        UpdateSourceKind source, string installedVersion, int installedRevision, HttpClient client, CancellationToken token)
+    {
+        const int pageSize = 100;
+        const int maximumPages = 20;
+        var installed = UpdateSemanticVersion.Parse(installedVersion);
+        var tags = new List<(string Tag, UpdateSemanticVersion Version, int Revision)>();
+        var seenTags = new HashSet<string>(StringComparer.Ordinal);
+        var api = source == UpdateSourceKind.GitHub
+            ? $"https://api.github.com/repos/{Repository}/releases"
+            : $"https://api.gitcode.com/api/v5/repos/{Repository}/releases";
+        for (var page = 1; page <= maximumPages; page++)
+        {
+            token.ThrowIfCancellationRequested();
+            var uri = new Uri($"{api}?page={page}&per_page={pageSize}");
+            using var document = JsonDocument.Parse(await ReadAsync(client, uri, 2 * 1024 * 1024, token));
+            if (document.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException("组件版本列表无效。");
+            foreach (var item in document.RootElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    item.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True ||
+                    !item.TryGetProperty("tag_name", out var name) || name.ValueKind != JsonValueKind.String) continue;
+                var tag = name.GetString()!;
+                var revisionOffset = tag.LastIndexOf("-r", StringComparison.Ordinal);
+                if (tag.StartsWith(TagPrefix, StringComparison.Ordinal) && tag.Length < 160 &&
+                    revisionOffset > TagPrefix.Length && int.TryParse(tag[(revisionOffset + 2)..], out var revision) && revision > 0 &&
+                    UpdateSemanticVersion.TryParse(tag[TagPrefix.Length..revisionOffset], out var version) &&
+                    (allowPreview || !version.IsPrerelease) &&
+                    (version.CompareTo(installed) > 0 || version.CompareTo(installed) == 0 && revision > installedRevision) &&
+                    seenTags.Add(tag))
+                    tags.Add((tag, version, revision));
+            }
+            if (document.RootElement.GetArrayLength() < pageSize) return tags;
+        }
+        throw new InvalidDataException("组件版本列表无效。");
     }
 
     internal static async Task<string> ReadAsync(HttpClient client, Uri uri, int maxBytes, CancellationToken token)
