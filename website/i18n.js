@@ -9,6 +9,7 @@
     "RaceServer 0.6.0 按比赛现场、赛事项目、规则与赛程、赛果与记录、服务器组织总控。一项目对应一场赛事；准备下一场时归档旧赛果并清理实时成绩和离线占位。客户端主动退出后释放席位；暂时掉线保留恢复身份，大厅离线占位五分钟后释放。": "RaceServer 0.6.0 organizes control into the live event, projects, rules and schedule, results and records, and server settings. Each project represents one event. Preparing the next archives earlier results and clears live standings and offline slots. Explicit departure releases a slot; temporary disconnections retain recovery identities, and offline lobby slots expire after five minutes.",
     "语音比赛工程师": "Race engineer",
     "窗口与快速设置": "Window and quick settings",
+    "设置上方的「关于」页提供品牌图、版本信息、官网与代码仓库入口，以及最近 5 个版本的更新公告。公告可展开阅读，跟随界面语言选择正文，并保留本地缓存供离线查看。": "About, above Settings, shows the brand graphic, version, website and repository links, plus the five most recent release announcements. Expand notes to read them in the interface language; saved announcements remain available offline.",
     "1.5.3 · Radio Check 带来语音比赛工程师、弯道级对比、无边框主窗口和自选快速设置，并改进维修区计圈与地产 HUD。推荐搭配 RaceServer 0.6.0，使用协议 v2。": "1.5.3 · Radio Check adds a race engineer, corner comparisons, a borderless main window and configurable quick settings, with improved pit timing and estate HUDs. RaceServer 0.6.0 is recommended, using protocol v2.",
     "圈记录可收藏、命名、备注和固定参考，自定义保存数量；结合速度、输入、走线和弯道分析比较差异。": "Favorite, name and annotate laps, pin references and choose how many to keep. Compare speed, inputs, racing lines and corner data.",
     "按车型、性能等级和可观测调校特征保存换挡学习结果。": "Save learned shift targets by vehicle, performance class and observable tune traits.",

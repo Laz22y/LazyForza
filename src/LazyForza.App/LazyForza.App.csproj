@@ -20,6 +20,8 @@
   <ItemGroup>
     <Resource Include="Assets\LazyForza.png" />
     <Resource Include="Assets\LazyForzaWordmark.png" />
+    <Resource Include="..\..\website\assets\github.png" Link="Assets\github.png" />
+    <Resource Include="..\..\website\assets\gitcode.png" Link="Assets\gitcode.png" />
     <EmbeddedResource Include="Localization\*.json" />
     <EmbeddedResource Include="Assets\estate-peer-component.json" LogicalName="LazyForza.EstatePeer.ComponentCatalog" Condition="Exists('Assets\estate-peer-component.json')" />
   </ItemGroup>

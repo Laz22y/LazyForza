@@ -84,6 +84,8 @@ LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 
 完整的安装、功能、数据、故障排查和开发说明见 [LazyForza 文档](https://laz22y.github.io/LazyForza/docs/)。
 
+「关于」入口位于侧栏「设置」上方，展示品牌图、当前版本与更新名，以及官网、使用文档、客户端 GitHub／GitCode 和服务端 GitHub 链接。更新公告列出最近 5 个已发布版本，点击卡片展开正文，并按界面语言选择更新说明。正式版只显示正式更新，预览版包含预览更新；打开页面时按当前更新来源获取公告，失败时尝试备用来源，已加载内容缓存在本机供离线查看，可手动刷新。
+
 ## RaceServer
 
 [LazyForza.RaceServer](https://github.com/Laz22y/LazyForza.RaceServer) 是独立的地产赛事服务端，提供：
@@ -192,6 +194,8 @@ The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu ent
 Settings saves and applies changes automatically. Language, HUD, recording options and valid live UDP endpoints take effect directly. Changing data folders prompts for a restart at a time of your choice; existing data stays in its original folder. Six UI accent colors are available: Default Blue, Midnight Purple, Fresh Green, Vivid Red, Pure White and Subtle Gray.
 
 The sidebar footer shows telemetry status and the active UDP port, or the simulation/replay source. Settings → General → Quick settings offers engineer mute and volume, HUD shift cues, current-car shift guidance, overall HUD and estate panel opacity, automatic race recording, and reduced motion. Mute and HUD shift cues appear by default; existing custom selections are preserved. Sliders open beside the sidebar and save immediately. Disabling automatic recording saves the current automatic recording. HUD cue visibility and current-car guidance are independent; hiding cues keeps vehicle learning active. Short windows combine quick actions into an icon row while keeping Settings at the bottom.
+
+About sits immediately above Settings. It shows the brand graphic, installed version and release name, with icon cards for the website, documentation, client GitHub/GitCode repositories and server GitHub repository. Release announcements list the five most recent published versions with expandable notes in the interface language. Stable builds show stable releases; preview builds also include previews. Announcements use the selected update source with automatic fallback and a local offline cache; refresh is also available on the page.
 
 In HUD settings, Estate race panel opacity changes panel backgrounds while keeping text, flags and status indicators clear. Overall opacity still affects all HUD content and combines with individual race widget opacity. Saved settings persist across restarts. Reduce motion shows race states immediately without fades, movement or pulsing.
 

@@ -40,7 +40,8 @@ internal sealed partial class MainWindow : Window
         ("M 5 5 L 5 19 L 17 12 Z M 19 5 L 19 19", "nav.replay", "回放工作台"),
         ("M 11 3 C 16 2 20 5 21 9 C 22 13 20 18 16 20 C 12 22 6 21 4 17 C 2 13 3 8 6 5 C 8 3 9 3 11 3 Z M 11 7 C 8 7 7 9 7 12 C 7 15 9 17 12 17 C 15 17 17 15 17 12 C 17 9 15 7 11 7 Z M 16 16 L 18.5 18 M 17.2 14.8 L 19.7 16.8", "nav.tracks", "赛道"),
         ("M 4 16 L 5.5 11 L 8 8 L 16 8 L 18.5 11 L 20 16 L 20 19 L 18 19 L 18 17 L 6 17 L 6 19 L 4 19 Z M 6 12 L 18 12 M 8 15 L 8.01 15 M 16 15 L 16.01 15", "nav.vehicles", "车辆与换挡"),
-        ("M 4 7 L 9 7 M 15 7 L 20 7 M 12 4 L 12 10 M 4 17 L 13 17 M 19 17 L 20 17 M 16 14 L 16 20", "nav.settings", "设置")
+        ("M 4 7 L 9 7 M 15 7 L 20 7 M 12 4 L 12 10 M 4 17 L 13 17 M 19 17 L 20 17 M 16 14 L 16 20", "nav.settings", "设置"),
+        ("M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 12 10 L 12 17 M 12 7 L 12 7.1", "nav.about", "关于")
     ];
     private static readonly (string IconData, string Key, string Title) DiagnosticsPageEntry =
         ("M 3 12 L 7 12 L 9 7 L 13 17 L 16 10 L 18 12 L 21 12 M 4 4 L 20 4 L 20 20 L 4 20 Z", "nav.diagnostics", "诊断");
@@ -652,11 +653,12 @@ internal sealed partial class MainWindow : Window
     private void PopulateNavigation()
     {
         navigation.ClearPages();
-        for (var index = 0; index < PrimaryPages.Length; index++)
+        // Preserve existing page IDs while keeping About immediately above Settings.
+        foreach (var index in Enumerable.Range(0, PrimaryPages.Length).OrderBy(index => PrimaryPages[index].Key == "nav.settings"))
         {
             var page = PrimaryPages[index];
             var entry = NavigationEntry(page.IconData, AppLocalization.Text(page.Key, page.Title));
-            navigation.AddPage(index, entry, page.Key == "nav.settings");
+            navigation.AddPage(index, entry, page.Key is "nav.settings" or "nav.about");
         }
         if (showDiagnosticsNavigation)
             navigation.AddPage(PrimaryPages.Length, NavigationEntry(
@@ -694,6 +696,7 @@ internal sealed partial class MainWindow : Window
             6 => TracksPage(),
             7 => ShiftPage(),
             8 => SettingsPage(),
+            9 => new AboutPage(OpenExternal, updateManager.ReadAnnouncementCache(), updateManager.LoadAnnouncementsAsync),
             _ => DiagnosticsPage()
         };
         AppLocalization.ApplyTo(page);

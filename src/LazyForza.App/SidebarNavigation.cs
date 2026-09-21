@@ -51,9 +51,9 @@ internal sealed class SidebarNavigation : Grid
             };
             list.PreviewKeyDown += (_, e) =>
             {
-                if (e.Key == Key.Down && list == pages && pages.SelectedIndex == pages.Items.Count - 1)
+                if (e.Key == Key.Down && list == pages && pages.SelectedIndex == pages.Items.Count - 1 && settings.Items.Count > 0)
                     FocusPage(settings.Items.Cast<ListBoxItem>().First(), e);
-                else if (e.Key == Key.Up && list == settings && pages.Items.Count > 0)
+                else if (e.Key == Key.Up && list == settings && settings.SelectedIndex == 0 && pages.Items.Count > 0)
                     FocusPage(pages.Items.Cast<ListBoxItem>().Last(), e);
             };
         }

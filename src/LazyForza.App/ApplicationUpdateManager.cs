@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using LazyForza.Storage;
 using LazyForza.Update;
 
@@ -15,18 +16,21 @@ internal sealed class ApplicationUpdateManager : IDisposable
     private readonly ApplicationDistribution distribution;
     private readonly MultiSourceUpdateClient stableClient;
     private readonly PreviewMultiSourceUpdateClient previewClient;
+    private readonly ReleaseHistoryClient announcementClient;
     private readonly Action<string> log;
 
     public ApplicationUpdateManager(
         LazyForzaStore store,
         DataDirectoryService directories,
         ApplicationDistribution distribution,
-        Action<string> log)
+        Action<string> log,
+        ReleaseHistoryClient? announcementClient = null)
     {
         this.store = store;
         this.directories = directories;
         this.distribution = distribution;
         this.log = log;
+        this.announcementClient = announcementClient ?? new ReleaseHistoryClient();
         stableClient = new MultiSourceUpdateClient(
             ReadPreferredSource(PreferredSourceSetting),
             log);
@@ -119,6 +123,38 @@ internal sealed class ApplicationUpdateManager : IDisposable
             ? previewClient.CheckForUpdateAsync(CurrentUpdateVersion, cancellationToken)
             : stableClient.CheckForUpdateAsync(CurrentVersion, cancellationToken);
 
+    private string AnnouncementCacheKey => $"updates.announcements.{(IsUpdateMandatory ? "preview" : "stable")}";
+
+    internal ReleaseHistorySnapshot? ReadAnnouncementCache()
+    {
+        try
+        {
+            var json = store.GetAppSetting(AnnouncementCacheKey);
+            if (string.IsNullOrEmpty(json) || json.Length > 200000) return null;
+            var cached = JsonSerializer.Deserialize<ReleaseHistorySnapshot>(json);
+            if (cached?.Releases is not { Length: > 0 and <= ReleaseHistoryClient.MaximumEntries } releases ||
+                releases.Any(release => release is null || string.IsNullOrEmpty(release.Title) || release.Notes is null ||
+                    !UpdateSemanticVersion.TryParse(release.Tag, out var version) ||
+                    !IsUpdateMandatory && (release.IsPreview || version.IsPrerelease))) return null;
+            return cached;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    internal async Task<ReleaseHistorySnapshot> LoadAnnouncementsAsync(CancellationToken cancellationToken)
+    {
+        var snapshot = await announcementClient.GetRecentAsync(PreferredSource, IsUpdateMandatory, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        // Human-readable JSON can exceed its text length when escaped; Unicode notes stay compact in the cache.
+        try
+        {
+            store.SetAppSetting(AnnouncementCacheKey, JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+            { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        }
+        catch (InvalidOperationException error) { ReportFailure("Save announcement cache", error); }
+        return snapshot;
+    }
+
     public Task<PreparedUpdate> DownloadAsync(
         UpdateReleaseInfo release,
         IProgress<UpdateProgress> progress,
@@ -168,6 +204,7 @@ internal sealed class ApplicationUpdateManager : IDisposable
 
     public void Dispose()
     {
+        announcementClient.Dispose();
         previewClient.Dispose();
         stableClient.Dispose();
     }
