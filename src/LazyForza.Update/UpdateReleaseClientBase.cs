@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace LazyForza.Update;
@@ -177,6 +178,32 @@ public abstract partial class UpdateReleaseClientBase : IDisposable
     }
 
     protected abstract void ValidateReleaseDownloadUri(Uri uri);
+
+    protected async Task<List<T>> ReadReleasePagesAsync<T>(Uri releasesApi, CancellationToken cancellationToken)
+    {
+        const int pageSize = 100;
+        const int maximumPages = 20;
+        var releases = new List<T>();
+        for (var page = 1; page <= maximumPages; page++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var uri = new UriBuilder(releasesApi) { Query = $"page={page}&per_page={pageSize}" }.Uri;
+            using var request = CreateRequest(HttpMethod.Get, uri);
+            using var response = await HttpClient.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                throw new UpdateException($"{SourceName} 返回了 HTTP {(int)response.StatusCode}，暂时无法检查预览版更新。");
+
+            await response.Content.LoadIntoBufferAsync(4 * 1024 * 1024, cancellationToken).ConfigureAwait(false);
+            await using var content = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var items = await JsonSerializer.DeserializeAsync<T[]>(content, cancellationToken: cancellationToken)
+                .ConfigureAwait(false) ?? throw new UpdateException($"{SourceName} 返回的预览版列表为空。");
+            releases.AddRange(items);
+            // Neither provider's ordering is part of version selection; inspect every page.
+            if (items.Length < pageSize) return releases;
+        }
+        throw new UpdateException($"{SourceName} 发行列表过长，未能完成预览版检查。请稍后重试。");
+    }
 
     protected static UpdateReleaseAsset ToAsset(
         string name,

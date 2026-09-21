@@ -62,20 +62,14 @@ internal sealed partial class MainWindow
             Tag = UpdateSourceKind.GitHub
         });
         sourceSelector.SelectedValue = updateManager.PreferredSource;
-        sourceSelector.SelectionChanged += (_, _) =>
-        {
-            if (sourceSelector.SelectedValue is not UpdateSourceKind source) return;
-            updateManager.PreferredSource = source;
-        };
         Grid.SetRow(sourceSelector, 1);
         Grid.SetColumn(sourceSelector, 1);
         panel.Children.Add(sourceSelector);
 
-        var updateStatus = Label(
-            updateManager.IsUpdateMandatory
+        string UpdateStatusText() => updateManager.IsUpdateMandatory
                 ? AppLocalization.Format(
                     "settings.update.statusPreview",
-                    "当前预览版 {0} · 每次启动强制检查；首选 {1}，失败时自动尝试 {2}。只检测并安装更高预览版，正式版不会进入此通道。",
+                    "当前预览版 {0} · 每次启动检查；首选 {1}，未找到新版或检查失败时尝试 {2}。自动更新更高预览版，失败后可继续使用当前版本。",
                     CurrentApplicationVersion(),
                     updateManager.PreferredSourceName,
                     updateManager.FallbackSourceName)
@@ -88,7 +82,8 @@ internal sealed partial class MainWindow
                         : "当前版本 {0} · 首选 {1}，失败时自动尝试 {2}。开发构建仅检查版本，不覆盖开发目录。",
                     CurrentApplicationVersion(),
                     updateManager.PreferredSourceName,
-                    updateManager.FallbackSourceName),
+                    updateManager.FallbackSourceName);
+        var updateStatus = Label(UpdateStatusText(),
             12,
             FontWeights.Normal,
             "MutedBrush");
@@ -96,6 +91,12 @@ internal sealed partial class MainWindow
         Grid.SetRow(updateStatus, 2);
         Grid.SetColumnSpan(updateStatus, 2);
         panel.Children.Add(updateStatus);
+        sourceSelector.SelectionChanged += (_, _) =>
+        {
+            if (sourceSelector.SelectedValue is not UpdateSourceKind source) return;
+            updateManager.PreferredSource = source;
+            updateStatus.Text = UpdateStatusText();
+        };
 
         var checkNow = new Button
         {

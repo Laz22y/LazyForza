@@ -7,7 +7,7 @@ namespace LazyForza.Update;
 public sealed class GitHubPreviewReleaseClient : UpdateReleaseClientBase
 {
     public static readonly Uri ReleasesApi = new(
-        $"https://api.github.com/repos/{GitHubReleaseClient.RepositoryOwner}/{GitHubReleaseClient.RepositoryName}/releases?per_page=30");
+        $"https://api.github.com/repos/{GitHubReleaseClient.RepositoryOwner}/{GitHubReleaseClient.RepositoryName}/releases?page=1&per_page=100");
 
     public GitHubPreviewReleaseClient()
         : this(CreateHttpClient(), true)
@@ -42,21 +42,8 @@ public sealed class GitHubPreviewReleaseClient : UpdateReleaseClientBase
 
         try
         {
-            using var request = CreateRequest(HttpMethod.Get, ReleasesApi);
-            using var response = await HttpClient.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,
-                timeout.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-                throw new UpdateException(
-                    $"GitHub 返回了 HTTP {(int)response.StatusCode}，暂时无法检查预览版更新。");
-
-            await using var content = await response.Content.ReadAsStreamAsync(timeout.Token)
+            var releases = await ReadReleasePagesAsync<ReleaseResponse>(ReleasesApi, timeout.Token)
                 .ConfigureAwait(false);
-            var releases = await JsonSerializer.DeserializeAsync<ReleaseResponse[]>(
-                    content,
-                    cancellationToken: timeout.Token)
-                .ConfigureAwait(false) ?? throw new UpdateException("GitHub 返回的预览版列表为空。");
 
             var selected = releases
                 .Where(release => !release.Draft)

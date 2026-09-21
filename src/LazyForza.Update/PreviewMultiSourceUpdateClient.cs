@@ -48,7 +48,7 @@ public sealed class PreviewMultiSourceUpdateClient : IDisposable
             log?.Invoke(release is null
                 ? $"No newer {primary} preview release is available."
                 : $"{primary} preview release {release.Tag} is available.");
-            return release;
+            if (release is not null) return release;
         }
         catch (OperationCanceledException)
         {
@@ -77,7 +77,7 @@ public sealed class PreviewMultiSourceUpdateClient : IDisposable
                 $"{fallback} preview update check failed: " +
                 $"{fallbackException.GetType().Name}: {fallbackException.Message}");
             throw new UpdateException(
-                "GitCode 和 GitHub 均无法检查预览版更新，请稍后重试。",
+                "未能完成预览版更新检查，请稍后重试。",
                 fallbackException);
         }
     }

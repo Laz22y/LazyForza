@@ -6,7 +6,7 @@ namespace LazyForza.Update;
 public sealed class GitCodePreviewReleaseClient : UpdateReleaseClientBase
 {
     public static readonly Uri ReleasesApi = new(
-        $"https://api.gitcode.com/api/v5/repos/{GitCodeReleaseClient.RepositoryOwner}/{GitCodeReleaseClient.RepositoryName}/releases");
+        $"https://api.gitcode.com/api/v5/repos/{GitCodeReleaseClient.RepositoryOwner}/{GitCodeReleaseClient.RepositoryName}/releases?page=1&per_page=100");
 
     private static readonly HashSet<string> TrustedDownloadHosts =
         new(StringComparer.OrdinalIgnoreCase)
@@ -50,21 +50,8 @@ public sealed class GitCodePreviewReleaseClient : UpdateReleaseClientBase
 
         try
         {
-            using var request = CreateRequest(HttpMethod.Get, ReleasesApi);
-            using var response = await HttpClient.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,
-                timeout.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-                throw new UpdateException(
-                    $"GitCode 返回了 HTTP {(int)response.StatusCode}，暂时无法检查预览版更新。");
-
-            await using var content = await response.Content.ReadAsStreamAsync(timeout.Token)
+            var releases = await ReadReleasePagesAsync<ReleaseResponse>(ReleasesApi, timeout.Token)
                 .ConfigureAwait(false);
-            var releases = await JsonSerializer.DeserializeAsync<ReleaseResponse[]>(
-                    content,
-                    cancellationToken: timeout.Token)
-                .ConfigureAwait(false) ?? throw new UpdateException("GitCode 返回的预览版列表为空。");
 
             var selected = releases
                 .Select(release => new

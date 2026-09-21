@@ -205,6 +205,20 @@ internal sealed partial class MainWindow : Window
                     return;
                 }
 
+                if (!updateManager.CanInstallAutomatically)
+                {
+                    progressWindow.Finish();
+                    IsEnabled = true;
+                    var available = AppLocalization.Format(
+                        "update.preview.developmentAvailable",
+                        "发现预览版 {0}。当前为源码开发构建，请下载完整预览包使用。",
+                        release.Tag);
+                    status?.SetCurrentValue(TextBlock.TextProperty, available);
+                    AppDialog.Show(this, available, AppLocalization.Literal("应用更新"),
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
                 progressWindow.Progress.Report(new UpdateProgress(
                     AppLocalization.Format(
                         "update.preview.required",
@@ -235,14 +249,15 @@ internal sealed partial class MainWindow : Window
                     this,
                     AppLocalization.Format(
                         "update.preview.failed",
-                        "预览版必须完成更新检查和安装后才能继续使用。\n\n{0}",
+                        "本次更新未完成，可以继续使用当前版本，并在“设置 → 维护”中切换更新源或重试。\n\n{0}",
                         AppLocalization.Literal(exception.Message)),
                     AppLocalization.Literal("预览版更新失败"),
                     AppLocalization.Literal("重试"),
-                    AppLocalization.Literal("退出"),
+                    AppLocalization.Text("update.preview.continueCurrent", "继续使用当前版本"),
                     MessageBoxImage.Error);
                 if (retry == MessageBoxResult.Yes) continue;
-                App.RequestExit();
+                status?.SetCurrentValue(TextBlock.TextProperty, AppLocalization.Text(
+                    "update.preview.deferred", "更新未完成，当前版本仍可使用。"));
                 return;
             }
         }

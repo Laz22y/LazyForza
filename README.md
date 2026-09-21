@@ -62,7 +62,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 2. 启动 LazyForza，按首次启动指引选择语言、玩家代号、数据目录和关闭方式；
 3. 在指引中按提示开启 FH6 Data Out。收到有效遥测后会自动进入主窗口，也可暂时跳过连接。
 
-安装版默认安装到 `C:\Program Files\LazyForza`，创建开始菜单入口；桌面快捷方式和 `.lfztelemetry`、`.lfzlap`、`.lfzestate` 文件关联可在安装时选择。便携版不写入这些系统项。每个便携版目录独立保存初始化状态；安装版卸载时保留数据库，并在重新安装后再次显示初始化指引。正式安装版默认启动检查更新，正式便携版默认关闭，两者都可在设置中修改。预览版使用独立初始化状态和 GitCode/GitHub 预发布更新通道，每次启动强制检查并自动安装更高预览版；正式版不参与该通道，预览包不会自动转为正式版。发行说明同时提供中文和英文，程序按当前界面语言显示对应内容。所有包都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。
+安装版默认安装到 `C:\Program Files\LazyForza`，创建开始菜单入口；桌面快捷方式和 `.lfztelemetry`、`.lfzlap`、`.lfzestate` 文件关联可在安装时选择。便携版不写入这些系统项。每个便携版目录独立保存初始化状态；安装版卸载时保留数据库，并在重新安装后再次显示初始化指引。正式安装版默认启动检查更新，正式便携版默认关闭，两者都可在设置中修改。预览版使用独立初始化状态和 GitCode/GitHub 预发布更新通道，每次启动检查并自动安装更高预览版，检查或更新失败后可继续使用当前版本；正式版不参与该通道，预览包不会自动转为正式版。发行说明同时提供中文和英文，程序按当前界面语言显示对应内容。所有包都包含 .NET 运行时，且可在首次启动或设置页选择数据目录。
 
 设置页修改后自动保存并应用，无需点击应用按钮。语言、HUD、录制选项和有效的遥测监听地址／端口可直接生效；切换数据目录后提示重启，由用户选择时机，原目录数据保留在原处。UI 强调色提供默认蓝、暗夜紫、清新绿、鲜艳红、纯粹白和低调灰六种选择。
 
@@ -189,7 +189,7 @@ Open “Speech service…” next to the engineer to configure an ElevenLabs API
 2. Start LazyForza and choose your language, player alias, data directory and close behavior in the first-run guide.
 3. Follow the guide to enable FH6 Data Out. The main window opens after valid telemetry arrives, or you can skip the connection step.
 
-The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu entry, and can optionally create a desktop shortcut and associate `.lfztelemetry`, `.lfzlap` and `.lfzestate` files. The portable build does not write those system entries. Stable installed builds check for updates by default; stable portable builds do not, and both settings can be changed later. Preview builds use separate initialization state and GitCode/GitHub prerelease channels; they check on every startup and install only newer previews automatically. Stable releases never enter the preview channel, so a preview build does not automatically become stable. Every package includes the .NET runtime.
+The installer defaults to `C:\Program Files\LazyForza`, creates a Start Menu entry, and can optionally create a desktop shortcut and associate `.lfztelemetry`, `.lfzlap` and `.lfzestate` files. The portable build does not write those system entries. Stable installed builds check for updates by default; stable portable builds do not, and both settings can be changed later. Preview builds use separate initialization state and GitCode/GitHub prerelease channels; they check on every startup and install only newer previews automatically. If a check or update fails, the current version remains available to use. Stable releases never enter the preview channel, so a preview build does not automatically become stable. Every package includes the .NET runtime.
 
 Settings saves and applies changes automatically. Language, HUD, recording options and valid live UDP endpoints take effect directly. Changing data folders prompts for a restart at a time of your choice; existing data stays in its original folder. Six UI accent colors are available: Default Blue, Midnight Purple, Fresh Green, Vivid Red, Pure White and Subtle Gray.
 

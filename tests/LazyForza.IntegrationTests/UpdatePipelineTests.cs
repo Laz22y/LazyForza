@@ -103,6 +103,108 @@ public sealed class UpdatePipelineTests
     }
 
     [TestMethod]
+    [DataRow(UpdateSourceKind.GitCode)]
+    [DataRow(UpdateSourceKind.GitHub)]
+    public async Task PreviewCheckReadsLaterPagesAndFindsNextVersion(UpdateSourceKind source)
+    {
+        var requests = new List<Uri>();
+        var oldTags = Enumerable.Range(0, 100).Select(index => $"v1.0.{index}").ToArray();
+        string Page(params string[] tags) => source == UpdateSourceKind.GitCode
+            ? GitCodePreviewReleaseListJson(tags.Select(tag => (tag, tag.Contains("alpha"))).ToArray())
+            : PreviewReleaseListJson(tags.Select(tag => (tag, tag.Contains("alpha"), false)).ToArray());
+        using var http = new HttpClient(new FakeHttpHandler(request =>
+        {
+            requests.Add(request.RequestUri!);
+            return JsonResponse(requests.Count == 1 ? Page(oldTags) : Page("v1.5.4-alpha-1", "v1.5.4"));
+        }));
+        using UpdateReleaseClientBase client = source == UpdateSourceKind.GitCode
+            ? new GitCodePreviewReleaseClient(http)
+            : new GitHubPreviewReleaseClient(http);
+        var current = UpdateSemanticVersion.Parse("1.5.3-alpha-3");
+        var update = client is GitCodePreviewReleaseClient gitCode
+            ? await gitCode.CheckForUpdateAsync(current, CancellationToken.None)
+            : await ((GitHubPreviewReleaseClient)client).CheckForUpdateAsync(current, CancellationToken.None);
+
+        Assert.AreEqual("1.5.4-alpha-1", update?.ArtifactVersion);
+        CollectionAssert.AreEqual(new[] { "?page=1&per_page=100", "?page=2&per_page=100" },
+            requests.Select(uri => uri.Query).ToArray());
+    }
+
+    [TestMethod]
+    public async Task IncompletePreviewListingMustNotReportUpToDate()
+    {
+        var requests = 0;
+        var fullPage = GitCodePreviewReleaseListJson(
+            Enumerable.Range(0, 100).Select(index => ($"v1.0.{index}", false)).ToArray());
+        using var http = new HttpClient(new FakeHttpHandler(_ => ++requests == 1
+            ? JsonResponse(fullPage)
+            : new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        using var client = new GitCodePreviewReleaseClient(http);
+        await Assert.ThrowsExactlyAsync<UpdateException>(() => client.CheckForUpdateAsync(
+            UpdateSemanticVersion.Parse("1.5.3-alpha-3"), CancellationToken.None));
+        Assert.AreEqual(2, requests);
+    }
+
+    [TestMethod]
+    public async Task GitCodePreviewAcceptsActualMetadataWithoutAssetSizes()
+    {
+        var json = GitCodePreviewReleaseListJson(("v1.5.4-alpha-1", true))
+            .Replace("\"size\":1024,", "", StringComparison.Ordinal)
+            .Replace("\"size\":103,", "", StringComparison.Ordinal);
+        using var http = new HttpClient(new FakeHttpHandler(_ => JsonResponse(json)));
+        using var client = new GitCodePreviewReleaseClient(http);
+        var update = await client.CheckForUpdateAsync(
+            UpdateSemanticVersion.Parse("1.5.3-alpha-3"), CancellationToken.None);
+        Assert.IsNotNull(update);
+        Assert.AreEqual("1.5.4-alpha-1", update.ArtifactVersion);
+        Assert.IsNull(update.Package.Size);
+        Assert.IsNotNull(update.Checksum);
+    }
+
+    [TestMethod]
+    [DataRow(UpdateSourceKind.GitCode)]
+    [DataRow(UpdateSourceKind.GitHub)]
+    public async Task PreviewChecksOtherSourceWhenPreferredSourceHasNoNewerVersion(UpdateSourceKind preferred)
+    {
+        var checkedSources = new List<UpdateSourceKind>();
+        using var gitCodeHttp = new HttpClient(new FakeHttpHandler(_ =>
+        {
+            checkedSources.Add(UpdateSourceKind.GitCode);
+            return JsonResponse(preferred == UpdateSourceKind.GitCode ? "[]"
+                : GitCodePreviewReleaseListJson(("v1.5.4-alpha-1", true)));
+        }));
+        using var gitHubHttp = new HttpClient(new FakeHttpHandler(_ =>
+        {
+            checkedSources.Add(UpdateSourceKind.GitHub);
+            return JsonResponse(preferred == UpdateSourceKind.GitHub ? "[]"
+                : PreviewReleaseListJson(("v1.5.4-alpha-1", true, false)));
+        }));
+        using var client = new PreviewMultiSourceUpdateClient(
+            new GitCodePreviewReleaseClient(gitCodeHttp), new GitHubPreviewReleaseClient(gitHubHttp), preferred);
+        var update = await client.CheckForUpdateAsync(
+            UpdateSemanticVersion.Parse("1.5.3-alpha-3"), CancellationToken.None);
+        Assert.AreEqual("1.5.4-alpha-1", update?.ArtifactVersion);
+        Assert.AreEqual(2, checkedSources.Count);
+        Assert.AreEqual(preferred, checkedSources[0]);
+        Assert.AreEqual(checkedSources[1], update?.Source);
+    }
+
+    [TestMethod]
+    public async Task PreviewOnlyReportsCurrentAfterBothSourcesComplete()
+    {
+        var fallbackFails = true;
+        using var primaryHttp = new HttpClient(new FakeHttpHandler(_ => JsonResponse("[]")));
+        using var fallbackHttp = new HttpClient(new FakeHttpHandler(_ => fallbackFails
+            ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) : JsonResponse("[]")));
+        using var client = new PreviewMultiSourceUpdateClient(
+            new GitCodePreviewReleaseClient(primaryHttp), new GitHubPreviewReleaseClient(fallbackHttp));
+        var current = UpdateSemanticVersion.Parse("1.5.3-alpha-3");
+        await Assert.ThrowsExactlyAsync<UpdateException>(() => client.CheckForUpdateAsync(current, CancellationToken.None));
+        fallbackFails = false;
+        Assert.IsNull(await client.CheckForUpdateAsync(current, CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task PreviewMultiSourceFallsBackToGitHubWhenGitCodeFails()
     {
         var gitCodeRequests = 0;

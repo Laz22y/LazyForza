@@ -42,7 +42,7 @@ public sealed class ReleaseHistoryClient : IDisposable
             {
                 var uri = source == UpdateSourceKind.GitHub
                     ? GitHubPreviewReleaseClient.ReleasesApi
-                    : new Uri(GitCodePreviewReleaseClient.ReleasesApi.AbsoluteUri + "?per_page=30");
+                    : GitCodePreviewReleaseClient.ReleasesApi;
                 using var request = new HttpRequestMessage(HttpMethod.Get, uri);
                 request.Headers.UserAgent.ParseAdd("LazyForza-Announcements/1.0");
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
