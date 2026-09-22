@@ -176,7 +176,6 @@ internal sealed class AboutPage : ScrollViewer
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var symbol = Icon(icon);
         symbol.Margin = new Thickness(0, 0, 12, 0);
         grid.Children.Add(symbol);
@@ -189,13 +188,6 @@ internal sealed class AboutPage : ScrollViewer
             labels.Children.Add(detail);
         }
         Grid.SetColumn(labels, 1); grid.Children.Add(labels);
-        if (url is not null)
-        {
-            var arrow = Text("↗", 16, muted: true);
-            arrow.Margin = new Thickness(8, 0, 0, 0);
-            arrow.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(arrow, 2); grid.Children.Add(arrow);
-        }
         button.Content = grid;
         return button;
     }
