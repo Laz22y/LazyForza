@@ -124,13 +124,14 @@ internal sealed class ApplicationUpdateManager : IDisposable
             : stableClient.CheckForUpdateAsync(CurrentVersion, cancellationToken);
 
     private string AnnouncementCacheKey => $"updates.announcements.{(IsUpdateMandatory ? "preview" : "stable")}";
+    private const int MaximumAnnouncementCacheCharacters = 8 * 1024 * 1024;
 
     internal ReleaseHistorySnapshot? ReadAnnouncementCache()
     {
         try
         {
             var json = store.GetAppSetting(AnnouncementCacheKey);
-            if (string.IsNullOrEmpty(json) || json.Length > 200000) return null;
+            if (string.IsNullOrEmpty(json) || json.Length > MaximumAnnouncementCacheCharacters) return null;
             var cached = JsonSerializer.Deserialize<ReleaseHistorySnapshot>(json);
             if (cached?.Releases is not { Length: > 0 and <= ReleaseHistoryClient.MaximumEntries } releases ||
                 releases.Any(release => release is null || string.IsNullOrEmpty(release.Title) || release.Notes is null ||
@@ -143,13 +144,16 @@ internal sealed class ApplicationUpdateManager : IDisposable
 
     internal async Task<ReleaseHistorySnapshot> LoadAnnouncementsAsync(CancellationToken cancellationToken)
     {
-        var snapshot = await announcementClient.GetRecentAsync(PreferredSource, IsUpdateMandatory, cancellationToken);
+        var snapshot = await announcementClient.GetAllAsync(PreferredSource, IsUpdateMandatory, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         // Human-readable JSON can exceed its text length when escaped; Unicode notes stay compact in the cache.
         try
         {
-            store.SetAppSetting(AnnouncementCacheKey, JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
-            { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+            var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+            { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            if (json.Length > MaximumAnnouncementCacheCharacters)
+                throw new InvalidOperationException("Announcement history exceeds the cache size limit.");
+            store.SetAppSetting(AnnouncementCacheKey, json);
         }
         catch (InvalidOperationException error) { ReportFailure("Save announcement cache", error); }
         return snapshot;

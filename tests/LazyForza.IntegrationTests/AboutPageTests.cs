@@ -29,7 +29,7 @@ public sealed class AboutPageTests
             ? ReleaseHistoryClient.Parse(File.ReadAllText(fixture), UpdateSourceKind.GitHub, false)
             : new[] { new ReleaseAnnouncement("v1.5.3", "LazyForza 1.5.3 · Radio Check", "## 简体中文\n- 语音比赛工程师\n- 弯道分析\n## English\n- Race engineer\n- Corner analysis", DateTimeOffset.UtcNow, false, UpdateSourceKind.GitHub) };
         var opened = new List<string>();
-        var page = new AboutPage(opened.Add, new(DateTimeOffset.UtcNow, releases), _ => throw new AssertFailedException("Fresh cached history must not trigger another request."))
+        var page = new AboutPage(opened.Add, new(DateTimeOffset.UtcNow, releases, IsComplete: true), _ => throw new AssertFailedException("Fresh cached history must not trigger another request."))
         { Background = (Brush)Application.Current.Resources["WindowBrush"], Width = width, Height = 1050 };
         using var host = new HwndSource(new HwndSourceParameters("About page layout")
         { Width = width, Height = 1050, WindowStyle = unchecked((int)0x80000000) });
@@ -58,14 +58,96 @@ public sealed class AboutPageTests
         }
         var items = Descendants<Expander>(page).ToArray();
         Assert.IsTrue(items.All(item => !item.IsExpanded));
+        Assert.IsTrue(Descendants<TextBlock>(page).Any(text => text.Text == (language == "en"
+            ? "Built by Laz22y · MIT License" : "由 Laz22y 构建 · MIT License")));
+        items[0].IsExpanded = true;
+        page.UpdateLayout();
+        var body = (ContentPresenter)items[0].Template.FindName("Body", items[0]);
+        var toggle = (System.Windows.Controls.Primitives.ToggleButton)items[0].Template.FindName("Toggle", items[0]);
+        Assert.IsTrue(body.TranslatePoint(new Point(), items[0]).Y -
+            toggle.TranslatePoint(new Point(0, toggle.ActualHeight), items[0]).Y >= 12, "Expanded notes need space below the header.");
+        items[0].IsExpanded = false;
         if (!string.IsNullOrEmpty(output))
         {
             Directory.CreateDirectory(output);
             Capture(page, Path.Combine(output, $"about-{language}-{width}.png"), width, 1050);
             items[0].IsExpanded = true;
             page.UpdateLayout();
+            page.ScrollToVerticalOffset(items[0].TranslatePoint(new Point(), page).Y + page.VerticalOffset);
+            Flush();
             Capture(page, Path.Combine(output, $"about-expanded-{language}-{width}.png"), width, 1050);
         }
+        host.RootVisual = null;
+    });
+
+    [TestMethod]
+    [DataRow("zh-Hans")]
+    [DataRow("en")]
+    public void PagingOnlyReplacesAnnouncementsAndRefreshClampsTheLastPage(string language) => WpfTestHost.Run(() =>
+    {
+        AppLocalization.UseLanguage(language);
+        var releases = Enumerable.Range(0, 11).Select(index => new ReleaseAnnouncement($"v1.0.{10 - index}",
+            $"Release {10 - index}", "Notes", null, false, UpdateSourceKind.GitHub)).ToArray();
+        var calls = 0;
+        var page = new AboutPage(_ => { }, new(DateTimeOffset.UtcNow, releases, IsComplete: true), _ =>
+        {
+            calls++;
+            return Task.FromResult(new ReleaseHistorySnapshot(DateTimeOffset.UtcNow, [releases[0]], IsComplete: true));
+        }) { Width = 680, Height = 900, Background = (Brush)Application.Current.Resources["WindowBrush"] };
+        using var host = new HwndSource(new HwndSourceParameters("About local pagination")
+        { Width = 680, Height = 900, WindowStyle = unchecked((int)0x80000000) });
+        host.RootVisual = page; Flush(); page.UpdateLayout();
+        var content = page.Content;
+        var logo = Descendants<Image>(page).Single(image => AutomationProperties.GetName(image) == "LazyForza");
+        var previous = Descendants<Button>(page).Single(button => AutomationProperties.GetName(button) == (language == "en" ? "Previous" : "上一页"));
+        var next = Descendants<Button>(page).Single(button => AutomationProperties.GetName(button) == (language == "en" ? "Next" : "下一页"));
+        Assert.AreEqual(5, Descendants<Expander>(page).Count());
+        Assert.IsFalse(previous.IsEnabled);
+        Assert.IsTrue(next.IsEnabled);
+        next.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Flush();
+        Assert.AreSame(content, page.Content);
+        Assert.AreSame(logo, Descendants<Image>(page).Single(image => AutomationProperties.GetName(image) == "LazyForza"));
+        Assert.AreEqual("Release 5", AutomationProperties.GetName(Descendants<Expander>(page).First()));
+        Assert.AreEqual(5, Descendants<Expander>(page).Count());
+        Assert.IsTrue(Descendants<TextBlock>(page).Any(text => text.Text == "2 / 3"));
+        Assert.AreEqual(0, calls, "Paging cached releases must not repeat network requests.");
+        var output = Environment.GetEnvironmentVariable("LAZYFORZA_ABOUT_QA");
+        if (!string.IsNullOrEmpty(output))
+        {
+            page.ScrollToEnd(); Flush();
+            Capture(page, Path.Combine(output, $"about-pagination-{language}.png"), 680, 900);
+        }
+        next.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Flush();
+        Assert.AreEqual("Release 0", AutomationProperties.GetName(Descendants<Expander>(page).Single()));
+        Assert.IsFalse(next.IsEnabled);
+        previous.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Flush();
+        Assert.AreEqual(5, Descendants<Expander>(page).Count());
+        next.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Flush();
+        var refresh = Descendants<Button>(page).Single(button => AutomationProperties.GetName(button) == (language == "en" ? "Refresh" : "刷新"));
+        refresh.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Flush();
+        Assert.AreEqual("Release 10", AutomationProperties.GetName(Descendants<Expander>(page).Single()));
+        Assert.IsFalse(next.IsVisible);
+        Assert.IsFalse(previous.IsVisible);
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual(0, page.ScrollableWidth, .5);
+        host.RootVisual = null;
+    });
+
+    [TestMethod]
+    public void LegacyRecentCacheRefreshesOnceAndRemainsReadableWhenOffline() => WpfTestHost.Run(() =>
+    {
+        var calls = 0;
+        var page = new AboutPage(_ => { }, new(DateTimeOffset.UtcNow,
+            [new("v1.0.0", "Legacy cached release", "Saved notes", null, false, UpdateSourceKind.GitHub)]), _ =>
+        {
+            calls++;
+            return Task.FromException<ReleaseHistorySnapshot>(new UpdateException("offline"));
+        });
+        using var host = new HwndSource(new HwndSourceParameters("About legacy history")
+        { Width = 700, Height = 800, WindowStyle = unchecked((int)0x80000000) });
+        host.RootVisual = page; Flush();
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual("Legacy cached release", AutomationProperties.GetName(Descendants<Expander>(page).Single()));
         host.RootVisual = null;
     });
 
@@ -75,7 +157,7 @@ public sealed class AboutPageTests
         AppLocalization.UseLanguage("en");
         var calls = 0;
         var snapshot = new ReleaseHistorySnapshot(DateTimeOffset.UtcNow,
-            [new("v1.5.3", "Cached release", "Saved notes", null, false, UpdateSourceKind.GitHub)]);
+            [new("v1.5.3", "Cached release", "Saved notes", null, false, UpdateSourceKind.GitHub)], IsComplete: true);
         var page = new AboutPage(_ => { }, snapshot, _ =>
         {
             calls++;

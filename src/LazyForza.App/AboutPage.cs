@@ -14,6 +14,13 @@ internal sealed class AboutPage : ScrollViewer
     private readonly Action<string> openLink;
     private readonly Func<CancellationToken, Task<ReleaseHistorySnapshot>> loadHistory;
     private readonly StackPanel announcements = new();
+    private readonly DockPanel pagination = new() { Margin = new Thickness(0, 4, 0, 0) };
+    private readonly TextBlock pageStatus;
+    private readonly TextBlock releaseCount;
+    private readonly Button previousPage;
+    private readonly Button nextPage;
+    private const int PageSize = 5;
+    private int historyPage;
     private readonly TextBlock historyStatus;
     private readonly Button refresh;
     private ReleaseHistorySnapshot? history;
@@ -65,9 +72,27 @@ internal sealed class AboutPage : ScrollViewer
         newsHeader.Children.Add(newsLabels);
         page.Children.Add(newsHeader);
         page.Children.Add(announcements);
+        previousPage = Link(T("about.previousPage", "上一页"), null, null, "previous");
+        nextPage = Link(T("about.nextPage", "下一页"), null, null, "next");
+        previousPage.Padding = nextPage.Padding = new Thickness(12, 8, 12, 8);
+        previousPage.Click += (_, _) => ChangeHistoryPage(-1);
+        nextPage.Click += (_, _) => ChangeHistoryPage(1);
+        pageStatus = Text("", 12, muted: true);
+        pageStatus.VerticalAlignment = VerticalAlignment.Center;
+        pageStatus.Margin = new Thickness(16, 0, 16, 0);
+        var navigation = new StackPanel { Orientation = Orientation.Horizontal };
+        navigation.Children.Add(previousPage);
+        navigation.Children.Add(pageStatus);
+        navigation.Children.Add(nextPage);
+        DockPanel.SetDock(navigation, Dock.Right);
+        pagination.Children.Add(navigation);
+        releaseCount = Text("", 12, muted: true);
+        releaseCount.VerticalAlignment = VerticalAlignment.Center;
+        pagination.Children.Add(releaseCount);
+        page.Children.Add(pagination);
         RenderHistory();
 
-        var footer = Text(T("about.credit", "由 Laz22y 与开源贡献者共同构建 · MIT License"), 12, muted: true);
+        var footer = Text(T("about.credit", "由 Laz22y 构建 · MIT License"), 12, muted: true);
         footer.Margin = new Thickness(0, 18, 0, 0);
         page.Children.Add(footer);
         Content = page;
@@ -76,7 +101,7 @@ internal sealed class AboutPage : ScrollViewer
             lifetime?.Cancel();
             lifetime?.Dispose();
             lifetime = new CancellationTokenSource();
-            if (history is null || DateTimeOffset.UtcNow - history.FetchedAt > TimeSpan.FromHours(1))
+            if (history is null || !history.IsComplete || DateTimeOffset.UtcNow - history.FetchedAt > TimeSpan.FromHours(1))
                 await RefreshAsync();
         };
         Unloaded += (_, _) => { lifetime?.Cancel(); };
@@ -188,25 +213,42 @@ internal sealed class AboutPage : ScrollViewer
         {
             "globe" => "M 12 2 A 10 10 0 1 0 12 22 A 10 10 0 1 0 12 2 M 2 12 H 22 M 12 2 C 5 7 5 17 12 22 C 19 17 19 7 12 2",
             "book" => "M 12 5 C 8 2 3 3 2 4 L 2 20 C 5 18 9 19 12 21 C 15 19 19 18 22 20 L 22 4 C 18 2 15 3 12 5 L 12 21",
+            "previous" => "M 15 5 L 8 12 L 15 19",
+            "next" => "M 9 5 L 16 12 L 9 19",
             _ => "M 21 8 A 9 9 0 1 0 21 16 M 21 2 L 21 8 L 15 8"
         };
-        var path = new VectorPath { Data = Geometry.Parse(data), Width = kind == "refresh" ? 16 : 26, Height = kind == "refresh" ? 16 : 26,
+        var size = kind is "refresh" or "previous" or "next" ? 16 : 26;
+        var path = new VectorPath { Data = Geometry.Parse(data), Width = size, Height = size,
             Stretch = Stretch.Uniform, StrokeThickness = 1.5, VerticalAlignment = VerticalAlignment.Center };
         path.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "AccentBrush");
         return path;
     }
 
-    private void RenderHistory()
+    private void ChangeHistoryPage(int delta)
+    {
+        historyPage += delta;
+        RenderHistory(updateStatus: false);
+    }
+
+    private void RenderHistory(bool updateStatus = true)
     {
         announcements.Children.Clear();
+        var total = history?.Releases.Length ?? 0;
+        var pages = Math.Max(1, (total + PageSize - 1) / PageSize);
+        historyPage = Math.Clamp(historyPage, 0, pages - 1);
+        pagination.Visibility = total > PageSize ? Visibility.Visible : Visibility.Collapsed;
+        previousPage.IsEnabled = historyPage > 0;
+        nextPage.IsEnabled = historyPage < pages - 1;
+        pageStatus.Text = AppLocalization.Format("about.pageNumber", "{0} / {1}", historyPage + 1, pages);
+        releaseCount.Text = AppLocalization.Format("about.releaseCount", "共 {0} 个版本", total);
         if (history is null || history.Releases.Length == 0)
         {
             announcements.Children.Add(Text(T("about.noAnnouncements", "尚无缓存的更新公告。联网后点击刷新即可查看。"), 13, muted: true));
-            historyStatus.Text = T("about.recentHint", "最近 5 个版本 · 展开查看更新详情");
+            if (updateStatus) historyStatus.Text = T("about.historyHint", "全部版本 · 每页 5 条 · 展开查看更新详情");
             return;
         }
-        historyStatus.Text = AppLocalization.Format("about.cachedAt", "{0} · 更新于 {1:g}", history.Releases[0].Source, history.FetchedAt.ToLocalTime());
-        foreach (var release in history.Releases)
+        if (updateStatus) historyStatus.Text = AppLocalization.Format("about.cachedAt", "{0} · 更新于 {1:g}", history.Releases[0].Source, history.FetchedAt.ToLocalTime());
+        foreach (var release in history.Releases.Skip(historyPage * PageSize).Take(PageSize))
         {
             var header = new StackPanel();
             header.Children.Add(Text(release.Title, 14, bold: true));

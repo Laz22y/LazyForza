@@ -11,12 +11,13 @@ public sealed record ReleaseAnnouncement(
         $"{GitHubReleaseClient.RepositoryOwner}/{GitHubReleaseClient.RepositoryName}/releases/tag/{Uri.EscapeDataString(Tag)}");
 }
 
-public sealed record ReleaseHistorySnapshot(DateTimeOffset FetchedAt, ReleaseAnnouncement[] Releases);
+public sealed record ReleaseHistorySnapshot(DateTimeOffset FetchedAt, ReleaseAnnouncement[] Releases, bool IsComplete = false);
 
 /// <summary>Read-only release announcements, independent of update availability and package installation.</summary>
 public sealed class ReleaseHistoryClient : IDisposable
 {
-    public const int MaximumEntries = 5;
+    public const int MaximumEntries = 2000;
+    private const int PageSize = 100;
     private const int MaximumResponseBytes = 2 * 1024 * 1024;
     private readonly HttpClient httpClient;
     private readonly bool ownsClient;
@@ -28,7 +29,7 @@ public sealed class ReleaseHistoryClient : IDisposable
         this.ownsClient = ownsClient;
     }
 
-    public async Task<ReleaseHistorySnapshot> GetRecentAsync(
+    public async Task<ReleaseHistorySnapshot> GetAllAsync(
         UpdateSourceKind preferredSource, bool includePreview, CancellationToken cancellationToken)
     {
         Exception? failure = null;
@@ -37,23 +38,38 @@ public sealed class ReleaseHistoryClient : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(8));
+            timeout.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var uri = source == UpdateSourceKind.GitHub
+                var api = (source == UpdateSourceKind.GitHub
                     ? GitHubPreviewReleaseClient.ReleasesApi
-                    : GitCodePreviewReleaseClient.ReleasesApi;
-                using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-                request.Headers.UserAgent.ParseAdd("LazyForza-Announcements/1.0");
-                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-                    .ConfigureAwait(false);
-                response.EnsureSuccessStatusCode();
-                await response.Content.LoadIntoBufferAsync(MaximumResponseBytes, timeout.Token).ConfigureAwait(false);
-                var json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-                var releases = Parse(json, source, includePreview);
-                if (releases.Length == 0) throw new JsonException("No published releases in this channel.");
-                return new(DateTimeOffset.UtcNow, releases);
+                    : GitCodePreviewReleaseClient.ReleasesApi).GetLeftPart(UriPartial.Path);
+                var releases = new List<ReleaseAnnouncement>();
+                for (var page = 1; page <= MaximumEntries / PageSize; page++)
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Get, $"{api}?page={page}&per_page={PageSize}");
+                    request.Headers.UserAgent.ParseAdd("LazyForza-Announcements/1.0");
+                    request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                    using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                        .ConfigureAwait(false);
+                    response.EnsureSuccessStatusCode();
+                    await response.Content.LoadIntoBufferAsync(MaximumResponseBytes, timeout.Token).ConfigureAwait(false);
+                    var json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+                    using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 32 });
+                    if (document.RootElement.ValueKind != JsonValueKind.Array) throw new JsonException("Expected a release list.");
+                    // Page length must include drafts, duplicates and invalid tags; filtered entries cannot signal the end.
+                    var count = document.RootElement.GetArrayLength();
+                    if (count > PageSize) throw new JsonException("Release page exceeds the requested size.");
+                    releases.AddRange(Parse(json, source, includePreview));
+                    if (count < PageSize)
+                    {
+                        if (releases.Count == 0) throw new JsonException("No published releases.");
+                        return new(DateTimeOffset.UtcNow, releases
+                            .OrderByDescending(item => UpdateSemanticVersion.Parse(item.Tag))
+                            .DistinctBy(item => UpdateSemanticVersion.Parse(item.Tag).Value).ToArray(), IsComplete: true);
+                    }
+                }
+                throw new JsonException("Release history exceeds the supported page limit.");
             }
             catch (Exception error) when (error is HttpRequestException or JsonException or OperationCanceledException)
             {
@@ -69,7 +85,8 @@ public sealed class ReleaseHistoryClient : IDisposable
         using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 32 });
         if (document.RootElement.ValueKind != JsonValueKind.Array) throw new JsonException("Expected a release list.");
         var entries = new List<(UpdateSemanticVersion Version, ReleaseAnnouncement Announcement)>();
-        foreach (var release in document.RootElement.EnumerateArray().Take(100))
+        if (document.RootElement.GetArrayLength() > MaximumEntries) throw new JsonException("Release list is too large.");
+        foreach (var release in document.RootElement.EnumerateArray())
         {
             if (release.ValueKind != JsonValueKind.Object || Flag(release, "draft")) continue;
             var tag = String(release, "tag_name");
@@ -85,7 +102,7 @@ public sealed class ReleaseHistoryClient : IDisposable
             entries.Add((version, new(tag, title[..Math.Min(title.Length, 240)], notes, date, preview, source)));
         }
         return entries.OrderByDescending(entry => entry.Version)
-            .DistinctBy(entry => entry.Version.Value).Take(MaximumEntries).Select(entry => entry.Announcement).ToArray();
+            .DistinctBy(entry => entry.Version.Value).Select(entry => entry.Announcement).ToArray();
     }
 
     private static string String(JsonElement item, string key) =>

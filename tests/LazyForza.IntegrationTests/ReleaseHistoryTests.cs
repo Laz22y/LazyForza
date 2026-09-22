@@ -24,7 +24,7 @@ public sealed class ReleaseHistoryTests
             new { tag_name = "v1.5.2" }, new { tag_name = "v1.5.0" }, new { tag_name = "v1.4.0" }, new { tag_name = "v1.3.0" }
         });
         var stable = ReleaseHistoryClient.Parse(json, UpdateSourceKind.GitHub, false);
-        CollectionAssert.AreEqual(new[] { "v1.5.3", "v1.5.2", "v1.5.1", "v1.5.0", "v1.4.0" }, stable.Select(item => item.Tag).ToArray());
+        CollectionAssert.AreEqual(new[] { "v1.5.3", "v1.5.2", "v1.5.1", "v1.5.0", "v1.4.0", "v1.3.0" }, stable.Select(item => item.Tag).ToArray());
         Assert.AreEqual("• New feature", UpdateReleaseMetadata.ToDisplayText(stable[0].Notes, "en"));
         Assert.AreEqual("• 新功能", UpdateReleaseMetadata.ToDisplayText(stable[0].Notes, "zh-Hans"));
         Assert.AreEqual("https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3", stable[0].PageUri.AbsoluteUri);
@@ -55,7 +55,7 @@ public sealed class ReleaseHistoryTests
             });
         }));
         using var client = new ReleaseHistoryClient(http);
-        var snapshot = await client.GetRecentAsync(UpdateSourceKind.GitCode, false, CancellationToken.None);
+        var snapshot = await client.GetAllAsync(UpdateSourceKind.GitCode, false, CancellationToken.None);
         CollectionAssert.AreEqual(new[] { "api.gitcode.com", "api.github.com" }, requests);
         Assert.AreEqual(UpdateSourceKind.GitHub, snapshot.Releases.Single().Source);
     }
@@ -72,11 +72,91 @@ public sealed class ReleaseHistoryTests
             return Task.FromCanceled<HttpResponseMessage>(token);
         }));
         using var client = new ReleaseHistoryClient(http);
-        await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => client.GetRecentAsync(UpdateSourceKind.GitHub, false, cancellation.Token));
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => client.GetAllAsync(UpdateSourceKind.GitHub, false, cancellation.Token));
         Assert.AreEqual(1, requests);
     }
 
     private static HttpResponseMessage Json(string json) => new(HttpStatusCode.OK) { Content = new StringContent(json) };
+
+    [TestMethod]
+    [DataRow(UpdateSourceKind.GitHub, false)]
+    [DataRow(UpdateSourceKind.GitCode, false)]
+    [DataRow(UpdateSourceKind.GitHub, true)]
+    [DataRow(UpdateSourceKind.GitCode, true)]
+    public async Task HistoryReadsAllRemotePagesBeforeSortingDeduplicatingAndFiltering(UpdateSourceKind source, bool includePreview)
+    {
+        var requests = new List<string>();
+        var first = Enumerable.Range(0, 99).Select(index => (object)new { tag_name = $"v1.0.{index}" })
+            .Append(new { tag_name = "v1.3.0-alpha-1" }).ToArray();
+        using var http = new HttpClient(new Handler((request, _) =>
+        {
+            var uri = request.RequestUri!;
+            requests.Add(uri.Query);
+            Assert.AreEqual(source == UpdateSourceKind.GitHub ? "api.github.com" : "api.gitcode.com", uri.Host);
+            return Task.FromResult(Json(uri.Query.Contains("page=1&", StringComparison.Ordinal)
+                ? JsonSerializer.Serialize(first)
+                : "[{\"tag_name\":\"v1.2.0\"},{\"tag_name\":\"1.0.1\"},{\"tag_name\":\"v9.0.0\",\"draft\":true}]"));
+        }));
+        using var client = new ReleaseHistoryClient(http);
+        var history = await client.GetAllAsync(source, includePreview, CancellationToken.None);
+        CollectionAssert.AreEqual(new[] { "?page=1&per_page=100", "?page=2&per_page=100" }, requests);
+        Assert.IsTrue(history.IsComplete);
+        Assert.AreEqual(includePreview ? 101 : 100, history.Releases.Length);
+        Assert.AreEqual(includePreview ? "v1.3.0-alpha-1" : "v1.2.0", history.Releases[0].Tag);
+        Assert.AreEqual("v1.0.0", history.Releases[^1].Tag);
+        Assert.IsTrue(includePreview || history.Releases.All(item => !item.IsPreview));
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task FailedLaterPageNeverReturnsAPartialHistory(bool fallbackAvailable)
+    {
+        using var http = new HttpClient(new Handler((request, _) =>
+        {
+            var uri = request.RequestUri!;
+            if (uri.Host == "api.github.com" && uri.Query.Contains("page=1&", StringComparison.Ordinal))
+                return Task.FromResult(Json(JsonSerializer.Serialize(Enumerable.Range(0, 100).Select(index => new { tag_name = $"v1.0.{index}" }))));
+            return Task.FromResult(uri.Host == "api.gitcode.com" && fallbackAvailable
+                ? Json("[{\"tag_name\":\"v0.5.0\"}]")
+                : new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        }));
+        using var client = new ReleaseHistoryClient(http);
+        if (fallbackAvailable)
+        {
+            var history = await client.GetAllAsync(UpdateSourceKind.GitHub, false, CancellationToken.None);
+            Assert.AreEqual("v0.5.0", history.Releases.Single().Tag);
+            Assert.IsTrue(history.IsComplete);
+        }
+        else await Assert.ThrowsExactlyAsync<UpdateException>(() => client.GetAllAsync(UpdateSourceKind.GitHub, false, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task CompleteHistoryLargerThanTheOldCacheLimitSurvivesReopen()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"lazyforza-history-cache-{Guid.NewGuid():N}");
+        try
+        {
+            var directories = new DataDirectoryService(root);
+            directories.EnsureCreated();
+            var distribution = new ApplicationDistribution(ApplicationDistributionKind.Portable, "", "");
+            using var http = new HttpClient(new Handler((_, _) => Task.FromResult(Json(JsonSerializer.Serialize(
+                Enumerable.Range(0, 9).Select(index => new { tag_name = $"v1.0.{index}", body = new string('x', 30000) }))))));
+            using (var store = new LazyForzaStore(directories.DatabasePath))
+            using (var manager = new ApplicationUpdateManager(store, directories, distribution, _ => { }, new ReleaseHistoryClient(http)))
+                await manager.LoadAnnouncementsAsync(CancellationToken.None);
+            using var reopenedStore = new LazyForzaStore(directories.DatabasePath);
+            using var reopened = new ApplicationUpdateManager(reopenedStore, directories, distribution, _ => { });
+            var cached = reopened.ReadAnnouncementCache();
+            Assert.IsNotNull(cached);
+            Assert.IsTrue(cached.IsComplete);
+            Assert.AreEqual(9, cached.Releases.Length);
+            Assert.AreEqual(270000, cached.Releases.Sum(item => item.Notes.Length));
+            reopenedStore.SetAppSetting("updates.announcements.stable", "{\"FetchedAt\":\"2026-09-21T00:00:00Z\",\"Releases\":[{\"Tag\":\"v1.0.0\",\"Title\":\"Legacy cache\",\"Notes\":\"Saved\",\"Source\":1}]}");
+            Assert.IsFalse(reopened.ReadAnnouncementCache()!.IsComplete, "Legacy recent-only caches remain readable and request a complete refresh.");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
 
     [TestMethod]
     public async Task CachedAnnouncementsSurviveReopenFailedRefreshAndChannelChanges()

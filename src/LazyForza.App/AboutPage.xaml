@@ -65,7 +65,7 @@
                                     </ControlTemplate>
                                 </ToggleButton.Template>
                             </ToggleButton>
-                            <ContentPresenter x:Name="Body" ContentSource="Content" Margin="18,0,18,18" Visibility="Collapsed"/>
+                            <ContentPresenter x:Name="Body" ContentSource="Content" Margin="18,14,18,18" Visibility="Collapsed"/>
                         </StackPanel>
                     </Border>
                     <ControlTemplate.Triggers>
