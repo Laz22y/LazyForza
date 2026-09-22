@@ -644,6 +644,7 @@ public sealed partial class LapAnalysisBehaviorTests
 
     [TestMethod]
     [TestCategory("CatalogAudit")]
+    [TestCategory("Extended")]
     public void EveryOfficialTrackOpeningRouteIdentifiesItself()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-official-match-audit-{Guid.NewGuid():N}.db");
@@ -699,6 +700,7 @@ public sealed partial class LapAnalysisBehaviorTests
 
     [TestMethod]
     [TestCategory("CatalogAudit")]
+    [TestCategory("Extended")]
     public void EveryOfficialTrackIdentifiesAfterLeavingAnOffsetStartingGrid()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-official-offset-grid-audit-{Guid.NewGuid():N}.db");

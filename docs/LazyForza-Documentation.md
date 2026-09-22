@@ -315,10 +315,11 @@ RaceServer `0.6.0` 推荐搭配 LazyForza `1.5.3`。旧版协议 v2 客户端仍
 git clone https://github.com/Laz22y/LazyForza.git
 cd LazyForza
 dotnet restore LazyForza.sln --configfile NuGet.Config
-dotnet build LazyForza.sln --no-restore -c Debug
-dotnet test LazyForza.sln --no-build --no-restore -c Debug
+./scripts/Test-Client.ps1
 dotnet run --project src/LazyForza.App/LazyForza.App.csproj --no-build --no-restore -c Debug
 ```
+
+`Test-Client.ps1` 默认构建并执行快速检查；可使用 `-Project` 和 `-Filter` 缩小到相关测试。`-Suite Full -Configuration Release` 包含全赛道穷举与真实网络超时测试，用于发行前和涉及这些行为的改动。每次运行的日志、TRX 与耗时摘要保存在 `artifacts/tests/`。
 
 开发和 QA 可使用隔离数据目录：
 

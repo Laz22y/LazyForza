@@ -36,7 +36,7 @@ public sealed class SpeechPipelineTests
     {
         var provider = new Provider();
         var player = new Player();
-        await using var output = new RadioSpeechOutput(provider, player, "zh-CN", "voice-1", 1.1);
+        await using var output = new RadioSpeechOutput(provider, player, "zh-CN", "voice-1", 1.1, pause: SkipPause);
         const string text = "<driver> 罚时 5 秒。";
         await output.SpeakAsync(text, 70, CancellationToken.None);
         var request = provider.Requests.Single();
@@ -66,7 +66,7 @@ public sealed class SpeechPipelineTests
             return reply.Task; // Deliberately ignores cancellation.
         });
         var player = new Player();
-        await using var output = new RadioSpeechOutput(provider, player, "zh-CN");
+        await using var output = new RadioSpeechOutput(provider, player, "zh-CN", pause: SkipPause);
         using var cancelled = new CancellationTokenSource();
         var old = output.SpeakAsync("old stage", 70, cancelled.Token);
         var oldReply = await Read(pending.Reader);
@@ -118,7 +118,7 @@ public sealed class SpeechPipelineTests
             if (index == 2) transmitted.TrySetResult();
             return Task.CompletedTask;
         });
-        using var engineer = new RaceEngineer(new RadioSpeechOutput(provider, player, "zh-CN"));
+        using var engineer = new RaceEngineer(new RadioSpeechOutput(provider, player, "zh-CN", pause: SkipPause));
         engineer.Configure(true, false, 70);
         engineer.SetStage("race");
         var message = new EngineerMessage("old", "old", "old", EngineerPriority.Information,
@@ -158,7 +158,7 @@ public sealed class SpeechPipelineTests
             reached.TrySetResult();
             await Task.Delay(Timeout.Infinite, token);
         });
-        await using var output = new RadioSpeechOutput(new Provider(), player, "zh-CN");
+        await using var output = new RadioSpeechOutput(new Provider(), player, "zh-CN", pause: SkipPause);
         using var cancellation = new CancellationTokenSource();
         var speaking = output.SpeakAsync("stop", 70, cancellation.Token);
         await reached.Task.WaitAsync(TimeSpan.FromSeconds(2));
@@ -174,7 +174,7 @@ public sealed class SpeechPipelineTests
         var provider = new Provider((_, _) => ++attempts == 1
             ? Task.FromException<SpeechAudio>(new InvalidOperationException("failed")) : Task.FromResult(Audio));
         var player = new Player();
-        await using var output = new RadioSpeechOutput(provider, player, "zh-CN");
+        await using var output = new RadioSpeechOutput(provider, player, "zh-CN", pause: SkipPause);
         await output.SpeakAsync("same", 0, CancellationToken.None);
         Assert.AreEqual(0, attempts);
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => output.SpeakAsync("same", 70, CancellationToken.None));
@@ -188,7 +188,7 @@ public sealed class SpeechPipelineTests
     public async Task CacheEvictsOldPhrasesAndRespectsItsByteBudget()
     {
         var provider = new Provider();
-        await using (var output = new RadioSpeechOutput(provider, new Player(), "zh-CN"))
+        await using (var output = new RadioSpeechOutput(provider, new Player(), "zh-CN", pause: SkipPause))
         {
             for (var i = 0; i < 33; i++) await output.SpeakAsync($"phrase {i}", 70, CancellationToken.None);
             await output.SpeakAsync("phrase 32", 70, CancellationToken.None);
@@ -198,7 +198,7 @@ public sealed class SpeechPipelineTests
         }
         var large = new SpeechAudio(new byte[2 * 1024 * 1024], 48000);
         var largeProvider = new Provider((_, _) => Task.FromResult(large));
-        await using var bounded = new RadioSpeechOutput(largeProvider, new Player(), "zh-CN");
+        await using var bounded = new RadioSpeechOutput(largeProvider, new Player(), "zh-CN", pause: SkipPause);
         foreach (var text in new[] { "a", "b", "c", "b", "a" })
             await bounded.SpeakAsync(text, 70, CancellationToken.None);
         Assert.AreEqual(4, largeProvider.Requests.Count);
@@ -215,7 +215,7 @@ public sealed class SpeechPipelineTests
             return result.Task;
         });
         var player = new Player();
-        await using var output = new RadioSpeechOutput(provider, player, "zh-CN");
+        await using var output = new RadioSpeechOutput(provider, player, "zh-CN", pause: SkipPause);
         var replies = new List<TaskCompletionSource<SpeechAudio>>();
         for (var i = 0; i < 2; i++)
         {
@@ -241,7 +241,7 @@ public sealed class SpeechPipelineTests
             await Task.Delay(Timeout.Infinite, token);
         });
         var provider = new Provider();
-        var output = new RadioSpeechOutput(provider, player, "zh-CN");
+        var output = new RadioSpeechOutput(provider, player, "zh-CN", pause: SkipPause);
         var work = output.SpeakAsync("dispose", 70, CancellationToken.None);
         await reached.Task.WaitAsync(TimeSpan.FromSeconds(2));
         await output.DisposeAsync();
@@ -289,6 +289,14 @@ public sealed class SpeechPipelineTests
 
     private static async Task<T> Read<T>(ChannelReader<T> reader) =>
         await reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+
+    // Cache/provider/playback assertions do not depend on the 180/220 ms radio gaps.
+    // The dedicated pause tests below still verify their durations, ordering and cancellation.
+    private static Task SkipPause(TimeSpan _, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
+    }
 
     [TestMethod]
     public async Task CustomCuesAndPausesUseOneSnapshotForEachTransmission()

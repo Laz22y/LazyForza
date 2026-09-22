@@ -118,6 +118,7 @@ public sealed class EndToEndTests
         {
             await start.Task.WaitAsync(cancellationToken);
             const int framesPerLap = 180;
+            var started = DateTimeOffset.UtcNow;
             for (var index = 0; index < framesPerLap * 6 && !cancellationToken.IsCancellationRequested; index++)
             {
                 var lapFrame = index % framesPerLap;
@@ -130,13 +131,15 @@ public sealed class EndToEndTests
                 Fh6PacketBuilder.WriteFloat(packet, 304, lapFrame / 10f);
                 packet[312] = (byte)(index / framesPerLap);
                 packet[313] = 0;
-                if (parser.TryParse(packet, index, DateTimeOffset.UtcNow, Kind, out var frame, out var error)) await publish(frame!);
+                if (parser.TryParse(packet, index, started.AddMilliseconds(index * 16), Kind, out var frame, out var error)) await publish(frame!);
                 else onInvalid(error ?? "parse");
-                // The production crossing debounce is two seconds of arrival time.
-                // Keep each synthetic lap above that boundary instead of relying on
-                // scheduler speed or treating several lap resets as one crossing.
-                await Task.Delay(12, cancellationToken);
+                // Advance telemetry arrival time instead of sleeping. Each simulated lap
+                // still exceeds the real two-second crossing debounce; both subscribers
+                // retain the complete burst in their explicitly sized channels.
+                if (index % 128 == 0) await Task.Yield();
             }
+            // Remain connected until the module lifecycle stops the source.
+            await Task.Delay(Timeout.Infinite, cancellationToken);
         }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

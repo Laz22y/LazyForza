@@ -106,16 +106,27 @@ LazyForza 是 Windows 10/11 x64 的 .NET 9 WPF 应用。它接收 FH6 官方 324
 dotnet restore LazyForza.sln --configfile NuGet.Config
 ```
 
-常规完整检查：
+日常先选择受影响的测试项目和用例；需要较广覆盖时使用快速检查：
 
 ```powershell
-dotnet build LazyForza.sln --no-restore -c Debug
-dotnet test LazyForza.sln --no-build --no-restore -c Debug
+./scripts/Test-Client.ps1
+./scripts/Test-Client.ps1 -Project Integration -Filter 'FullyQualifiedName~AboutPageTests|FullyQualifiedName~ReleaseHistoryTests'
 ```
+
+脚本默认 `Quick`，构建一次后运行测试，仅排除标记 `Extended` 的全赛道穷举和真实网络超时回归。`-Project` 可选 `Analysis`、`Telemetry`、`Storage`、`Integration`、`EstatePeer`；`-NoBuild` 仅用于对应配置已完成构建的情况。每次运行的日志、TRX、用例数与最慢用例摘要保存在 `artifacts/tests/` 的独立目录。
+
+完整检查与扩展检查：
+
+```powershell
+./scripts/Test-Client.ps1 -Suite Full -Configuration Release
+./scripts/Test-Client.ps1 -Suite Extended -NoBuild -Configuration Release
+```
+
+修改赛道识别或官方目录时，必须包含 `CatalogAudit`；修改直连握手、回执或重试时，必须包含 `PeerRetryTests`，可使用 `-Suite Full` 配合项目和过滤器执行。发布前运行完整检查；现有发布脚本仍直接执行全套 `dotnet test`，不排除扩展用例。快速检查不能写成完整测试通过。
 
 当前客户端仓库的 GitHub Actions 只部署 `website/**` Pages，不执行客户端 build/test；本地通过是客户端改动的必要证据，不能把 Pages 工作流成功当作应用验证。
 
-纯逻辑小改可先运行对应测试项目或 `--filter FullyQualifiedName~...`，交付前按影响面决定是否补全套。Release/性能相关改动使用 Release 构建；热路径门禁为：
+纯逻辑小改运行对应测试项目或过滤器，交付前按影响面决定是否补全套。简单文案、间距和样式调整优先复用现有验证；新增测试应覆盖独立行为或回归风险，避免逐项复述实现。通过后不重复执行同一检查，除非有新修改、失败或尚未验证的风险。测试时优先推进模拟时间或使用已有的等待注入点；只在验证真实计时与系统网络行为时等待实际时间，不缩短产品超时来提速。Release/性能相关改动使用 Release 构建；热路径门禁为：
 
 ```powershell
 dotnet run --project tools/LazyForza.Performance/LazyForza.Performance.csproj -c Release

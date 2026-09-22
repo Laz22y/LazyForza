@@ -109,10 +109,11 @@ RaceServer 0.6.0 将项目、规则与赛程、赛果记录分开管理。一项
 
 ```powershell
 dotnet restore LazyForza.sln --configfile NuGet.Config
-dotnet build LazyForza.sln --no-restore -c Debug
-dotnet test LazyForza.sln --no-build --no-restore -c Debug
+./scripts/Test-Client.ps1
 dotnet run --project src/LazyForza.App/LazyForza.App.csproj --no-build --no-restore -c Debug
 ```
+
+测试脚本默认构建并运行快速检查；小改动可通过 `-Project` 和 `-Filter` 只检查相关功能。发行前使用 `./scripts/Test-Client.ps1 -Suite Full -Configuration Release`，包含全赛道与真实网络超时回归。运行日志和耗时摘要位于 `artifacts/tests/`。
 
 模拟与回放：
 
@@ -229,10 +230,11 @@ Requires Windows 10/11 x64, .NET SDK 9 and PowerShell 7:
 
 ```powershell
 dotnet restore LazyForza.sln --configfile NuGet.Config
-dotnet build LazyForza.sln --no-restore -c Debug
-dotnet test LazyForza.sln --no-build --no-restore -c Debug
+./scripts/Test-Client.ps1
 dotnet run --project src/LazyForza.App/LazyForza.App.csproj --no-build --no-restore -c Debug
 ```
+
+The script builds once and runs the quick suite. Use `-Project` and `-Filter` for focused changes. Before a release, run `./scripts/Test-Client.ps1 -Suite Full -Configuration Release` to include exhaustive track audits and real network timeout regressions. Logs and timing summaries are saved under `artifacts/tests/`.
 
 Development references:
 

@@ -7,6 +7,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace LazyForza.EstatePeer.Tests;
 
 [TestClass]
+[TestCategory("Extended")]
 [SupportedOSPlatform("windows")]
 public sealed class PeerRetryTests
 {
