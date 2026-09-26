@@ -33,7 +33,7 @@ if (Get-ChildItem -LiteralPath $publish -Directory) { throw 'Component publishin
 $archive = Join-Path $output "LazyForza-EstatePeerHost-$releaseId-win-x64.zip"
 Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $archive -CompressionLevel Optimal
 $catalog = [ordered]@{
-    FormatVersion = 1; ControlVersion = 1; Version = $Version; Runtime = 'win-x64'
+    FormatVersion = 1; ControlVersion = 2; Version = $Version; Runtime = 'win-x64'
     Revision = $Revision; ServerRevision = $engine.revision
     DownloadBytes = (Get-Item -LiteralPath $archive).Length
     ArchiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash

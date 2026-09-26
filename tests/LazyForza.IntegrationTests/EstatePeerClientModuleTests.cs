@@ -103,9 +103,10 @@ public sealed partial class EstateRaceClientModuleTests
     }
 
     [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task PeerModuleUsesPinnedTransportAndKeepsRecoveryIdentitySeparateFromServerMode(bool useUdp)
+    [DataRow("tcp")]
+    [DataRow("udp")]
+    [DataRow("reverse")]
+    public async Task PeerModuleUsesPinnedTransportAndKeepsRecoveryIdentitySeparateFromServerMode(string transport)
     {
         var root = Path.Combine(Path.GetTempPath(), "LazyForza-peer-module-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -123,13 +124,19 @@ public sealed partial class EstateRaceClientModuleTests
                 track.Id.ToString("D"), track.Name, definition.MapRevision, hash, package, 3, 3, false);
             await using var room = new PeerRoom(settings);
             await room.StartAsync(default);
-            if (useUdp && !PeerQuicHost.IsSupported) { Assert.Inconclusive("QUIC unavailable."); return; }
-            await using var udp = useUdp ? new PeerQuicJoin(room.Invitation) : null;
+            if (transport == "udp" && !PeerQuicHost.IsSupported) { Assert.Inconclusive("QUIC unavailable."); return; }
+            await using var udp = transport == "udp" ? new PeerQuicJoin(room.Invitation) : null;
+            await using var reverse = transport == "reverse" ? new PeerReverseJoin(room.Invitation) : null;
             PeerConnection connection;
             if (udp is not null)
             {
                 Assert.IsTrue(room.Control(new("acceptReceipt", udp.Receipt.Encode())).Success);
                 connection = await udp.ConnectAsync(default);
+            }
+            else if (reverse is not null)
+            {
+                Assert.IsTrue(room.Control(new("acceptReceipt", reverse.Receipt.Encode())).Success);
+                connection = await reverse.ConnectAsync(default);
             }
             else connection = new PeerConnection(room.Invitation, new PeerEndpoint(IPAddress.Loopback, room.Port));
             var descriptor = await EstateRaceModule.ReadServerDescriptorAsync(connection.Origin.AbsoluteUri, default, connection, settings.Password);

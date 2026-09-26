@@ -158,7 +158,7 @@ public sealed class PeerComponentStore(string root, PeerComponentCatalog catalog
 
     internal void ValidateCatalog()
     {
-        if (catalog.FormatVersion != 1 || catalog.ControlVersion != 1 || catalog.Runtime != "win-x64" || catalog.Revision < 1 ||
+        if (catalog.FormatVersion != 1 || catalog.ControlVersion is < 1 or > 2 || catalog.Runtime != "win-x64" || catalog.Revision < 1 ||
             !ValidHash(catalog.ArchiveSha256) || catalog.DownloadBytes is < 1 or > 268_435_456 ||
             catalog.Files.Count is < 1 or > 512 || catalog.Files.Sum(file => file.Size) > 536_870_912 ||
             catalog.Files.Select(file => file.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != catalog.Files.Count ||

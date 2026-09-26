@@ -122,7 +122,7 @@ dotnet restore LazyForza.sln --configfile NuGet.Config
 ./scripts/Test-Client.ps1 -Suite Extended -NoBuild -Configuration Release
 ```
 
-修改赛道识别或官方目录时，必须包含 `CatalogAudit`；修改直连握手、回执或重试时，必须包含 `PeerRetryTests`，可使用 `-Suite Full` 配合项目和过滤器执行。发布前运行完整检查；现有发布脚本仍直接执行全套 `dotnet test`，不排除扩展用例。快速检查不能写成完整测试通过。
+修改赛道识别或官方目录时，必须包含 `CatalogAudit`；修改直连握手、回执或重试时，必须包含 `PeerRetryTests` 和 `PeerNatPathTests`，其中 NAT 映射切换需要真实等待的用例也归入 `Extended`，可使用 `-Suite Full` 配合项目和过滤器执行。发布前运行完整检查；现有发布脚本仍直接执行全套 `dotnet test`，不排除扩展用例。快速检查不能写成完整测试通过。
 
 当前客户端仓库的 GitHub Actions 只部署 `website/**` Pages，不执行客户端 build/test；本地通过是客户端改动的必要证据，不能把 Pages 工作流成功当作应用验证。
 

@@ -34,7 +34,7 @@ internal sealed class EstatePeerWindow : Window
     private string hostPassword = string.Empty;
     private Guid? selectedProjectId;
     private bool newProject;
-    private PeerQuicJoin? pendingJoin;
+    private PeerAssistedJoin? pendingJoin;
     private readonly Action<string>? clipboardWriter;
 
     public EstatePeerWindow(EstateRaceConnectionProfile saved, IReadOnlyList<PeerTrackChoice> tracks,
@@ -113,9 +113,9 @@ internal sealed class EstatePeerWindow : Window
             var invitation = PeerInvitation.Parse(code.Text);
             PeerConnection connection;
             try { connection = await PeerConnection.FindAsync(invitation, cancellation.Token); }
-            catch (IOException) when (invitation.SupportsUdp && PeerQuicHost.IsSupported)
+            catch (IOException) when (PeerAssistedJoin.IsSupported(invitation))
             {
-                pendingJoin = new PeerQuicJoin(invitation);
+                pendingJoin = new PeerAssistedJoin(invitation);
                 var pending = pendingJoin;
                 var receipt = Input(pending.Receipt.Encode()); receipt.IsReadOnly = true; receipt.TextWrapping = TextWrapping.Wrap;
                 receiptPanel.Children.Clear();
@@ -124,13 +124,13 @@ internal sealed class EstatePeerWindow : Window
                 receiptPanel.Children.Add(CopyButton("复制连接回执", receipt));
                 receiptPanel.Children.Add(AsyncButton("继续连接", async () =>
                 {
-                    message.Text = AppLocalization.Literal("正在等待房主 UDP 响应并建立加密连接…");
+                    message.Text = AppLocalization.Literal("正在验证 UDP 与反向 TCP 路径…");
                     var verified = await pending.ConnectAsync(cancellation.Token);
                     await join(Profile(verified, password.Password, name.Text, observer.IsChecked == true), cancellation.Token);
                     pendingJoin = null; // The connected module now owns the tunnel.
                     CloseAfterOperation();
                 }, primary: true));
-                message.Text = AppLocalization.Literal("TCP 地址不可达，已准备 UDP 连接回执。");
+                message.Text = AppLocalization.Literal("未能直接连接，已准备连接回执。");
                 return;
             }
             message.Text = AppLocalization.Literal("房主身份已验证，正在同步赛道并加入…");
@@ -421,7 +421,12 @@ internal sealed class EstatePeerWindow : Window
             if (busy) return;
             busy = true; body.IsEnabled = false; message.Text = string.Empty;
             try { await action(); }
-            catch (Exception error) { message.Text = AppLocalization.Literal(error.Message); }
+            catch (Exception error)
+            {
+                message.Text = error.InnerException is AggregateException attempts
+                    ? string.Join(Environment.NewLine, attempts.InnerExceptions.Select(item => AppLocalization.Literal(item.Message)).Distinct())
+                    : AppLocalization.Literal(error.Message);
+            }
             finally { busy = false; body.IsEnabled = true; }
         };
         return button;

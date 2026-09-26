@@ -13,6 +13,7 @@ public sealed record PeerEndpoint(IPAddress Address, int Port)
 public sealed class PeerInvitation
 {
     public const string Prefix = "LFZP2-";
+    private const string AssistedPrefix = "LFZP3-";
     private const string LegacyPrefix = "LFZP1-";
     public const int MaximumCandidates = 8;
     public const int MaximumCodeLength = 1024;
@@ -22,13 +23,14 @@ public sealed class PeerInvitation
     public required string PublicKeySha256 { get; init; }
     public required IReadOnlyList<PeerEndpoint> Candidates { get; init; }
     public bool SupportsUdp { get; init; }
+    public bool SupportsAssistedConnection { get; init; }
     public string RoomLabel => RoomId.ToString("N")[..8].ToUpperInvariant();
     public string Header => $"{RoomId:N}:{Generation}";
 
     public string Encode()
     {
         Validate();
-        return PeerCode.Encode(Prefix, writer =>
+        return PeerCode.Encode(SupportsAssistedConnection ? AssistedPrefix : Prefix, writer =>
         {
             writer.Write(RoomId.ToByteArray());
             writer.Write7BitEncodedInt(Generation);
@@ -39,9 +41,9 @@ public sealed class PeerInvitation
         });
     }
 
-    private static PeerInvitation ParseCompact(string code, DateTimeOffset? now)
+    private static PeerInvitation ParseCompact(string code, DateTimeOffset? now, bool assisted = false)
     {
-        using var reader = PeerCode.Decode(code, Prefix);
+        using var reader = PeerCode.Decode(code, assisted ? AssistedPrefix : Prefix);
         var room = new Guid(reader.ReadBytes(16));
         var generation = reader.Read7BitEncodedInt();
         var expires = DateTimeOffset.FromUnixTimeSeconds(reader.ReadUInt32());
@@ -51,7 +53,7 @@ public sealed class PeerInvitation
         var candidates = PeerCode.ReadEndpoints(reader);
         if (reader.BaseStream.Position != reader.BaseStream.Length) throw InvalidCode();
         var invitation = new PeerInvitation { RoomId = room, Generation = generation, ExpiresAt = expires,
-            PublicKeySha256 = fingerprint, SupportsUdp = flags == 1, Candidates = candidates };
+            PublicKeySha256 = fingerprint, SupportsUdp = flags == 1, SupportsAssistedConnection = assisted, Candidates = candidates };
         invitation.Validate();
         if (expires <= (now ?? DateTimeOffset.UtcNow)) throw new InvalidDataException("邀请代码已过期，请房主重新分享。");
         return invitation;
@@ -63,6 +65,7 @@ public sealed class PeerInvitation
         code = code.Trim();
         try
         {
+            if (code.StartsWith(AssistedPrefix, StringComparison.Ordinal)) return ParseCompact(code, now, assisted: true);
             if (code.StartsWith(Prefix, StringComparison.Ordinal)) return ParseCompact(code, now);
             if (!code.StartsWith(LegacyPrefix, StringComparison.Ordinal)) throw InvalidCode();
             var encoded = code[LegacyPrefix.Length..];

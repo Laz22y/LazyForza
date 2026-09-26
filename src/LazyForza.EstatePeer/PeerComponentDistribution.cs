@@ -38,7 +38,7 @@ public sealed class PeerComponentDistribution(string publicKeyPem, string client
                 !UpdateSemanticVersion.TryParse(release.MaximumClientVersionExclusive, out var maximum) ||
                 minimum.CompareTo(maximum) >= 0)
                 throw new InvalidDataException("组件更新清单不受支持。");
-            if (release.RaceProtocolVersion != 2 || release.ProjectFormatVersion != 1 || release.Catalog.ControlVersion != 1 ||
+            if (release.RaceProtocolVersion != 2 || release.ProjectFormatVersion != 1 || release.Catalog.ControlVersion is < 1 or > 2 ||
                 release.Catalog.Runtime != "win-x64") throw new PeerComponentIncompatibleException();
             new PeerComponentStore(Path.GetTempPath(), release.Catalog).ValidateCatalog();
             var urls = release.Catalog.DownloadUrls;

@@ -45,9 +45,11 @@ public sealed class PeerComponentUpdateTests
             fixture.Release with { MinimumClientVersion = "1.5.4-alpha-2" },
             fixture.Release with { MaximumClientVersionExclusive = ClientVersion },
             fixture.Release with { RaceProtocolVersion = 3 }, fixture.Release with { ProjectFormatVersion = 2 },
-            fixture.Release with { Catalog = fixture.NewCatalog with { ControlVersion = 2 } },
+            fixture.Release with { Catalog = fixture.NewCatalog with { ControlVersion = 3 } },
             fixture.Release with { Catalog = fixture.NewCatalog with { Runtime = "win-arm64" } }
         }) Assert.ThrowsExactly<PeerComponentIncompatibleException>(() => fixture.Distribution.Verify(fixture.Sign(release)));
+        Assert.IsNotNull(fixture.Distribution.Verify(fixture.Sign(fixture.Release with
+        { Catalog = fixture.NewCatalog with { ControlVersion = 2 } })), "New clients accept assisted-connection components while retaining v1 support.");
         var stable = new PeerComponentDistribution(fixture.Key.ExportSubjectPublicKeyInfoPem(), "1.5.4", false);
         Assert.ThrowsExactly<PeerComponentIncompatibleException>(() => stable.Verify(fixture.Sign(fixture.Release)));
         Assert.IsNotNull(stable.Verify(fixture.Sign(fixture.Release with { Channel = "stable", Catalog = fixture.NewCatalog with { Version = "0.3.0" } })));

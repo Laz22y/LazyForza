@@ -54,6 +54,8 @@ public sealed class PeerQuicHost : IAsyncDisposable
         path.Add(receipt, receipt.Candidates, listener.LocalEndPoint);
     }
 
+    public void Revoke(PeerReceipt receipt) => path.Revoke(receipt.Nonce);
+
     private async Task AcceptAsync()
     {
         try
