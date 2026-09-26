@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$')]
-    [string]$Version = '1.5.3',
+    [string]$Version,
     [ValidateSet('win-x64')]
     [string]$Runtime = 'win-x64',
     [switch]$SkipInstaller,
@@ -10,10 +10,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+if (-not $Version) {
+    [xml]$project = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src\LazyForza.App\LazyForza.App.csproj') -Raw
+    $Version = [string]$project.Project.PropertyGroup.Version
+    if ($Version -notmatch '^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
+        throw 'The App project must declare a valid package version.'
+    }
+}
 $releaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts\release'))
 $packageName = "LazyForza-$Version-$Runtime"
 $workRoot = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot '_work'))
-$publishPath = [System.IO.Path]::GetFullPath((Join-Path $workRoot 'publish'))
 $stagePath = [System.IO.Path]::GetFullPath((Join-Path $workRoot $packageName))
 $archivePath = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot "$packageName.zip"))
 $hashPath = "$archivePath.sha256"
@@ -36,11 +42,34 @@ function Assert-ChildPath {
 }
 
 Assert-ChildPath -Path $workRoot -Parent $releaseRoot
-Assert-ChildPath -Path $publishPath -Parent $releaseRoot
 Assert-ChildPath -Path $stagePath -Parent $releaseRoot
 Assert-ChildPath -Path $archivePath -Parent $releaseRoot
 Assert-ChildPath -Path $setupPath -Parent $releaseRoot
 Assert-ChildPath -Path $setupHashPath -Parent $releaseRoot
+
+if (-not $SkipInstaller) {
+    $innoCompiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $innoCompiler) {
+        $innoCandidates = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+        )
+        $innoCompiler = $innoCandidates |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+            Select-Object -First 1
+    }
+    if ($null -eq $innoCompiler) {
+        throw 'Inno Setup 6 compiler was not found. Install Inno Setup 6 or use -SkipInstaller for portable-only local checks.'
+    }
+    $innoCompilerPath = if ($innoCompiler.PSObject.Properties.Name -contains 'Source') {
+        $innoCompiler.Source
+    } elseif ($innoCompiler.PSObject.Properties.Name -contains 'FullName') {
+        $innoCompiler.FullName
+    } else {
+        [string]$innoCompiler
+    }
+}
 
 New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
 if (Test-Path -LiteralPath $workRoot) {
@@ -58,7 +87,7 @@ if (Test-Path -LiteralPath $setupPath) {
 if (Test-Path -LiteralPath $setupHashPath) {
     Remove-Item -LiteralPath $setupHashPath -Force
 }
-New-Item -ItemType Directory -Force -Path $publishPath, $stagePath | Out-Null
+New-Item -ItemType Directory -Force -Path $stagePath | Out-Null
 
 $catalogPath = Join-Path $repositoryRoot 'src\LazyForza.Storage\Assets\PlaygroundOfficialTracks.json.gz'
 $catalogHash = (Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash
@@ -77,20 +106,19 @@ if ($catalogHash -ne $expectedCatalogHash) {
     -p:DebugSymbols=false `
     -p:PublishTrimmed=false `
     -p:SatelliteResourceLanguages=en `
-    -o $publishPath
+    -o $stagePath
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE."
 }
 
-$nestedPublishFiles = Get-ChildItem -LiteralPath $publishPath -Recurse -File |
-    Where-Object { $_.DirectoryName -ne $publishPath }
+$nestedPublishFiles = Get-ChildItem -LiteralPath $stagePath -Recurse -File |
+    Where-Object { $_.DirectoryName -ne $stagePath }
 if ($nestedPublishFiles) {
     throw "Release publish contains nested files that are incompatible with LazyForza 1.1.0-1.1.1 updaters: $($nestedPublishFiles.FullName -join ', ')"
 }
 
-Get-ChildItem -LiteralPath $publishPath -Filter '*.pdb' -File -ErrorAction SilentlyContinue |
+Get-ChildItem -LiteralPath $stagePath -Filter '*.pdb' -File -ErrorAction SilentlyContinue |
     Remove-Item -Force
-Copy-Item -Path (Join-Path $publishPath '*') -Destination $stagePath -Recurse
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\README.txt') -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') `
     -Destination (Join-Path $stagePath 'THIRD_PARTY_NOTICES.txt')
@@ -148,27 +176,6 @@ $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
 Set-Content -LiteralPath $hashPath -Value "$archiveHash  $([System.IO.Path]::GetFileName($archivePath))" -Encoding ASCII
 
 if (-not $SkipInstaller) {
-    $innoCompiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $innoCompiler) {
-        $innoCandidates = @(
-            (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
-            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
-            (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
-        )
-        $innoCompiler = $innoCandidates |
-            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
-            Select-Object -First 1
-    }
-    if ($null -eq $innoCompiler) {
-        throw 'Inno Setup 6 compiler was not found. Install Inno Setup 6 or use -SkipInstaller for portable-only local checks.'
-    }
-    $innoCompilerPath = if ($innoCompiler.PSObject.Properties.Name -contains 'Source') {
-        $innoCompiler.Source
-    } elseif ($innoCompiler.PSObject.Properties.Name -contains 'FullName') {
-        $innoCompiler.FullName
-    } else {
-        [string]$innoCompiler
-    }
     $numericVersion = ($Version -split '[-+]')[0]
     & $innoCompilerPath `
         "-dAppVersion=$Version" `

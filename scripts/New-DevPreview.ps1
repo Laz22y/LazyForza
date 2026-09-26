@@ -13,7 +13,6 @@ $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $previewRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts\dev-preview'))
 $packageName = "LazyForza-$Version-$Runtime"
 $workRoot = [System.IO.Path]::GetFullPath((Join-Path $previewRoot "_work-$Version"))
-$publishPath = [System.IO.Path]::GetFullPath((Join-Path $workRoot 'publish'))
 $stagePath = [System.IO.Path]::GetFullPath((Join-Path $workRoot $packageName))
 $archivePath = [System.IO.Path]::GetFullPath((Join-Path $previewRoot "$packageName.zip"))
 $hashPath = "$archivePath.sha256"
@@ -33,7 +32,7 @@ function Assert-ChildPath {
     }
 }
 
-foreach ($path in @($workRoot, $publishPath, $stagePath, $archivePath, $hashPath)) {
+foreach ($path in @($workRoot, $stagePath, $archivePath, $hashPath)) {
     Assert-ChildPath -Path $path -Parent $previewRoot
 }
 
@@ -43,7 +42,7 @@ foreach ($path in @($workRoot, $archivePath, $hashPath)) {
         Remove-Item -LiteralPath $path -Recurse -Force
     }
 }
-New-Item -ItemType Directory -Force -Path $publishPath, $stagePath | Out-Null
+New-Item -ItemType Directory -Force -Path $stagePath | Out-Null
 
 # Keep the preview package flat for the same legacy-updater compatibility as a formal release.
 & dotnet publish (Join-Path $repositoryRoot 'src\LazyForza.App\LazyForza.App.csproj') `
@@ -56,20 +55,19 @@ New-Item -ItemType Directory -Force -Path $publishPath, $stagePath | Out-Null
     -p:DebugSymbols=false `
     -p:PublishTrimmed=false `
     -p:SatelliteResourceLanguages=en `
-    -o $publishPath
+    -o $stagePath
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE."
 }
 
-$nestedPublishFiles = Get-ChildItem -LiteralPath $publishPath -Recurse -File |
-    Where-Object { $_.DirectoryName -ne $publishPath }
+$nestedPublishFiles = Get-ChildItem -LiteralPath $stagePath -Recurse -File |
+    Where-Object { $_.DirectoryName -ne $stagePath }
 if ($nestedPublishFiles) {
     throw "Development preview contains nested publish files: $($nestedPublishFiles.FullName -join ', ')"
 }
 
-Get-ChildItem -LiteralPath $publishPath -Filter '*.pdb' -File -ErrorAction SilentlyContinue |
+Get-ChildItem -LiteralPath $stagePath -Filter '*.pdb' -File -ErrorAction SilentlyContinue |
     Remove-Item -Force
-Copy-Item -Path (Join-Path $publishPath '*') -Destination $stagePath -Recurse
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\README.txt') -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging\LazyForza.Preview') -Destination $stagePath
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') `
