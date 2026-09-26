@@ -321,8 +321,6 @@ dotnet run --project src/LazyForza.App/LazyForza.App.csproj --no-build --no-rest
 
 `Test-Client.ps1` 默认构建并执行快速检查；可使用 `-Project` 和 `-Filter` 缩小到相关测试。`-Suite Full -Configuration Release` 包含全赛道穷举与真实网络超时测试，用于发行前和涉及这些行为的改动。每次运行的日志、TRX 与耗时摘要保存在 `artifacts/tests/`。
 
-正式版本同步使用 `scripts/Set-ReleaseVersion.ps1 -Version x.y.z`，先校验全部替换位置，再写入项目、版本显示测试和官网入口。`scripts/New-Release.ps1` 未指定 `-Version` 时读取 App 项目版本；生成安装包前检查 Inno Setup，使用 `-SkipInstaller` 可只打包便携版。正式版和开发预览均直接发布到临时打包目录，保留文件清单、完整性与用户数据检查。
-
 开发和 QA 可使用隔离数据目录：
 
 ```powershell
