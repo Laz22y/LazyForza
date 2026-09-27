@@ -124,7 +124,7 @@ dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --replay "C:\path
 
 ## 开发资料
 
-当前源码提供[地产赛事直连房间（实验）](docs/ESTATE_PEER_ROOMS.md)：加入能力内置，房主组件按需安装，比赛只在参与者之间通信。房主组件通过独立的 [GitHub](https://github.com/Laz22y/LazyForza.Components/releases)／[GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases) 分发仓库更新，编号跟随服务端版本并带组件修订号；支持签名校验、离线导入、升级前备份及恢复上一版本。完整公网联机和真实 FH6 多机验证尚未完成。
+预览版提供[地产赛事直连房间（实验）](docs/ESTATE_PEER_ROOMS.md)：加入能力内置，房主组件按需安装，比赛只在参与者之间通信。1.5.4-alpha-3 配合房主组件 0.6.0-r3，可通过连接回执同时尝试 UDP 与反向 TCP，并改善多网卡、端口变化和小报文路径的处理。新版邀请需要房主和加入者使用配套客户端；反向 TCP 仍需玩家具有可入站地址。房主组件通过独立的 [GitHub](https://github.com/Laz22y/LazyForza.Components/releases)／[GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases) 分发仓库更新，编号跟随服务端版本并带组件修订号；支持签名校验、离线导入、升级前备份及恢复上一版本。完整公网联机和真实 FH6 多机验证尚未完成。
 
 GPT-5.6 Sol 参与了此前版本的开发。1.5.3 版本起由 GPT-6 Astra 开发。
 

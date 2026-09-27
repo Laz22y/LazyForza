@@ -1,13 +1,13 @@
 {
   "FormatVersion": 1,
-  "ControlVersion": 1,
+  "ControlVersion": 2,
   "Version": "0.6.0",
   "Runtime": "win-x64",
-  "Revision": 2,
+  "Revision": 3,
   "ServerRevision": "b6909f8bb260231bca51e35e175918fd0841c4df",
-  "DownloadBytes": 50071020,
-  "ArchiveSha256": "7813FCF1C87BC50B08BFDCF8536CFF4F7A1FF1F961B6B2A88A77C7F0B57AC097",
-  "DownloadUrl": "https://github.com/Laz22y/LazyForza.Components/releases/download/estate-peer-host-v0.6.0-r2/LazyForza-EstatePeerHost-0.6.0-r2-win-x64.zip",
+  "DownloadBytes": 50086080,
+  "ArchiveSha256": "CFE31D726F01275BEF96EB441B031BD4206E1D97976ED13E4CF8D9613B9531E3",
+  "DownloadUrl": "https://github.com/Laz22y/LazyForza.Components/releases/download/estate-peer-host-v0.6.0-r3/LazyForza-EstatePeerHost-0.6.0-r3-win-x64.zip",
   "Files": [
     {
       "Name": "aspnetcorev2_inprocess.dll",
@@ -66,8 +66,8 @@
     },
     {
       "Name": "LazyForza.EstatePeer.dll",
-      "Size": 135168,
-      "Sha256": "B4DC0204D89588342DE42E8B37288A54341A2E5CBED539F3C933CCA4D09BCECE"
+      "Size": 168960,
+      "Sha256": "8DEAC7E90321B4ED186053A40C54AD04B2AB4BA766D2F1D0B29344C0F344056D"
     },
     {
       "Name": "LazyForza.EstatePeer.Host.deps.json",
@@ -76,13 +76,13 @@
     },
     {
       "Name": "LazyForza.EstatePeer.Host.dll",
-      "Size": 70144,
-      "Sha256": "B457F1052087BA39557887FB969A445FE1F7895DAE14A4EA59B6E435540E28A3"
+      "Size": 70656,
+      "Sha256": "2A49678D2561DFE7697F94D3C06F7474E3A6EC305D63F163F0B553ECF597E438"
     },
     {
       "Name": "LazyForza.EstatePeer.Host.exe",
       "Size": 156672,
-      "Sha256": "521FE8F237041E92351A1A88C659487966948E53DE0D2276DBE6C542DA045FC5"
+      "Sha256": "D53D17E561FEE220F937393DE6A18F970004B8B7CECFB0CCABEE7FEF305688A9"
     },
     {
       "Name": "LazyForza.EstatePeer.Host.runtimeconfig.json",
@@ -111,8 +111,8 @@
     },
     {
       "Name": "LazyForza.Update.dll",
-      "Size": 146944,
-      "Sha256": "D9B0499625A0774BAFFEFA3186EBFE188B9D822A3D19010BC59E10956C301DD0"
+      "Size": 147968,
+      "Sha256": "B9EE64DB1311CFC4CE02E5F0EC6A26ADD06149C63FEA3E6BB134E4CF86931B78"
     },
     {
       "Name": "Microsoft.AspNetCore.Antiforgery.dll",
@@ -1701,7 +1701,7 @@
     }
   ],
   "DownloadUrls": [
-    "https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza.Components/releases/estate-peer-host-v0.6.0-r2/attach_files/LazyForza-EstatePeerHost-0.6.0-r2-win-x64.zip/download",
-    "https://github.com/Laz22y/LazyForza.Components/releases/download/estate-peer-host-v0.6.0-r2/LazyForza-EstatePeerHost-0.6.0-r2-win-x64.zip"
+    "https://api.gitcode.com/api/v5/repos/Laz22y/LazyForza.Components/releases/estate-peer-host-v0.6.0-r3/attach_files/LazyForza-EstatePeerHost-0.6.0-r3-win-x64.zip/download",
+    "https://github.com/Laz22y/LazyForza.Components/releases/download/estate-peer-host-v0.6.0-r3/LazyForza-EstatePeerHost-0.6.0-r3-win-x64.zip"
   ]
 }
