@@ -47,6 +47,9 @@ public sealed partial class EstateRaceClientModuleTests
                         () => host, (_, _) => throw new AssertFailedException(), (_, _) => Task.CompletedTask,
                         () => Task.CompletedTask, () => true, () => "Room ready", clipboardWriter: value => copied = value);
                     var scroll = (ScrollViewer)window.Content;
+                    var compatibility = AppLocalization.Literal("此邀请需要 1.5.4-alpha-3 或更新的兼容客户端。加入者无需安装房主组件。");
+                    Assert.IsTrue(Children<TextBlock>(scroll).Any(text => text.Text == compatibility));
+                    if (language == "en") StringAssert.Contains(compatibility, "requires client");
                     var access = Children<Expander>(scroll).Single(item => (string)item.Header == AppLocalization.Literal("总控登录"));
                     Assert.IsFalse(access.IsExpanded);
                     access.IsExpanded = true;

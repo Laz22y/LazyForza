@@ -3096,4 +3096,6 @@
   ,"literal:连接回执已过期，请重新加入并将新回执交给房主。": "The receipt has expired. Join again and send the new receipt to the host."
   ,"literal:未收到房主的 UDP 响应。请确认房主已添加本次回执并保持房间开启，双方允许 UDP 通信；然后点击继续连接。": "No UDP response from the host. Confirm the host added this receipt and kept the room open, and both peers allow UDP traffic; then select Continue connecting."
   ,"literal:已收到 UDP 探测，但加密握手超时。请确认双方使用新版客户端和房主组件，再点击继续连接；若仍失败，请检查防火墙或更换直连路径。": "UDP probes arrived, but the encrypted handshake timed out. Update both clients and the host component, then try Continue connecting again. If it still fails, check the firewall or try another direct path."
+  ,"literal:此邀请需要 1.5.4-alpha-3 或更新的兼容客户端。加入者无需安装房主组件。": "This invitation requires client 1.5.4-alpha-3 or a newer compatible version. Joining players do not need the host component."
+  ,"literal:此邀请使用较新的格式，请更新客户端后重试。": "This invitation uses a newer format. Update the client and try again."
 }

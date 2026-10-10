@@ -47,6 +47,22 @@ public sealed class PeerPathTests
     }
 
     [TestMethod]
+    public void NewerInvitationFormatRequestsAnUpdateWhileDamagedCodesStillReportCopyErrors()
+    {
+        var code = Assisted(PeerTests.Invitation()).Encode();
+        foreach (var version in new[] { "4", "12" })
+        {
+            var error = Assert.ThrowsExactly<InvalidDataException>(() => PeerInvitation.Parse($"LFZP{version}-" + code[6..]));
+            Assert.AreEqual("此邀请使用较新的格式，请更新客户端后重试。", error.Message);
+        }
+        foreach (var invalid in new[] { "LFZP3-invalid", "LFZPx-" + code[6..], "LFZP-4-" + code[6..], "LFZP0-" + code[6..] })
+        {
+            var error = Assert.ThrowsExactly<InvalidDataException>(() => PeerInvitation.Parse(invalid));
+            StringAssert.Contains(error.Message, "无效或损坏");
+        }
+    }
+
+    [TestMethod]
     public void AuthenticatedDiscoveryLearnsMappedEndpointsAndRejectsTamperingReplayAndReflection()
     {
         long now = 0;

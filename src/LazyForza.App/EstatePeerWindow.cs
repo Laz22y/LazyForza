@@ -342,6 +342,8 @@ internal sealed class EstatePeerWindow : Window
         body.Children.Add(Text("与服务端相同的总控界面，仅在房主本机开放。", 11));
         var code = Input(running.Invitation.Encode()); code.IsReadOnly = true; code.TextWrapping = TextWrapping.Wrap; code.MinHeight = 90;
         Field(body, "邀请代码", code);
+        if (running.Invitation.SupportsAssistedConnection)
+            body.Children.Add(Text("此邀请需要 1.5.4-alpha-3 或更新的兼容客户端。加入者无需安装房主组件。", 11));
         var invitationActions = new WrapPanel();
         invitationActions.Children.Add(CopyButton("复制邀请代码", code));
         invitationActions.Children.Add(AsyncButton("刷新邀请代码", async () =>

@@ -67,7 +67,15 @@ public sealed class PeerInvitation
         {
             if (code.StartsWith(AssistedPrefix, StringComparison.Ordinal)) return ParseCompact(code, now, assisted: true);
             if (code.StartsWith(Prefix, StringComparison.Ordinal)) return ParseCompact(code, now);
-            if (!code.StartsWith(LegacyPrefix, StringComparison.Ordinal)) throw InvalidCode();
+            if (!code.StartsWith(LegacyPrefix, StringComparison.Ordinal))
+            {
+                var separator = code.IndexOf('-');
+                if (code.StartsWith("LFZP", StringComparison.Ordinal) && separator > 4 &&
+                    int.TryParse(code.AsSpan(4, separator - 4), System.Globalization.NumberStyles.None,
+                        System.Globalization.CultureInfo.InvariantCulture, out var version) && version > 3)
+                    throw new InvalidDataException("此邀请使用较新的格式，请更新客户端后重试。");
+                throw InvalidCode();
+            }
             var encoded = code[LegacyPrefix.Length..];
             if (encoded.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_'))) throw InvalidCode();
             var bytes = Convert.FromBase64String(encoded.Replace('-', '+').Replace('_', '/') + new string('=', (4 - encoded.Length % 4) % 4));
