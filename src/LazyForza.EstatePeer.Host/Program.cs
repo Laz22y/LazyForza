@@ -11,7 +11,7 @@ try
     var settings = await PeerPipe.ReadAsync<PeerHostStart>(pipe, startup.Token);
     await using var room = new PeerRoom(settings);
     await room.StartAsync(startup.Token);
-    await PeerPipe.WriteAsync(pipe, new PeerHostReply(true, Invitation: room.Invitation.Encode(), Port: room.Port), startup.Token);
+    await PeerPipe.WriteAsync(pipe, new PeerHostReply(true, Invitation: room.Invitation.Encode(), Port: room.Port, ConnectivityVersion: 1), startup.Token);
     while (pipe.IsConnected)
     {
         var read = PeerPipe.ReadAsync<PeerHostCommand>(pipe, CancellationToken.None);

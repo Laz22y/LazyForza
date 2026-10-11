@@ -10,6 +10,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using LazyForza.Domain;
+using LazyForza.Telemetry;
 using Microsoft.Win32;
 using Ellipse = System.Windows.Shapes.Ellipse;
 
@@ -19,7 +20,8 @@ internal sealed record InitializationResult(
     StartupProfile Profile,
     string PlayerCode,
     string ListenAddress,
-    int Port);
+    int Port,
+    string? DismissedPortRecommendation = null);
 
 internal sealed class InitializationWindow : Window
 {
@@ -32,8 +34,13 @@ internal sealed class InitializationWindow : Window
     private readonly Button nextButton = new();
     private readonly Button closeButton = new();
     private readonly DispatcherTimer welcomeTimer;
+    private readonly DispatcherTimer probeRefreshTimer;
+    private readonly Func<string, int, CancellationToken, Task<TelemetryProbeResult>> probe;
     private CancellationTokenSource? probeCancellation;
     private Task? probeTask;
+    private int probeGeneration;
+    private bool closing;
+    private FrameworkElement? telemetryEndpointEditor;
     private TextBlock? telemetryStatus;
     private TextBlock? telemetryDetail;
     private Border? telemetryStatusIcon;
@@ -48,10 +55,13 @@ internal sealed class InitializationWindow : Window
     private string dataDirectory;
     private MainWindowCloseBehavior closeBehavior;
     private string listenAddress = LazyForzaDefaults.TelemetryListenAddress;
+    private string? dismissedPortRecommendation;
     private string portText = LazyForzaDefaults.TelemetryPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    public InitializationWindow(StartupProfile profile, string? explicitDataDirectory = null)
+    public InitializationWindow(StartupProfile profile, string? explicitDataDirectory = null,
+        Func<string, int, CancellationToken, Task<TelemetryProbeResult>>? probe = null)
     {
+        this.probe = probe ?? new TelemetryInitializationProbe().WaitForTelemetryAsync;
         sourceProfile = profile.Normalize();
         fixedDataDirectory = string.IsNullOrWhiteSpace(explicitDataDirectory)
             ? null
@@ -72,7 +82,7 @@ internal sealed class InitializationWindow : Window
         ShowInTaskbar = true;
         UseLayoutRounding = true;
         FontFamily = new FontFamily("Microsoft YaHei UI");
-        Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForza.png", UriKind.Absolute));
+        Icon = BitmapFrame.Create(new Uri("pack://application:,,,/LazyForza.App;component/Assets/LazyForza.png", UriKind.Absolute));
         Content = BuildWindow();
         welcomeTimer = new DispatcherTimer(TimeSpan.FromSeconds(2.3), DispatcherPriority.Normal, (_, _) =>
         {
@@ -81,6 +91,8 @@ internal sealed class InitializationWindow : Window
             RefreshWelcomeTitle();
         }, Dispatcher);
         welcomeTimer.Start();
+        probeRefreshTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(400) };
+        probeRefreshTimer.Tick += (_, _) => BeginProbe();
         Closing += OnClosing;
         Loaded += (_, _) => Render();
     }
@@ -151,7 +163,7 @@ internal sealed class InitializationWindow : Window
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var brand = new Image
         {
-            Source = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForzaWordmark.png", UriKind.Absolute)),
+            Source = BitmapFrame.Create(new Uri("pack://application:,,,/LazyForza.App;component/Assets/LazyForzaWordmark.png", UriKind.Absolute)),
             Width = 146,
             Height = 32,
             Stretch = Stretch.Uniform,
@@ -563,8 +575,14 @@ internal sealed class InitializationWindow : Window
             FontWeights.SemiBold));
         var endpointSpacer = new Border { Height = 14 };
         settings.Children.Add(endpointSpacer);
-        settings.Children.Add(InputRow(AppLocalization.Text("wizard.telemetry.address", "监听 IP"), listenAddress, value => listenAddress = value));
-        settings.Children.Add(InputRow(AppLocalization.Text("wizard.telemetry.port", "UDP 端口"), portText, value => portText = value));
+        telemetryEndpointEditor = settings;
+        settings.Children.Add(InputRow(AppLocalization.Text("wizard.telemetry.address", "监听 IP"), listenAddress,
+            value => { listenAddress = value; TelemetryEndpointChanged(); }));
+        var portWarning = new TelemetryPortRecommendation(dismissedPortRecommendation, value => dismissedPortRecommendation = value);
+        void RefreshPortWarning() => portWarning.Update(portText);
+        settings.Children.Add(InputRow(AppLocalization.Text("wizard.telemetry.port", "UDP 端口"), portText,
+            value => { portText = value; RefreshPortWarning(); TelemetryEndpointChanged(); }));
+        RefreshPortWarning(); settings.Children.Add(portWarning);
         var endpointCard = PanelCard(settings);
         endpointCard.Margin = new Thickness(0, 0, 9, 0);
         content.Children.Add(endpointCard);
@@ -631,7 +649,39 @@ internal sealed class InitializationWindow : Window
         return stack;
     }
 
-    private void BeginProbe() => probeTask = StartProbeAsync();
+    private void CancelProbe()
+    {
+        probeRefreshTimer.Stop();
+        probeGeneration++;
+        probeCancellation?.Cancel();
+    }
+
+    private bool IsCurrentProbe(int generation) => !closing && step == FinalStep && generation == probeGeneration;
+
+    private void TelemetryEndpointChanged()
+    {
+        if (captureMode || closing || completing || step != FinalStep) return;
+        // Stop accepting the old endpoint immediately, including an already queued receive result.
+        CancelProbe();
+        if (!TryReadTelemetryEndpoint(out var port))
+        {
+            ShowProbeError(AppLocalization.Text("wizard.telemetry.invalid", "IP 或端口无效"),
+                AppLocalization.Text("wizard.telemetry.invalidDetail", "请输入有效 IP 和 1–65535 端口。"));
+            retryButton!.Visibility = Visibility.Collapsed;
+            return;
+        }
+        ShowProbeWaiting(AppLocalization.Text("wizard.telemetry.updating", "正在更新监听设置"),
+            AppLocalization.Format("wizard.telemetry.pendingEndpoint", "准备监听 {0}:{1}", listenAddress, port));
+        probeRefreshTimer.Start();
+    }
+
+    private void BeginProbe()
+    {
+        if (captureMode || closing || completing || step != FinalStep) return;
+        CancelProbe();
+        var previous = probeTask ?? Task.CompletedTask;
+        probeTask = StartProbeAsync(previous, probeGeneration);
+    }
 
     private FrameworkElement InputRow(string label, string value, Action<string> changed)
     {
@@ -642,55 +692,61 @@ internal sealed class InitializationWindow : Window
         caption.VerticalAlignment = VerticalAlignment.Center;
         row.Children.Add(caption);
         var input = new TextBox { Text = value, Padding = new Thickness(10, 8, 10, 8) };
+        System.Windows.Automation.AutomationProperties.SetName(input, label);
         input.TextChanged += (_, _) => changed(input.Text);
         Grid.SetColumn(input, 1);
         row.Children.Add(input);
         return row;
     }
 
-    private async Task StartProbeAsync()
+    private void ShowProbeWaiting(string title, string detail)
     {
-        if (step != FinalStep || completing || telemetryStatus is null || telemetryDetail is null) return;
-        probeCancellation?.Cancel();
-        probeCancellation?.Dispose();
-        probeCancellation = new CancellationTokenSource();
+        telemetryStatus!.Text = title;
+        telemetryDetail!.Text = detail;
         retryButton!.Visibility = Visibility.Collapsed;
-        if (!TryReadTelemetryEndpoint(out var port))
-        {
-            ShowProbeError(
-                AppLocalization.Text("wizard.telemetry.invalid", "IP 或端口无效"),
-                AppLocalization.Text("wizard.telemetry.invalidDetail", "请输入有效 IP 和 1–65535 端口，并避开 5200–5300。"));
-            return;
-        }
-
-        listenAddress = listenAddress.Trim();
-        telemetryStatus.Text = AppLocalization.Text("wizard.telemetry.waiting", "正在等待遥测数据");
-        telemetryDetail.Text = AppLocalization.Format(
-            "wizard.telemetry.endpoint",
-            "正在监听 {0}:{1}",
-            listenAddress,
-            port);
         telemetryStatus.Foreground = ResourceBrush("TextBrush");
         telemetryStatusIcon!.BorderBrush = new SolidColorBrush(Color.FromRgb(42, 191, 211));
         telemetryStatusIcon.Child = Text("•", 18, FontWeights.Bold, "AccentBrush");
         ((TextBlock)telemetryStatusIcon.Child).HorizontalAlignment = HorizontalAlignment.Center;
         ((TextBlock)telemetryStatusIcon.Child).VerticalAlignment = VerticalAlignment.Center;
+    }
+
+    private async Task StartProbeAsync(Task previous, int generation)
+    {
+        // Wait for the previous socket to close before rebinding, including same-port address edits.
+        await previous;
+        if (!IsCurrentProbe(generation) || completing || telemetryStatus is null || telemetryDetail is null) return;
+        if (!TryReadTelemetryEndpoint(out var port))
+        {
+            ShowProbeError(
+                AppLocalization.Text("wizard.telemetry.invalid", "IP 或端口无效"),
+                AppLocalization.Text("wizard.telemetry.invalidDetail", "请输入有效 IP 和 1–65535 端口。"));
+            return;
+        }
+
+        var address = listenAddress;
+        using var cancellation = new CancellationTokenSource();
+        probeCancellation = cancellation;
+        ShowProbeWaiting(AppLocalization.Text("wizard.telemetry.waiting", "正在等待遥测数据"), AppLocalization.Format(
+            "wizard.telemetry.endpoint",
+            "正在监听 {0}:{1}",
+            address,
+            port));
         try
         {
-            var result = await new TelemetryInitializationProbe().WaitForTelemetryAsync(
-                listenAddress,
-                port,
-                probeCancellation.Token);
-            if (step != FinalStep) return;
+            var result = await probe(address, port, cancellation.Token);
+            if (!IsCurrentProbe(generation) || cancellation.IsCancellationRequested) return;
             completing = true;
             backButton.IsEnabled = false;
+            nextButton.IsEnabled = false;
+            telemetryEndpointEditor!.IsEnabled = false;
             telemetryStatus.Text = AppLocalization.Text("wizard.telemetry.complete", "初始化完成");
             telemetryDetail.Text = AppLocalization.Format(
                 "wizard.telemetry.completeDetail",
                 "已接收 FH6 遥测 · {0} km/h · 正在启动 LazyForza",
                 result.Frame.Normalized.SpeedKph.ToString("0"));
             telemetryStatus.Foreground = ResourceBrush("SuccessBrush");
-            telemetryStatusIcon.Background = new SolidColorBrush(Color.FromRgb(35, 169, 107));
+            telemetryStatusIcon!.Background = new SolidColorBrush(Color.FromRgb(35, 169, 107));
             telemetryStatusIcon.BorderBrush = new SolidColorBrush(Color.FromRgb(90, 232, 161));
             telemetryStatusIcon.Child = Text("✓", 15, FontWeights.Bold);
             ((TextBlock)telemetryStatusIcon.Child).HorizontalAlignment = HorizontalAlignment.Center;
@@ -700,32 +756,42 @@ internal sealed class InitializationWindow : Window
                 AutoReverse = true,
                 RepeatBehavior = new RepeatBehavior(2)
             });
-            await Task.Delay(1250);
-            CompleteInitialization(port);
+            await Task.Delay(1250, cancellation.Token);
+            if (IsCurrentProbe(generation)) CompleteInitialization(address, port);
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception exception) when (exception is SocketException or ArgumentException)
         {
+            if (!IsCurrentProbe(generation) || cancellation.IsCancellationRequested) return;
             ShowProbeError(
                 AppLocalization.Text("wizard.telemetry.failed", "无法开始监听"),
                 exception is SocketException socket && socket.SocketErrorCode == SocketError.AddressAlreadyInUse
                     ? AppLocalization.Text("wizard.telemetry.inUse", "该端口已被其他程序占用，请更换端口或关闭占用程序。")
                     : AppLocalization.Literal(exception.Message));
         }
+        finally
+        {
+            if (ReferenceEquals(probeCancellation, cancellation)) probeCancellation = null;
+        }
     }
 
     private async Task SkipTelemetryAsync()
     {
-        if (step != FinalStep || completing) return;
+        if (step != FinalStep || completing || closing) return;
         if (!TryReadTelemetryEndpoint(out var port))
         {
             listenAddress = LazyForzaDefaults.TelemetryListenAddress;
             port = LazyForzaDefaults.TelemetryPort;
         }
 
-        probeCancellation?.Cancel();
+        var address = listenAddress;
+        completing = true;
+        backButton.IsEnabled = false;
+        nextButton.IsEnabled = false;
+        telemetryEndpointEditor!.IsEnabled = false;
+        CancelProbe();
         if (probeTask is not null)
         {
             try
@@ -736,25 +802,19 @@ internal sealed class InitializationWindow : Window
             {
             }
         }
-        if (completing) return;
-        completing = true;
-        backButton.IsEnabled = false;
-        nextButton.IsEnabled = false;
-        CompleteInitialization(port);
+        if (!closing) CompleteInitialization(address, port);
     }
 
     private bool TryReadTelemetryEndpoint(out int port)
     {
         port = 0;
-        if (!IPAddress.TryParse(listenAddress.Trim(), out _) ||
-            !int.TryParse(portText.Trim(), out port) ||
-            port is < 1 or > 65535 || port is >= 5200 and <= 5300)
+        if (!TelemetryNetworkPolicy.TryParseListener(listenAddress, portText, out _, out port))
             return false;
         listenAddress = listenAddress.Trim();
         return true;
     }
 
-    private void CompleteInitialization(int port)
+    private void CompleteInitialization(string address, int port)
     {
         var profile = sourceProfile with
         {
@@ -766,8 +826,9 @@ internal sealed class InitializationWindow : Window
         Result = new InitializationResult(
             profile.Normalize(),
             PlayerIdentitySettings.Normalize(playerCode),
-            listenAddress,
-            port);
+            address,
+            port,
+            dismissedPortRecommendation);
         DialogResult = true;
     }
 
@@ -785,7 +846,7 @@ internal sealed class InitializationWindow : Window
         if (completing) return;
         var next = Math.Clamp(step + offset, 0, FinalStep);
         if (next == step) return;
-        probeCancellation?.Cancel();
+        CancelProbe();
         step = next;
         Render();
     }
@@ -793,8 +854,8 @@ internal sealed class InitializationWindow : Window
     private void OnClosing(object? sender, CancelEventArgs eventArgs)
     {
         welcomeTimer.Stop();
-        probeCancellation?.Cancel();
-        probeCancellation?.Dispose();
+        closing = true;
+        CancelProbe();
     }
 
     private void RefreshWelcomeTitle()

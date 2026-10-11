@@ -46,6 +46,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LazyForza.EstatePeer.Host",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LazyForza.EstatePeer.Tests", "tests\LazyForza.EstatePeer.Tests\LazyForza.EstatePeer.Tests.csproj", "{96E51626-4427-416F-B2CE-3A4A850FFAAF}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LazyForza.TelemetryProbe", "tools\LazyForza.TelemetryProbe\LazyForza.TelemetryProbe.csproj", "{AB666F6D-2A0C-418D-BEB4-01CBECE44356}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -140,6 +142,10 @@ Global
 		{96E51626-4427-416F-B2CE-3A4A850FFAAF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{96E51626-4427-416F-B2CE-3A4A850FFAAF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{96E51626-4427-416F-B2CE-3A4A850FFAAF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AB666F6D-2A0C-418D-BEB4-01CBECE44356}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AB666F6D-2A0C-418D-BEB4-01CBECE44356}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AB666F6D-2A0C-418D-BEB4-01CBECE44356}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AB666F6D-2A0C-418D-BEB4-01CBECE44356}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

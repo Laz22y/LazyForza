@@ -31,6 +31,7 @@ public sealed record PeerReceipt(Guid RoomId, int Generation, DateTimeOffset Exp
 
     public static PeerReceipt Parse(string code, PeerInvitation invitation, DateTimeOffset? now = null)
     {
+        var outcome = PeerOutcome.Invalid;
         try
         {
             var authenticated = code.Trim().StartsWith(AuthenticatedPrefix, StringComparison.Ordinal);
@@ -43,14 +44,21 @@ public sealed record PeerReceipt(Guid RoomId, int Generation, DateTimeOffset Exp
             var receipt = new PeerReceipt(room, generation, expires, nonce, PeerCode.ReadEndpoints(reader))
             { Authenticated = authenticated, Transports = transports };
             var time = now ?? DateTimeOffset.UtcNow;
-            if (reader.BaseStream.Position != reader.BaseStream.Length || receipt.RoomId != invitation.RoomId ||
-                receipt.Generation != invitation.Generation || receipt.ExpiresAt <= time || receipt.ExpiresAt > time.AddMinutes(11) ||
-                invitation.ExpiresAt <= time || receipt.Nonce.Length != 32 ||
+            if (receipt.ExpiresAt <= time || invitation.ExpiresAt <= time)
+            { outcome = PeerOutcome.Expired; throw PeerCode.Invalid(); }
+            if (receipt.RoomId != invitation.RoomId || receipt.Generation != invitation.Generation)
+            { outcome = PeerOutcome.Rejected; throw PeerCode.Invalid(); }
+            if (reader.BaseStream.Position != reader.BaseStream.Length || receipt.ExpiresAt > time.AddMinutes(11) || receipt.Nonce.Length != 32 ||
                 transports is < PeerReceiptTransport.Udp or > (PeerReceiptTransport.Udp | PeerReceiptTransport.ReverseTcp) ||
                 authenticated && !invitation.SupportsAssistedConnection) throw PeerCode.Invalid();
+            PeerDiagnostics.Record(PeerStage.Receipt, PeerOutcome.Succeeded, codeFormat: authenticated ? 2 : 1, transports: transports);
             return receipt;
         }
-        catch (Exception error) when (error is FormatException or ArgumentException or EndOfStreamException or OverflowException)
-        { throw PeerCode.Invalid(); }
+        catch (Exception error) when (error is FormatException or ArgumentException or IOException or OverflowException)
+        {
+            PeerDiagnostics.Record(PeerStage.Receipt, outcome);
+            if (error is IOException) throw;
+            throw PeerCode.Invalid();
+        }
     }
 }

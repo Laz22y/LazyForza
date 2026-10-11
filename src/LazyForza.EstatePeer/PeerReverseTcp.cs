@@ -49,6 +49,7 @@ public sealed class PeerReverseHost(int roomPort) : IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private readonly object sync = new();
     private readonly Dictionary<string, Task> tickets = [];
+    private readonly Dictionary<string, TicketState> states = [];
 
     public void Admit(PeerReceipt receipt)
     {
@@ -56,11 +57,24 @@ public sealed class PeerReverseHost(int roomPort) : IAsyncDisposable
             throw new IOException("此回执不支持反向连接。");
         lock (sync)
         {
-            foreach (var key in tickets.Where(item => item.Value.IsCompleted).Select(item => item.Key).ToArray()) tickets.Remove(key);
+            foreach (var key in tickets.Where(item => item.Value.IsCompleted).Select(item => item.Key).ToArray()) { tickets.Remove(key); states.Remove(key); }
             if (tickets.ContainsKey(receipt.Nonce)) throw new IOException("此回执已添加，无需重复导入。");
             if (tickets.Count >= 32) throw new IOException("反向连接数量已达上限。");
-            var state = new TicketState();
+            var state = new TicketState { Receipt = receipt };
+            states.Add(receipt.Nonce, state);
             tickets.Add(receipt.Nonce, Task.WhenAll(Enumerable.Range(0, 4).Select(index => RunAsync(receipt, state, index))));
+        }
+    }
+
+    public bool UpdateReceipt(PeerReceipt receipt)
+    {
+        lock (sync)
+        {
+            if (!states.TryGetValue(receipt.Nonce, out var state) || state.Receipt.RoomId != receipt.RoomId ||
+                state.Receipt.Generation != receipt.Generation || state.Receipt.ExpiresAt != receipt.ExpiresAt ||
+                !receipt.Authenticated || state.Receipt.Transports != receipt.Transports ||
+                state.Receipt.Candidates.SequenceEqual(receipt.Candidates)) return false;
+            state.Receipt = receipt; state.Selected = null; return true;
         }
     }
 
@@ -72,7 +86,8 @@ public sealed class PeerReverseHost(int roomPort) : IAsyncDisposable
             while (!lifetime.IsCancellationRequested && (receipt.ExpiresAt > DateTimeOffset.UtcNow ||
                 Volatile.Read(ref state.Active) > 0 || Environment.TickCount64 - Interlocked.Read(ref state.LastUsed) < 180_000))
             {
-                var endpoint = state.Selected ?? receipt.Candidates[candidate++ % receipt.Candidates.Count];
+                var candidates = state.Receipt.Candidates;
+                var endpoint = state.Selected ?? candidates[candidate++ % candidates.Count];
                 using var remote = new TcpClient { NoDelay = true };
                 var activated = false;
                 try
@@ -121,6 +136,7 @@ public sealed class PeerReverseHost(int roomPort) : IAsyncDisposable
 
     private sealed class TicketState
     {
+        internal required PeerReceipt Receipt;
         internal volatile PeerEndpoint? Selected;
         internal int Active;
         internal long LastUsed = long.MinValue / 2;
@@ -144,13 +160,15 @@ public sealed class PeerReverseJoin : IAsyncDisposable
     public PeerReceipt Receipt { get; }
     public PeerConnection Connection { get; }
 
-    public PeerReverseJoin(PeerInvitation invitation, PeerReceipt? udpReceipt = null)
+    public int LocalPort => ((IPEndPoint)listener.LocalEndpoint).Port;
+
+    public PeerReverseJoin(PeerInvitation invitation, PeerReceipt? udpReceipt = null, int? localPort = null)
     {
         if (!invitation.SupportsAssistedConnection) throw new IOException("房主组件尚不支持反向连接。");
         this.invitation = invitation;
         try
         {
-            if (udpReceipt is not null) listener = new(IPAddress.IPv6Any, udpReceipt.Candidates[0].Port);
+            if (udpReceipt is not null) listener = new(IPAddress.IPv6Any, localPort ?? udpReceipt.Candidates[0].Port);
             listener.Server.DualMode = true;
             listener.Start(16); local.Start(16);
             Receipt = udpReceipt is null
@@ -169,18 +187,25 @@ public sealed class PeerReverseJoin : IAsyncDisposable
         using var attempt = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
         token = attempt.Token;
         await connecting.WaitAsync(token).ConfigureAwait(false);
+        var attemptId = PeerDiagnostics.Start(PeerStage.ReverseTcp);
+        var stage = PeerStage.ReverseTcp;
         try
         {
             try { await seen.Task.WaitAsync(TimeSpan.FromSeconds(20), token).ConfigureAwait(false); }
             catch (TimeoutException error)
             { throw new IOException("未收到房主的反向 TCP 连接。请确认房主已添加回执，并检查本机 TCP 入站路径。", error); }
+            PeerDiagnostics.Record(PeerStage.ReverseTcp, PeerOutcome.Succeeded, attemptId);
+            stage = PeerStage.Identity;
             using var http = Connection.CreateHttpClient();
             var identity = await http.GetFromJsonAsync<PeerIdentity>("peer/identity", token).ConfigureAwait(false);
             if (identity is null || identity.RoomId != invitation.RoomId || identity.Generation != invitation.Generation || identity.ProtocolVersion != 2)
                 throw new IOException("房主身份已变更，请索取新的邀请代码。");
             connected = true;
+            PeerDiagnostics.Record(PeerStage.Identity, PeerOutcome.Succeeded, attemptId);
             return Connection;
         }
+        catch (Exception error) when (PeerTunnelCopy.IsConnectionError(error))
+        { PeerDiagnostics.Record(stage, PeerDiagnostics.Failure(error, token.IsCancellationRequested), attemptId); throw; }
         finally { connecting.Release(); }
     }
 

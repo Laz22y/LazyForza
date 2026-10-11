@@ -64,6 +64,7 @@ LazyForza 是 Windows 10/11 x64 的 .NET 9 WPF 应用。它接收 FH6 官方 324
 | --- | --- |
 | FH6 UDP 字段或标准化 | `Telemetry/ForzaPacketParser*`、原始/标准化模型、录制/回放兼容、`PacketParserTests`、`StreamAndReplayTests`、遥测指南 |
 | 遥测分发、断流或性能 | `TelemetryHub`、订阅者生命周期、录制和三类模块、流统计测试；确认慢消费者不反压接收 |
+| 原始 UDP 转发与端口设置 | `TelemetryForwardingTests`、`TelemetryForwardingSettingsTests`、初始化与设置接线；用 TelemetryProbe 经实际 Live 客户端验证字节完整性。5200–5300 仅提示，可关闭；转发只允许 Live 原始包，本机监听端口回环仍拒绝 |
 | 换挡或车辆识别 | `Analysis`、Dashboard 学习编排、车辆指纹与 Storage、相应 Analysis/Storage/Integration 测试 |
 | 普通赛道、计圈或 Delta | `Analysis`、`Modules.LapAnalysis`、Storage 的路线/圈/分段、Lap HUD、赛道与圈速测试、Replay 回归 |
 | 地产录入、几何、维修区或切弯 | `Modules.EstateRace` 的模型/状态机/几何、`App/MainWindow.EstateRace*`、Storage 迁移/导入导出、Estate 集成测试；改变赛事含义时再同步服务端 |
@@ -158,6 +159,7 @@ Demo、Replay 和 `docs/qa` 的截图只证明确定性数据下的界面，不�
 - 数据目录由首次初始化选择；便携版的初始化状态随程序目录保存，安装版状态保存在当前用户目录。`--data-dir` 仅作为开发/QA 显式覆盖。不得把数据库、录制、日志、设置或备份打进源码提交/发行包。
 - 保留工作树中不属于当前任务的修改。不要用重置、覆盖或大范围格式化处理它们。
 - 普通开发不生成发行、不推送。开发预览使用 `scripts/New-DevPreview.ps1`；便携版必须通过首次初始化选择数据目录，不再附带强制隔离数据的启动脚本。预览包使用独立初始化状态和 GitCode/GitHub 预发布更新通道，每次启动强制检查并只自动安装更高预览版；正式版不参与预览通道，预览包不会自动转为正式版。正式版仍使用原有稳定版更新流和独立来源设置。
+- 开发版变更版本号时，不得沿用上一版本的版本名称；用户未指定该版本名称时留空。名称必须按完整版本号绑定，检查中英文构建元数据以及标题栏、关于页的显示；该约定只记入 Agent 开发文档，不写入产品更新日志。
 - 只有用户明确要求分发预览版时才运行 `scripts/Publish-Preview.ps1`。该脚本创建 GitHub Prerelease、GitCode 预发布和预览便携包，不更新正式版下载入口或稳定版版本号；源码和标签只推送 GitHub，GitCode 仅上传 Release 资产。
 - 正式发行只在用户明确要求时执行，优先使用 `scripts/Publish-Release.ps1`。从 1.5.0 起，发布时分别提供中文与英文更新说明；发布页显示完整双语正文，新客户端按当前界面语言显示对应部分。版本更新同时核对 README、用户/开发文档、官网和 RaceServer 兼容说明。
 - 发行说明以同一发布序列的上一已发行版本为基线：预览版对比上一预览版（如 `1.5.3-alpha-3` 对比 `1.5.3-alpha-2`），正式版对比上一正式版（如 `1.5.3` 对比 `1.5.2`）。核对标签间的最终代码差异和上一版说明，按功能归属组织新增、改进与修复；开发途中已撤回的方案不列为新功能。
@@ -170,6 +172,8 @@ Demo、Replay 和 `docs/qa` 的截图只证明确定性数据下的界面，不�
 - 领域事实：`FH6_TELEMETRY_DEVELOPMENT_GUIDE.md`；协议事实最终仍以官方 FH6 文档和当前解析器为准。
 - 实机证据：`VALIDATION_WITH_FH6.md`。
 - 专项现行说明：`docs/ESTATE_RACE_PIT_STRATEGY.md`、`docs/ESTATE_COORDINATE_VALIDATION.md`、Playground 赛道目录与 QA 说明；使用前仍需核对对应代码日期。
+- 直连设计与交接：[地产赛事直连连通性改进计划](docs/development/ESTATE_PEER_CONNECTIVITY_PLAN.md)，包含本轮实现、自动验证和仍待多机实测的边界；以源码和测试为准。
+- 遥测开发工具：[TelemetryProbe](tools/LazyForza.TelemetryProbe/README.md)，独立发包／收包／转发校验；自身回环不能作为客户端原始遥测转发的验收。
 - 历史资料：`LAZYFORZA_AGENT_PROMPT_PACK.md`、`prompts/*`、`docs/ESTATE_CIRCUIT_PHASE1.md` 和早期仪表盘设计/生成提示。它们解释设计来源，不是当前实施指令。
 - ADR 记录当时决策背景；当前目标框架和依赖以项目文件为准。
 

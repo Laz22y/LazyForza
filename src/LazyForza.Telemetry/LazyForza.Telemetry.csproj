@@ -3,6 +3,7 @@
     <TargetFramework>net9.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="LazyForza.Telemetry.Tests" />
     <ProjectReference Include="..\LazyForza.Domain\LazyForza.Domain.csproj" />
     <ProjectReference Include="..\LazyForza.Modules.Abstractions\LazyForza.Modules.Abstractions.csproj" />
   </ItemGroup>

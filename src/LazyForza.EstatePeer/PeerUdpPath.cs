@@ -20,6 +20,12 @@ internal sealed class PeerUdpPath : IAsyncDisposable
     private readonly ConcurrentQueue<Task> retired = new();
     private readonly Task receive;
     private readonly Task probe;
+    private IReadOnlyList<PeerEndpoint> localCandidates = [];
+    internal void UpdateLocalCandidates(IReadOnlyList<PeerEndpoint> candidates)
+    {
+        localCandidates = candidates;
+        foreach (var route in routes.Values) route.Security?.SetLocalCandidates(candidates);
+    }
     internal int Port => ((IPEndPoint)socket.Client.LocalEndPoint!).Port;
 
     internal PeerUdpPath(int port)
@@ -40,6 +46,7 @@ internal sealed class PeerUdpPath : IAsyncDisposable
         if (routes.Count >= 32) throw new IOException("UDP 连接数量已达上限，请关闭不再使用的连接。");
         var route = new Route(receipt, destinations, quicTarget);
         if (!routes.TryAdd(route.Identifier, route)) { route.Dispose(); throw new IOException("此回执已添加，无需重复导入。"); }
+        route.Security?.SetLocalCandidates(localCandidates);
         route.Pump = ForwardLocalAsync(route);
         return route.LocalEndpoint;
     }
@@ -94,7 +101,8 @@ internal sealed class PeerUdpPath : IAsyncDisposable
                 {
                     if (!authenticated) continue;
                     var decoded = security.Receive(bytes, remote, out var responses);
-                    foreach (var response in responses) await SendAsync(response.Bytes, response.Remote).ConfigureAwait(false);
+                    foreach (var response in responses)
+                        if (route.AllowResponse()) await SendAsync(response.Bytes, response.Remote).ConfigureAwait(false);
                     if (decoded is null) continue;
                     kind = decoded.Value.Kind; body = decoded.Value.Payload;
                 }
@@ -180,7 +188,19 @@ internal sealed class PeerUdpPath : IAsyncDisposable
     internal void Authenticate(string nonce)
     {
         var route = routes.Values.FirstOrDefault(item => item.Receipt.Nonce == nonce);
-        if (route is not null) route.Connected = true;
+        if (route is not null) { route.Connected = true; route.Security?.MarkConnected(); }
+    }
+
+    internal bool UpdateReceipt(PeerReceipt receipt)
+    {
+        var route = routes.Values.FirstOrDefault(r => r.Receipt.Nonce == receipt.Nonce);
+        if (route is null || !route.Receipt.Authenticated || route.Receipt.RoomId != receipt.RoomId ||
+            route.Receipt.Generation != receipt.Generation || route.Receipt.ExpiresAt != receipt.ExpiresAt ||
+            !receipt.Authenticated || route.Receipt.Transports != receipt.Transports ||
+            route.Destinations.SequenceEqual(receipt.Candidates)) return false;
+        route.Destinations = receipt.Candidates;
+        route.Security?.UpdateRemoteCandidates(receipt.Candidates);
+        return true;
     }
 
     internal void Revoke(string nonce)
@@ -193,7 +213,7 @@ internal sealed class PeerUdpPath : IAsyncDisposable
     {
         if (route.Security is { } security)
         {
-            foreach (var probe in security.Probe()) await SendAsync(probe.Bytes, probe.Remote).ConfigureAwait(false);
+            foreach (var probe in security.Probe(budget: 4)) await SendAsync(probe.Bytes, probe.Remote).ConfigureAwait(false);
         }
         else
         {
@@ -207,7 +227,7 @@ internal sealed class PeerUdpPath : IAsyncDisposable
     {
         foreach (var route in routes.Values)
             if (!route.Closed && route.LocalEndpoint.Equals(local))
-            { route.Connected = true; return true; }
+            { route.Connected = true; route.Security?.MarkConnected(); return true; }
         return false;
     }
 
@@ -263,7 +283,7 @@ internal sealed class PeerUdpPath : IAsyncDisposable
         internal readonly PeerReceipt Receipt;
         internal readonly PeerUdpSession? Security;
         internal string Identifier => Security?.Identifier ?? Receipt.Nonce;
-        internal readonly IReadOnlyList<PeerEndpoint> Destinations;
+        internal IReadOnlyList<PeerEndpoint> Destinations;
         internal readonly UdpClient Local = new(new IPEndPoint(IPAddress.Loopback, 0));
         internal readonly IPEndPoint LocalEndpoint;
         internal volatile IPEndPoint? Target;
@@ -274,6 +294,14 @@ internal sealed class PeerUdpPath : IAsyncDisposable
         internal long LastActivity = Environment.TickCount64;
         internal Task Pump = Task.CompletedTask;
         internal uint Sequence;
+        private long responseWindow;
+        private int responseCount;
+        internal bool AllowResponse()
+        {
+            var now = Environment.TickCount64;
+            if (now - responseWindow >= 1000) { responseWindow = now; responseCount = 0; }
+            return responseCount++ < 16;
+        }
         private readonly Dictionary<uint, (long Created, byte[]?[] Parts)> fragments = [];
         internal byte[]? Reassemble(ReadOnlySpan<byte> bytes)
         {

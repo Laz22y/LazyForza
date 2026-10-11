@@ -22,6 +22,9 @@ public sealed class PeerQuicHost : IAsyncDisposable
     private readonly SemaphoreSlim capacity = new(32, 32);
     private readonly Task accept;
     private int nextId;
+    public bool UpdateReceipt(PeerReceipt receipt) => path.UpdateReceipt(receipt);
+    public void UpdateCandidates(IReadOnlyList<PeerEndpoint> candidates) => path.UpdateLocalCandidates(candidates);
+
     public static bool IsSupported => QuicConnection.IsSupported && QuicListener.IsSupported;
 
     private PeerQuicHost(QuicListener listener, PeerUdpPath path, int tcpPort)
@@ -139,6 +142,8 @@ public sealed class PeerQuicJoin : IAsyncDisposable
     private int nextId;
     private int disposed;
     public PeerReceipt Receipt { get; }
+    public int LocalPort => path.Port;
+    internal void UpdateCandidates(IReadOnlyList<PeerEndpoint> candidates) => path.UpdateLocalCandidates(candidates);
     public PeerConnection? Connection { get; private set; }
 
     public PeerQuicJoin(PeerInvitation invitation)
@@ -178,10 +183,17 @@ public sealed class PeerQuicJoin : IAsyncDisposable
     private async Task<QuicConnection> EnsureConnectionAsync(CancellationToken token)
     {
         await connecting.WaitAsync(token).ConfigureAwait(false);
+        var stage = PeerStage.Udp;
+        var attemptId = Guid.NewGuid();
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             if (connection is not null) return connection;
+            PeerDiagnostics.Record(PeerStage.Udp, PeerOutcome.Started, attemptId);
             await path.PrepareClientAttemptAsync(Receipt.Nonce, token).ConfigureAwait(false);
+            PeerDiagnostics.Record(PeerStage.Udp, PeerOutcome.Succeeded, attemptId, milliseconds: System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            stage = PeerStage.Quic;
+            PeerDiagnostics.Record(PeerStage.Quic, PeerOutcome.Started, attemptId);
             var pin = new PeerConnection(invitation, new PeerEndpoint(IPAddress.Loopback, 1));
             connection = await QuicConnection.ConnectAsync(new QuicClientConnectionOptions
             {
@@ -195,11 +207,19 @@ public sealed class PeerQuicJoin : IAsyncDisposable
                 }
             }, token).ConfigureAwait(false);
             path.Authenticate(Receipt.Nonce);
+            PeerDiagnostics.Record(PeerStage.Quic, PeerOutcome.Succeeded, attemptId);
             return connection;
         }
         catch (QuicException error) when (error.QuicError == QuicError.ConnectionTimeout)
         {
+            PeerDiagnostics.Record(PeerStage.Quic, PeerOutcome.Timeout, attemptId);
             throw new IOException("已收到 UDP 探测，但加密握手超时。请确认双方使用新版客户端和房主组件，再点击继续连接；若仍失败，请检查防火墙或更换直连路径。", error);
+        }
+        catch (Exception error) when (PeerTunnelCopy.IsConnectionError(error))
+        {
+            PeerDiagnostics.Record(stage, PeerDiagnostics.Failure(error, token.IsCancellationRequested), attemptId,
+                milliseconds: System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            throw;
         }
         finally { connecting.Release(); }
     }

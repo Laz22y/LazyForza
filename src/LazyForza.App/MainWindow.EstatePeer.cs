@@ -19,7 +19,7 @@ internal sealed record PeerProjectInfo(Guid Id, Guid TrackId, string Name, strin
 }
 
 internal sealed record PeerRoomDraft(string Name, string Password, Guid TrackId, Guid? ProjectId,
-    int Port, string? ExternalAddress, int? ExternalPort, int RaceLaps);
+    int Port, string? ExternalAddress, int? ExternalPort, int RaceLaps, bool AutomaticPortMapping = false);
 
 internal sealed partial class MainWindow
 {
@@ -111,7 +111,7 @@ internal sealed partial class MainWindow
                     }
                     var start = new PeerHostStart(folder, project.Name, draft.Password, draft.Port, draft.ExternalAddress, draft.ExternalPort,
                         project.TrackId.ToString("D"), project.TrackName, project.Revision, project.TrackHash, packagePath,
-                        project.SectorCount, project.RaceLaps, draft.ProjectId is not null);
+                        project.SectorCount, project.RaceLaps, draft.ProjectId is not null, draft.AutomaticPortMapping);
                     // A project becomes visible only after the helper has opened its listeners.
                     // A failed attempt can be retried without adding an empty item to the project list.
                     var started = await PeerHostProcess.StartAsync(executable, start, token);

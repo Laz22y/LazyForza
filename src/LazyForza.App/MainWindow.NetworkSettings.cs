@@ -3,6 +3,7 @@ using System.Net;
 using System.Windows;
 using System.Windows.Controls;
 using LazyForza.Domain;
+using LazyForza.Telemetry;
 using LazyForza.Modules.Abstractions;
 
 namespace LazyForza.App;
@@ -16,21 +17,24 @@ internal sealed partial class MainWindow
         var port = new TextBox { Text = store.GetAppSetting("telemetry.port") ?? LazyForzaDefaults.TelemetryPort.ToString(CultureInfo.InvariantCulture) };
         network.Children.Add(NetworkSettingRow(AppLocalization.Literal("监听地址"), address));
         network.Children.Add(NetworkSettingRow(AppLocalization.Literal("UDP 端口"), port));
-        var note = Label("端口范围 1–65535，5200–5300 为保留端口。", 12, FontWeights.Normal, "MutedBrush");
+        var note = Label("端口范围 1–65535，建议使用 2299。", 12, FontWeights.Normal, "MutedBrush");
         note.Margin = new Thickness(0, 8, 0, 0); network.Children.Add(note);
+        var warning = new TelemetryPortRecommendation(store.GetAppSetting("telemetry.portRecommendationDismissed"),
+            value => store.SetAppSetting("telemetry.portRecommendationDismissed", value));
+        void RefreshWarning() => warning.Update(port.Text);
+        RefreshWarning(); network.Children.Add(warning);
         var status = AutoApplyStatus(); network.Children.Add(status);
         var appliedAddress = address.Text;
         var appliedPort = port.Text;
         var automatic = AutoApplySettings(network, async () =>
         {
-            if (!IPAddress.TryParse(address.Text.Trim(), out var parsedAddress) ||
-                !int.TryParse(port.Text.Trim(), out var parsedPort) || parsedPort is < 1 or > 65535 or >= 5200 and <= 5300)
+            if (!TelemetryNetworkPolicy.TryParseListener(address.Text, port.Text, out var parsedAddress, out var parsedPort))
             {
-                status.Text = AppLocalization.Literal("请输入有效 IP 地址和端口。保留端口：5200–5300。");
+                status.Text = AppLocalization.Literal("请输入有效 IP 地址和 1–65535 端口。");
                 status.Visibility = Visibility.Visible;
                 return;
             }
-            var nextAddress = parsedAddress.ToString();
+            var nextAddress = parsedAddress!.ToString();
             var nextPort = parsedPort.ToString(CultureInfo.InvariantCulture);
             if (nextAddress == appliedAddress && nextPort == appliedPort && telemetry.Diagnostics.State != TelemetryStreamState.Faulted)
             { status.Visibility = Visibility.Collapsed; return; }
@@ -45,8 +49,25 @@ internal sealed partial class MainWindow
             if (sourceChip is not null && sourceKind == TelemetrySourceKind.Live) sourceChip.ToolTip = ConfiguredLiveEndpoint();
         }, status, 650);
         address.TextChanged += (_, _) => automatic.Request();
-        port.TextChanged += (_, _) => automatic.Request();
+        port.TextChanged += (_, _) => { RefreshWarning(); automatic.Request(); };
         return Card(network);
+    }
+
+    private UIElement BuildTelemetryForwardingSettings()
+    {
+        var hub = telemetry as TelemetryHub;
+        var panel = new TelemetryForwardingPanel(TelemetryForwardingSettings.Read(store.GetAppSetting(TelemetryForwardingSettings.Key)), sourceKind,
+            async settings =>
+            {
+                if (hub is null) throw new InvalidOperationException("当前遥测源不支持转发。");
+                await hub.ChangeForwardingAsync(settings, lifetimeCancellation.Token);
+                store.SetAppSetting(TelemetryForwardingSettings.Key, TelemetryForwardingSettings.Write(settings));
+            }, () => hub?.ForwardingStatus ?? new(false, 0, 0, 0, null),
+            store.GetAppSetting("telemetry.forwardingRecommendationDismissed"),
+            value => store.SetAppSetting("telemetry.forwardingRecommendationDismissed", value));
+        settingApplications.Add(panel.Application);
+        refreshVisiblePage = panel.Refresh;
+        return Card(panel);
     }
 
     internal static Grid NetworkSettingRow(string title, TextBox editor)

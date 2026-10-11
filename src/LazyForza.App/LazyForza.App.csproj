@@ -6,8 +6,9 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Version>1.5.3</Version>
-    <ReleaseNameZh>Radio Check</ReleaseNameZh>
-    <ReleaseNameEn>Radio Check</ReleaseNameEn>
+    <!-- Release names belong to an exact version; version overrides must not inherit an older name. -->
+    <ReleaseNameZh Condition="'$(Version)' == '1.5.3'">Radio Check</ReleaseNameZh>
+    <ReleaseNameEn Condition="'$(Version)' == '1.5.3'">Radio Check</ReleaseNameEn>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\LazyForza.ico</ApplicationIcon>
   </PropertyGroup>

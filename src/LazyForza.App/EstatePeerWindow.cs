@@ -28,6 +28,8 @@ internal sealed class EstatePeerWindow : Window
     private readonly TextBlock message = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 16, 0, 0) };
     private readonly DispatcherTimer timer;
     private TextBlock? liveStatus;
+    private TextBox? sharedCode;
+    private TextBlock? connectivityStatus;
     private bool busy;
     private bool creating;
     private bool componentInstalled;
@@ -67,6 +69,20 @@ internal sealed class EstatePeerWindow : Window
         Closing += (_, args) => { if (busy) args.Cancel = true; };
         timer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
         {
+            if (sharedCode is not null)
+            {
+                var nextCode = host() is { IsRunning: true } active ? active.Invitation.Encode() : pendingJoin?.Receipt.Encode();
+                if (nextCode is not null && sharedCode.Text != nextCode)
+                {
+                    sharedCode.Text = nextCode;
+                    message.Text = AppLocalization.Literal("网络地址已更新，请重新复制代码；已连接成员继续使用原身份。");
+                }
+            }
+            if (connectivityStatus is not null && (host() is null || host()!.ConnectivityVersion > 0))
+            {
+                var mapped = host()?.MappedEndpoints ?? pendingJoin?.MappedEndpoints ?? 0;
+                connectivityStatus.Text = AppLocalization.Literal(mapped > 0 ? "网关映射已建立；仍需对端连接确认可达。" : "尚未确认网关映射；继续尝试已有直连地址。");
+            }
             if (liveStatus is not null) liveStatus.Text = host() is { IsRunning: true } ? roomStatus() : AppLocalization.Literal("房主组件已退出。重新创建时可选择原项目恢复比赛。");
         }, Dispatcher);
         Closed += async (_, _) =>
@@ -81,7 +97,7 @@ internal sealed class EstatePeerWindow : Window
 
     private void Render()
     {
-        body.Children.Clear(); liveStatus = null;
+        body.Children.Clear(); liveStatus = null; sharedCode = null; connectivityStatus = null;
         if (host() is { IsRunning: true } running) { RenderHosting(running); return; }
         var tabs = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 20, 0, 8) };
         tabs.Children.Add(ActionButton("加入房间", () => { creating = false; Render(); }, !creating));
@@ -102,6 +118,10 @@ internal sealed class EstatePeerWindow : Window
         Field(body, "房间密码", password);
         Field(body, "显示名称", name);
         body.Children.Add(observer);
+        var map = new CheckBox { Content = AppLocalization.Literal("自动申请路由器端口映射"), IsChecked = false };
+        var networkOptions = new StackPanel(); networkOptions.Children.Add(map);
+        networkOptions.Children.Add(Text("仅映射赛事端口，房间或连接结束后释放；不开放 Web 总控。", 11));
+        body.Children.Add(Disclosure("连接选项", networkOptions));
         var receiptPanel = new StackPanel();
         body.Children.Add(AsyncButton("加入房间", async () =>
         {
@@ -117,16 +137,22 @@ internal sealed class EstatePeerWindow : Window
             {
                 pendingJoin = new PeerAssistedJoin(invitation);
                 var pending = pendingJoin;
-                var receipt = Input(pending.Receipt.Encode()); receipt.IsReadOnly = true; receipt.TextWrapping = TextWrapping.Wrap;
+                pending.MonitorCandidates(map.IsChecked == true);
+                PeerDiagnostics.Record(PeerStage.Receipt, PeerOutcome.Started);
+                var receipt = Input(pending.Receipt.Encode()); sharedCode = receipt; receipt.IsReadOnly = true; receipt.TextWrapping = TextWrapping.Wrap;
                 receiptPanel.Children.Clear();
                 receiptPanel.Children.Add(Text("将回执发给房主。房主添加后，点击继续连接。回执十分钟内有效。", 12));
                 Field(receiptPanel, "连接回执", receipt);
                 receiptPanel.Children.Add(CopyButton("复制连接回执", receipt));
+                connectivityStatus = Text("尚未确认网关映射；继续尝试已有直连地址。", 11);
+                if (map.IsChecked == true) receiptPanel.Children.Add(connectivityStatus);
                 receiptPanel.Children.Add(AsyncButton("继续连接", async () =>
                 {
                     message.Text = AppLocalization.Literal("正在验证 UDP 与反向 TCP 路径…");
                     var verified = await pending.ConnectAsync(cancellation.Token);
+                    PeerDiagnostics.Record(PeerStage.Login, PeerOutcome.Started);
                     await join(Profile(verified, password.Password, name.Text, observer.IsChecked == true), cancellation.Token);
+                    PeerDiagnostics.Record(PeerStage.Connected, PeerOutcome.Succeeded);
                     pendingJoin = null; // The connected module now owns the tunnel.
                     CloseAfterOperation();
                 }, primary: true));
@@ -134,7 +160,9 @@ internal sealed class EstatePeerWindow : Window
                 return;
             }
             message.Text = AppLocalization.Literal("房主身份已验证，正在同步赛道并加入…");
+            PeerDiagnostics.Record(PeerStage.Login, PeerOutcome.Started);
             await join(Profile(connection, password.Password, name.Text, observer.IsChecked == true), cancellation.Token);
+            PeerDiagnostics.Record(PeerStage.Connected, PeerOutcome.Succeeded);
             CloseAfterOperation();
         }, primary: true));
         body.Children.Add(receiptPanel);
@@ -254,6 +282,9 @@ internal sealed class EstatePeerWindow : Window
         var external = Input(string.Empty);
         var externalPort = Input("24878");
         var advanced = new StackPanel();
+        var mapping = new CheckBox { Content = AppLocalization.Literal("自动申请路由器端口映射"), IsChecked = false };
+        advanced.Children.Add(mapping);
+        advanced.Children.Add(Text("仅映射赛事端口，房间或连接结束后释放；不开放 Web 总控。", 11));
         Field(advanced, "正赛圈数", laps);
         Field(advanced, "监听端口（TCP／UDP）", port);
         Field(advanced, "外部或指定网卡 IP（可选）", external);
@@ -292,7 +323,7 @@ internal sealed class EstatePeerWindow : Window
             _ = PeerAddresses.Collect(localPort, string.IsNullOrWhiteSpace(external.Text) ? null : external.Text.Trim(), publicPort);
             message.Text = AppLocalization.Literal("正在校验组件并创建房间…");
             var running = await create(new(roomName.Text, password.Password, existing?.TrackId ?? selected!.Id, existing?.Id,
-                localPort, string.IsNullOrWhiteSpace(external.Text) ? null : external.Text.Trim(), publicPort, raceLaps), cancellation.Token);
+                localPort, string.IsNullOrWhiteSpace(external.Text) ? null : external.Text.Trim(), publicPort, raceLaps, mapping.IsChecked == true), cancellation.Token);
             hostPassword = password.Password;
             selectedProjectId = existing?.Id ?? projects.FirstOrDefault()?.Id; newProject = false;
             Render();
@@ -340,7 +371,7 @@ internal sealed class EstatePeerWindow : Window
         }, primary: true));
         body.Children.Add(accessDisclosure);
         body.Children.Add(Text("与服务端相同的总控界面，仅在房主本机开放。", 11));
-        var code = Input(running.Invitation.Encode()); code.IsReadOnly = true; code.TextWrapping = TextWrapping.Wrap; code.MinHeight = 90;
+        var code = Input(running.Invitation.Encode()); sharedCode = code; code.IsReadOnly = true; code.TextWrapping = TextWrapping.Wrap; code.MinHeight = 90;
         Field(body, "邀请代码", code);
         if (running.Invitation.SupportsAssistedConnection)
             body.Children.Add(Text("此邀请需要 1.5.4-alpha-3 或更新的兼容客户端。加入者无需安装房主组件。", 11));
@@ -353,7 +384,9 @@ internal sealed class EstatePeerWindow : Window
             message.Text = AppLocalization.Literal("邀请已刷新。旧代码不能用于新加入，已加入成员可以继续比赛和重连。");
         }));
         body.Children.Add(invitationActions);
-        if (running.Invitation.SupportsUdp)
+        connectivityStatus = Text(running.ConnectivityVersion > 0 ? "尚未确认网关映射；继续尝试已有直连地址。" : "当前组件不支持新的连通性诊断与映射，请更新组件。", 11);
+        body.Children.Add(Disclosure("连接状态", connectivityStatus));
+        if (running.Invitation.SupportsUdp || running.Invitation.SupportsAssistedConnection)
         {
             var receipts = new StackPanel();
             receipts.Children.Add(Text("玩家无法直接加入时，将连接回执粘贴到这里，再通知对方继续连接。", 12));

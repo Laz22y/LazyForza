@@ -35,6 +35,8 @@ public sealed class PeerRoom : IAsyncDisposable
     private int disposed;
     private PeerQuicHost? udp;
     private PeerReverseHost? reverse;
+    private PeerCandidateMonitor? network;
+    public int MappedEndpoints => network?.MappedEndpoints ?? 0;
     private PeerWebControl? webControl;
     private readonly RaceWebSocketRegistry webSockets = new();
     public RaceCoordinator Coordinator { get; }
@@ -192,7 +194,21 @@ public sealed class PeerRoom : IAsyncDisposable
             RoomId = Invitation.RoomId, Generation = Invitation.Generation, ExpiresAt = Invitation.ExpiresAt,
             PublicKeySha256 = Invitation.PublicKeySha256, Candidates = candidates, SupportsUdp = udp is not null, SupportsAssistedConnection = true
         };
+        network = new PeerCandidateMonitor(Port, true, udp is not null, settings.AutomaticPortMapping, UpdateCandidates,
+            settings.ExternalAddress, settings.ExternalPort);
+        if (OperatingSystem.IsWindows()) udp?.UpdateCandidates(candidates);
         tickTask = Task.Run(TickAsync);
+    }
+
+    private void UpdateCandidates(IReadOnlyList<PeerEndpoint> candidates)
+    {
+        lock (identitySync)
+        {
+            Invitation = new PeerInvitation { RoomId = Invitation.RoomId, Generation = Invitation.Generation,
+                ExpiresAt = Invitation.ExpiresAt, PublicKeySha256 = Invitation.PublicKeySha256, Candidates = candidates,
+                SupportsUdp = Invitation.SupportsUdp, SupportsAssistedConnection = Invitation.SupportsAssistedConnection };
+        }
+        if (OperatingSystem.IsWindows()) udp?.UpdateCandidates(candidates);
     }
 
     public PeerHostReply Control(PeerHostCommand command)
@@ -200,6 +216,10 @@ public sealed class PeerRoom : IAsyncDisposable
         RaceCommandResult result;
         switch (command.Action)
         {
+            case "connectivity":
+                _ = long.TryParse(command.Value, out var after);
+                return new(true, Invitation: Invitation.Encode(), Port: Port, ConnectivityVersion: 1,
+                    Diagnostics: PeerDiagnostics.Snapshot(after, 24), MappedEndpoints: MappedEndpoints);
             case "openControl": return webControl is null ? new(false, "总控尚未就绪。") :
                 new(true, ControlUrl: webControl.OpenUrl(), ControlPassword: webControl.Password);
             case "controlAccess": return webControl is null ? new(false, "总控尚未就绪。") :
@@ -211,6 +231,9 @@ public sealed class PeerRoom : IAsyncDisposable
                     var useUdp = receipt.Transports.HasFlag(PeerReceiptTransport.Udp) && OperatingSystem.IsWindows() && udp is not null;
                     var useReverse = receipt.Transports.HasFlag(PeerReceiptTransport.ReverseTcp) && reverse is not null;
                     if (!useUdp && !useReverse) return new(false, "当前系统没有可用的回执连接方式。");
+                    var updatedUdp = useUdp && OperatingSystem.IsWindows() && udp!.UpdateReceipt(receipt);
+                    var updatedTcp = useReverse && reverse!.UpdateReceipt(receipt);
+                    if (updatedUdp || updatedTcp) return new(true);
                     if (useUdp && OperatingSystem.IsWindows()) udp!.Admit(receipt);
                     try { if (useReverse) reverse!.Admit(receipt); }
                     catch { if (useUdp && OperatingSystem.IsWindows()) udp!.Revoke(receipt); throw; }
@@ -226,7 +249,7 @@ public sealed class PeerRoom : IAsyncDisposable
                     Invitation = new PeerInvitation
                     {
                         RoomId = identity.RoomId, Generation = identity.Generation, ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
-                        PublicKeySha256 = Invitation.PublicKeySha256, Candidates = PeerAddresses.Collect(Port, settings.ExternalAddress, settings.ExternalPort), SupportsUdp = udp is not null, SupportsAssistedConnection = true
+                        PublicKeySha256 = Invitation.PublicKeySha256, Candidates = network?.Current ?? PeerAddresses.Collect(Port, settings.ExternalAddress, settings.ExternalPort), SupportsUdp = udp is not null, SupportsAssistedConnection = true
                     };
                     return new(true, Invitation: Invitation.Encode(), Port: Port);
                 }
@@ -466,6 +489,7 @@ public sealed class PeerRoom : IAsyncDisposable
         try { if (tickTask is not null) await tickTask; }
         finally
         {
+            if (network is not null) await network.DisposeAsync();
             if (OperatingSystem.IsWindows() && udp is not null) await udp.DisposeAsync();
             if (reverse is not null) await reverse.DisposeAsync();
             if (webControl is not null) await webControl.DisposeAsync();

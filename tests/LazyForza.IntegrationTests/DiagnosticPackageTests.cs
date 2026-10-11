@@ -68,7 +68,8 @@ public sealed class DiagnosticPackageTests
                     "telemetry.json",
                     "events.json",
                     "anomalies.json",
-                    "track-match.json"
+                    "track-match.json",
+                    "estate-peer.json"
                 },
                 names);
 
@@ -77,6 +78,12 @@ public sealed class DiagnosticPackageTests
             var anomalies = ReadText(archive, "anomalies.json");
             var trackMatch = ReadText(archive, "track-match.json");
             StringAssert.Contains(manifest, "\"schemaVersion\": 8");
+            using (var peer = JsonDocument.Parse(ReadText(archive, "estate-peer.json")))
+            {
+                Assert.AreEqual(1, peer.RootElement.GetProperty("formatVersion").GetInt32());
+                Assert.IsTrue(peer.RootElement.GetProperty("client").GetProperty("events").GetArrayLength() <= 500);
+                Assert.IsTrue(peer.RootElement.GetProperty("host").GetProperty("events").GetArrayLength() <= 500);
+            }
             using (var eventsJson = JsonDocument.Parse(events))
             {
                 Assert.IsTrue(eventsJson.RootElement.EnumerateArray().Any(item =>
@@ -115,6 +122,26 @@ public sealed class DiagnosticPackageTests
         {
             if (File.Exists(packagePath)) File.Delete(packagePath);
         }
+    }
+
+    [TestMethod]
+    public async Task PeerFailureCanBeExportedWithoutStartingTelemetry()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"peer-only-{Guid.NewGuid():N}.lfzdiag");
+        await using var capture = new DiagnosticCaptureService(new TestTelemetryFeed(), Path.GetTempPath(), _ => { });
+        LazyForza.EstatePeer.PeerDiagnostics.Record(LazyForza.EstatePeer.PeerStage.Identity,
+            LazyForza.EstatePeer.PeerOutcome.Rejected, address: System.Net.IPAddress.Parse("203.0.113.27"));
+        try
+        {
+            capture.Export(path, 15, "test");
+            using var archive = ZipFile.OpenRead(path);
+            var peer = ReadText(archive, "estate-peer.json");
+            Assert.IsFalse(peer.Contains("203.0.113.27", StringComparison.Ordinal));
+            using var json = JsonDocument.Parse(peer);
+            Assert.IsTrue(json.RootElement.GetProperty("client").GetProperty("events").GetArrayLength() > 0);
+            Assert.IsTrue(new FileInfo(path).Length < 512 * 1024);
+        }
+        finally { File.Delete(path); }
     }
 
     private static string ReadText(ZipArchive archive, string name)

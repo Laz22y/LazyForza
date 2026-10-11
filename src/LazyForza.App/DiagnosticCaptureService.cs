@@ -140,7 +140,8 @@ internal sealed class DiagnosticCaptureService : IAsyncDisposable
             ["telemetry.json"] = JsonSerializer.SerializeToUtf8Bytes(sampleSnapshot, JsonOptions),
             ["events.json"] = JsonSerializer.SerializeToUtf8Bytes(eventSnapshot, JsonOptions),
             ["anomalies.json"] = JsonSerializer.SerializeToUtf8Bytes(anomalySnapshot, JsonOptions),
-            ["track-match.json"] = JsonSerializer.SerializeToUtf8Bytes(trackMatch, JsonOptions)
+            ["track-match.json"] = JsonSerializer.SerializeToUtf8Bytes(trackMatch, JsonOptions),
+            ["estate-peer.json"] = JsonSerializer.SerializeToUtf8Bytes(new { formatVersion = 1, client = LazyForza.EstatePeer.PeerDiagnostics.Snapshot(), host = LazyForza.EstatePeer.PeerDiagnostics.HostSnapshot() }, JsonOptions)
         };
         var hashes = payloads.ToDictionary(
             pair => pair.Key,

@@ -14,7 +14,9 @@ public sealed class PeerAssistedJoin : IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private readonly SemaphoreSlim connecting = new(1, 1);
     private int disposed;
-    public PeerReceipt Receipt { get; }
+    private PeerCandidateMonitor? network;
+    public int MappedEndpoints => network?.MappedEndpoints ?? 0;
+    public PeerReceipt Receipt { get; private set; }
 
     public static bool IsSupported(PeerInvitation invitation) => invitation.SupportsAssistedConnection ||
         invitation.SupportsUdp && PeerQuicHost.IsSupported;
@@ -30,10 +32,12 @@ public sealed class PeerAssistedJoin : IAsyncDisposable
             }
             if (invitation.SupportsAssistedConnection)
             {
-                try { reverse = new(invitation, udp?.Receipt); }
+                try { reverse = new(invitation, udp?.Receipt, udp?.LocalPort); }
                 catch (SocketException) when (udp is not null) { } // The UDP port can already be occupied by another TCP app.
             }
             Receipt = reverse?.Receipt ?? udp?.Receipt ?? throw new IOException("没有可用的回执连接方式，请更新房主组件或检查网络接口。");
+            PeerDiagnostics.Record(PeerStage.Capabilities, PeerOutcome.Succeeded, transports: Receipt.Transports);
+            if (invitation.SupportsUdp && udp is null) PeerDiagnostics.Record(PeerStage.Udp, PeerOutcome.Unsupported);
         }
         catch
         {
@@ -41,6 +45,18 @@ public sealed class PeerAssistedJoin : IAsyncDisposable
             reverse?.DisposeAsync().AsTask().GetAwaiter().GetResult();
             lifetime.Dispose(); connecting.Dispose(); throw;
         }
+    }
+
+    public void MonitorCandidates(bool automaticMapping)
+    {
+        if (network is not null) return;
+        var port = reverse?.LocalPort ?? udp!.LocalPort;
+        network = new PeerCandidateMonitor(port, reverse is not null, udp is not null, automaticMapping, candidates =>
+        {
+            Receipt = Receipt with { Candidates = candidates };
+            udp?.UpdateCandidates(candidates);
+        });
+        udp?.UpdateCandidates(Receipt.Candidates);
     }
 
     public async Task<PeerConnection> ConnectAsync(CancellationToken token)
@@ -52,6 +68,7 @@ public sealed class PeerAssistedJoin : IAsyncDisposable
         {
             if (reverse is not null) tasks.Add(reverse.ConnectAsync(attempt.Token));
             if (udp is not null) tasks.Add(udp.ConnectAsync(attempt.Token));
+            var attemptId = PeerDiagnostics.Start(PeerStage.Receipt);
             var errors = new List<Exception>();
             while (tasks.Count > 0)
             {
@@ -60,10 +77,11 @@ public sealed class PeerAssistedJoin : IAsyncDisposable
                 try
                 {
                     var result = await task.ConfigureAwait(false);
+                    PeerDiagnostics.Record(PeerStage.Receipt, PeerOutcome.Succeeded, attemptId);
                     return new(result.Invitation, new(IPAddress.Parse(result.Origin.Host.Trim('[', ']')), result.Origin.Port), this);
                 }
                 catch (Exception error) when (IsAttemptError(error))
-                { errors.Add(error); }
+                { errors.Add(error); PeerDiagnostics.Record(PeerStage.Receipt, PeerDiagnostics.Failure(error, attempt.IsCancellationRequested), attemptId); }
             }
             token.ThrowIfCancellationRequested();
             lifetime.Token.ThrowIfCancellationRequested();
@@ -90,6 +108,7 @@ public sealed class PeerAssistedJoin : IAsyncDisposable
         await connecting.WaitAsync().ConfigureAwait(false);
         try
         {
+            if (network is not null) await network.DisposeAsync().ConfigureAwait(false);
             if (udp is not null) await udp.DisposeAsync().ConfigureAwait(false);
             if (reverse is not null) await reverse.DisposeAsync().ConfigureAwait(false);
         }

@@ -8,6 +8,7 @@ namespace LazyForza.Telemetry;
 public sealed class TelemetryHub : ITelemetryFeed, ILiveTelemetryConfiguration
 {
     private ITelemetrySource source;
+    private readonly TelemetryForwarder forwarder = new();
     private TelemetryOptions options;
     private StreamStatistics statistics = new();
     private readonly ConcurrentDictionary<Guid, Channel<TelemetryFrame>> subscribers = new();
@@ -28,6 +29,23 @@ public sealed class TelemetryHub : ITelemetryFeed, ILiveTelemetryConfiguration
     }
 
     public TelemetryFrame? Latest => Volatile.Read(ref latest);
+    public TelemetryForwardingOptions ForwardingOptions => forwarder.Options;
+    public TelemetryForwardingStatus ForwardingStatus => forwarder.Status;
+
+    public async ValueTask ChangeForwardingAsync(TelemetryForwardingOptions settings, CancellationToken cancellationToken)
+    {
+        await lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (settings.Enabled) TelemetryNetworkPolicy.ValidateForwarding(settings, options.Port);
+            if (settings == forwarder.Options) return;
+            await forwarder.ConfigureAsync(settings, options.Port).ConfigureAwait(false);
+            if (settings.Enabled && sourceTask is null) StartListener();
+            else if (!settings.Enabled && subscribers.IsEmpty && sourceTask is not null) await StopListenerAsync().ConfigureAwait(false);
+        }
+        finally { lifecycleLock.Release(); }
+    }
 
     public async ValueTask ChangeListenerAsync(string address, int port, CancellationToken cancellationToken)
     {
@@ -39,6 +57,7 @@ public sealed class TelemetryHub : ITelemetryFeed, ILiveTelemetryConfiguration
         {
             ObjectDisposedException.ThrowIf(disposed, this);
             if (source is not UdpTelemetrySource) throw new InvalidOperationException("The current source is not live UDP.");
+            if (forwarder.Enabled) TelemetryNetworkPolicy.ValidateForwarding(forwarder.Options, port);
             var nextOptions = options with { ListenAddress = parsedAddress.ToString(), Port = port };
             if (nextOptions == options && !sourceFailed) return;
             var previousOptions = options;
@@ -56,6 +75,7 @@ public sealed class TelemetryHub : ITelemetryFeed, ILiveTelemetryConfiguration
                 if (!releasedPrevious) await StopListenerAsync().ConfigureAwait(false);
                 source = candidate;
                 options = nextOptions;
+                forwarder.ChangeListeningPort(port);
                 statistics = new StreamStatistics();
                 Volatile.Write(ref latest, null);
                 lastError = null; sourceFailed = false;
@@ -175,6 +195,7 @@ public sealed class TelemetryHub : ITelemetryFeed, ILiveTelemetryConfiguration
     {
         Volatile.Write(ref latest, frame);
         statistics.OnPacket(frame);
+        forwarder.Publish(frame);
         foreach (var subscriber in Volatile.Read(ref subscriberSnapshot))
         {
             subscriber.Writer.TryWrite(frame);
@@ -227,7 +248,7 @@ public sealed class TelemetryHub : ITelemetryFeed, ILiveTelemetryConfiguration
             channel.Writer.TryComplete();
         }
 
-        if (!subscribers.IsEmpty)
+        if (!subscribers.IsEmpty || forwarder.Enabled)
         {
             return;
         }
@@ -235,7 +256,7 @@ public sealed class TelemetryHub : ITelemetryFeed, ILiveTelemetryConfiguration
         await lifecycleLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (!subscribers.IsEmpty || sourceTask is null)
+            if (!subscribers.IsEmpty || forwarder.Enabled || sourceTask is null)
             {
                 return;
             }
@@ -261,6 +282,7 @@ public sealed class TelemetryHub : ITelemetryFeed, ILiveTelemetryConfiguration
         }
 
         disposed = true;
+        await forwarder.DisposeAsync().ConfigureAwait(false);
         foreach (var id in subscribers.Keys)
         {
             await RemoveAsync(id).ConfigureAwait(false);

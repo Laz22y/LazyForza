@@ -55,7 +55,8 @@ public sealed class PeerInvitation
         var invitation = new PeerInvitation { RoomId = room, Generation = generation, ExpiresAt = expires,
             PublicKeySha256 = fingerprint, SupportsUdp = flags == 1, SupportsAssistedConnection = assisted, Candidates = candidates };
         invitation.Validate();
-        if (expires <= (now ?? DateTimeOffset.UtcNow)) throw new InvalidDataException("邀请代码已过期，请房主重新分享。");
+        if (expires <= (now ?? DateTimeOffset.UtcNow)) { PeerDiagnostics.Record(PeerStage.Parse, PeerOutcome.Expired); throw new InvalidDataException("邀请代码已过期，请房主重新分享。"); }
+        if (now != DateTimeOffset.MinValue) PeerDiagnostics.Record(PeerStage.Parse, PeerOutcome.Succeeded);
         return invitation;
     }
 
@@ -63,6 +64,8 @@ public sealed class PeerInvitation
     {
         if (code is null || code.Length > MaximumCodeLength) throw InvalidCode();
         code = code.Trim();
+        if (now != DateTimeOffset.MinValue) PeerDiagnostics.Record(PeerStage.Parse, PeerOutcome.Started,
+            codeFormat: code.StartsWith(AssistedPrefix, StringComparison.Ordinal) ? 3 : code.StartsWith(Prefix, StringComparison.Ordinal) ? 2 : code.StartsWith(LegacyPrefix, StringComparison.Ordinal) ? 1 : null);
         try
         {
             if (code.StartsWith(AssistedPrefix, StringComparison.Ordinal)) return ParseCompact(code, now, assisted: true);
@@ -73,7 +76,7 @@ public sealed class PeerInvitation
                 if (code.StartsWith("LFZP", StringComparison.Ordinal) && separator > 4 &&
                     int.TryParse(code.AsSpan(4, separator - 4), System.Globalization.NumberStyles.None,
                         System.Globalization.CultureInfo.InvariantCulture, out var version) && version > 3)
-                    throw new InvalidDataException("此邀请使用较新的格式，请更新客户端后重试。");
+                    { PeerDiagnostics.Record(PeerStage.Parse, PeerOutcome.Unsupported); throw new InvalidDataException("此邀请使用较新的格式，请更新客户端后重试。"); }
                 throw InvalidCode();
             }
             var encoded = code[LegacyPrefix.Length..];
@@ -103,7 +106,8 @@ public sealed class PeerInvitation
                 PublicKeySha256 = fingerprint, Candidates = candidates
             };
             invitation.Validate();
-            if (expires <= (now ?? DateTimeOffset.UtcNow)) throw new InvalidDataException("邀请代码已过期，请房主重新分享。");
+            if (expires <= (now ?? DateTimeOffset.UtcNow)) { PeerDiagnostics.Record(PeerStage.Parse, PeerOutcome.Expired); throw new InvalidDataException("邀请代码已过期，请房主重新分享。"); }
+            if (now != DateTimeOffset.MinValue) PeerDiagnostics.Record(PeerStage.Parse, PeerOutcome.Succeeded);
             return invitation;
         }
         catch (Exception error) when (error is FormatException or ArgumentException or EndOfStreamException or OverflowException)
@@ -133,5 +137,6 @@ public sealed class PeerInvitation
         };
     }
 
-    private static InvalidDataException InvalidCode() => new("邀请代码无效或损坏，请复制完整代码。");
+    private static InvalidDataException InvalidCode()
+    { PeerDiagnostics.Record(PeerStage.Parse, PeerOutcome.Invalid); return new("邀请代码无效或损坏，请复制完整代码。"); }
 }

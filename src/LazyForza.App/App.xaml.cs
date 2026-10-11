@@ -149,6 +149,8 @@ public partial class App : Application
                 store.SetAppSetting(
                     "telemetry.port",
                     initialization.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                if (initialization.DismissedPortRecommendation is not null)
+                    store.SetAppSetting("telemetry.portRecommendationDismissed", initialization.DismissedPortRecommendation);
                 startupProfileStore.Save(startupProfile);
                 initializationStateStore.MarkCompleted();
             }
@@ -176,6 +178,12 @@ public partial class App : Application
                 $"{PlaygroundOfficialTrackCatalog.DisplayName} catalog {catalogImport.Version}: " +
                 $"{catalogImport.TotalTracks} tracks available, {catalogImport.ImportedTracks} imported or refreshed.");
             log.Write($"Starting with source {source.Description}");
+            try
+            {
+                await telemetry.ChangeForwardingAsync(TelemetryForwardingSettings.Read(store.GetAppSetting(TelemetryForwardingSettings.Key)), CancellationToken.None);
+            }
+            catch (Exception error) when (error is ArgumentException or System.Net.Sockets.SocketException or System.Net.NetworkInformation.NetworkInformationException)
+            { log.Write($"Telemetry forwarding could not start: {error.GetType().Name}"); }
             diagnosticCapture = new DiagnosticCaptureService(
                 telemetry,
                 directories.Root,

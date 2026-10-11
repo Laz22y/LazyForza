@@ -15,8 +15,9 @@ public sealed record PeerHostStart(
     string TrackPackagePath,
     int SectorCount,
     int RaceLaps,
-    bool Resume);
+    bool Resume, bool AutomaticPortMapping = false);
 
 public sealed record PeerHostReply(bool Success, string? Error = null, string? Invitation = null, int Port = 0,
-    string? ControlUrl = null, string? ControlPassword = null);
+    string? ControlUrl = null, string? ControlPassword = null, int ConnectivityVersion = 0,
+    PeerDiagnosticSnapshot? Diagnostics = null, int MappedEndpoints = 0);
 public sealed record PeerHostCommand(string Action, string? Value = null, bool Force = false);

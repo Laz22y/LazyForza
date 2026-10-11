@@ -111,8 +111,6 @@
   "literal:记录圈": "Lap",
   "literal:相对中位数": "vs median",
   "settings.auto.failed": "Could not apply: {0}",
-  "literal:端口范围 1–65535，5200–5300 为保留端口。": "Port range: 1–65535. Ports 5200–5300 are reserved.",
-  "literal:请输入有效 IP 地址和端口。保留端口：5200–5300。": "Enter a valid IP address and port. Ports 5200–5300 are reserved.",
   "literal:已保存，使用 Live 模式时生效。": "Saved for Live mode.",
   "literal:数据目录已保存，重启后切换到新目录。": "Data folder saved. Restart to switch to the new folder.",
   "literal:每个组件可独立选择主题。": "Choose a theme for each widget.",
@@ -317,8 +315,10 @@
   "wizard.telemetry.waitingDetail": "Start the game or enter the driving view and keep this window open.",
   "wizard.telemetry.retry": "Listen again",
   "wizard.telemetry.invalid": "Invalid IP or port",
-  "wizard.telemetry.invalidDetail": "Enter a valid IP and port from 1–65535, excluding 5200–5300.",
+  "wizard.telemetry.invalidDetail": "Enter a valid IP address and a port from 1–65535.",
   "wizard.telemetry.endpoint": "Listening on {0}:{1}",
+  "wizard.telemetry.updating": "Updating listener settings",
+  "wizard.telemetry.pendingEndpoint": "Preparing to listen on {0}:{1}",
   "wizard.telemetry.complete": "Setup complete",
   "wizard.telemetry.completeDetail": "FH6 telemetry received · {0} km/h · Starting LazyForza",
   "wizard.telemetry.failed": "Could not start listening",
@@ -367,7 +367,7 @@
   "settings.category.telemetry": "Telemetry & recording",
   "settings.category.telemetryTab": "Telemetry",
   "settings.category.telemetryDetail": "UDP & recording",
-  "settings.category.telemetry.pageDetail": "Configure FH6 telemetry input, automatic race recording and recording files.",
+  "settings.category.telemetry.pageDetail": "Configure FH6 telemetry input and forwarding, automatic race recording and recording files.",
   "settings.category.hudDetail": "Layout & display",
   "settings.category.hud.pageDetail": "Adjust Overlay layout, widgets, opacity, motion and display timing.",
   "settings.category.maintenance": "Maintenance",
@@ -1462,7 +1462,6 @@
   ,"diagnostics.bufferStatus": "Short buffer {0} frames · Events {1} · Anomaly snapshots {2}\nExports remove user names and local paths and do not include raw UDP bytes."
   ,"diagnostics.recording.active": "Manual recording: {0:N0} frames\n{1}\n{2}"
   ,"diagnostics.recording.stopped": "Manual raw-data recording stopped.\n{0}"
-  ,"literal:请输入有效 IP 地址和 1–65535 端口，并避开 5200–5300。": "Enter a valid IP address and a port from 1–65535, excluding 5200–5300."
   ,"literal:监听设置无效": "Invalid listener settings"
   ,"literal:监听设置已保存，重启后生效。": "Listener settings saved. Restart to apply them."
   ,"literal:设置已保存": "Settings saved"
@@ -3098,4 +3097,34 @@
   ,"literal:已收到 UDP 探测，但加密握手超时。请确认双方使用新版客户端和房主组件，再点击继续连接；若仍失败，请检查防火墙或更换直连路径。": "UDP probes arrived, but the encrypted handshake timed out. Update both clients and the host component, then try Continue connecting again. If it still fails, check the firewall or try another direct path."
   ,"literal:此邀请需要 1.5.4-alpha-3 或更新的兼容客户端。加入者无需安装房主组件。": "This invitation requires client 1.5.4-alpha-3 or a newer compatible version. Joining players do not need the host component."
   ,"literal:此邀请使用较新的格式，请更新客户端后重试。": "This invitation uses a newer format. Update the client and try again."
+  ,"literal:网络地址已更新，请重新复制代码；已连接成员继续使用原身份。": "Network addresses changed. Copy the updated code; connected members keep their existing identity."
+  ,"literal:网关映射已建立；仍需对端连接确认可达。": "Gateway mapping established; the other peer still needs to connect to confirm reachability."
+  ,"literal:尚未确认网关映射；继续尝试已有直连地址。": "Gateway mapping is not confirmed. Existing direct addresses remain available."
+  ,"literal:自动申请路由器端口映射": "Request router port mapping automatically"
+  ,"literal:仅映射赛事端口，房间或连接结束后释放；不开放 Web 总控。": "Maps this race port only and releases it when the room or connection closes. The web console stays local."
+  ,"literal:连接选项": "Connection options"
+  ,"literal:连接状态": "Connection status"
+  ,"literal:当前组件不支持新的连通性诊断与映射，请更新组件。": "Update the host component to enable connectivity diagnostics and port mapping."
+  ,"literal:当前房主组件不支持自动端口映射，请更新组件或关闭该选项。": "Update the host component to use automatic port mapping, or turn this option off."
+  ,"literal:端口范围 1–65535，建议使用 2299。": "Ports 1–65535 are accepted. Port 2299 is recommended."
+  ,"literal:请输入有效 IP 地址和 1–65535 端口。": "Enter a valid IP address and a port from 1–65535."
+  ,"literal:5200–5300 可能与游戏使用的端口冲突，建议更换；仍可使用。": "Ports 5200–5300 may conflict with the game. Another port is recommended, but these ports are allowed."
+  ,"literal:遥测转发": "Telemetry forwarding"
+  ,"literal:将 Live 原始 UDP 包发送给其他软件或设备；模拟与回放不转发。": "Send original Live UDP packets to another app or device. Demo and replay data are not forwarded."
+  ,"literal:目标 IP": "Target IP"
+  ,"literal:目标 UDP 端口": "Target UDP port"
+  ,"literal:同机软件使用 127.0.0.1；外设填写其 IP。目标端口须与接收软件一致。": "Use 127.0.0.1 for an app on this PC, or the device’s IP. Match the port configured in the receiving app."
+  ,"literal:请输入有效目标 IP 地址和 1–65535 端口。": "Enter a valid target IP address and a port from 1–65535."
+  ,"literal:转发目标必须是单台设备的 IP，不能使用未指定、广播或组播地址。": "Use a single device IP. Unspecified, broadcast, and multicast targets are not supported."
+  ,"literal:转发目标不能指向本机的遥测监听端口，请更换目标端口。": "The target cannot point back to this PC’s telemetry listener. Choose another target port."
+  ,"literal:已开启": "On"
+  ,"literal:已关闭": "Off"
+  ,"literal:已保存，切换到 Live 后转发。": "Saved. Forwarding starts in Live mode."
+  ,"literal:尚未启用，请检查目标配置。": "Not active. Check the target configuration."
+  ,"literal:目标发送失败，将自动重试；遥测接收不受影响。": "Sending failed. Retrying automatically; telemetry input continues."
+  ,"literal:已启用，等待 Live 遥测。": "Enabled. Waiting for Live telemetry."
+  ,"literal:正在转发。UDP 发送成功不代表接收端已确认。": "Forwarding. UDP sends do not confirm delivery to the receiver."
+  ,"literal:当前遥测源不支持转发。": "This telemetry source does not support forwarding."
+  ,"telemetry.forwarding.counts": "Sent {0} packets · Queue drops {1} · Send errors {2}"
+  ,"literal:忽略此建议": "Dismiss recommendation"
 }

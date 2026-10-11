@@ -11,6 +11,7 @@ FH6 UDP / Deterministic Simulator / .lfztelemetry Replay
              -> LapAnalysisModule -> Track matcher/lap state -> Lap HUD state
              -> EstateRaceModule -> estate timing/network -> race HUD state
              -> Recorder -> versioned raw packet file
+             -> Live-only raw UDP forwarding -> one configured destination
         -> WPF/Win32 Overlay (render only)
         -> winsqlite3 metadata/derived-data store
 
@@ -19,7 +20,9 @@ EstateRaceModule <-> LazyForza.RaceServer protocol v2
                  <-> optional EstatePeer.Host on the host player's PC (HTTPS/WSS)
 ```
 
-`TelemetryHub` 只有存在订阅者时运行数据源；HUD/实时分析订阅是 bounded、`DropOldest` 的 latest-wins 通道。模块停用会取消自己的 Task、释放订阅并移除 HUD contribution。所有业务模块关闭后主窗口、模块管理与诊断仍能运行。
+`TelemetryHub` 在存在订阅者或开启遥测转发时运行数据源；HUD/实时分析订阅是 bounded、`DropOldest` 的 latest-wins 通道。模块停用会取消自己的 Task、释放订阅并移除 HUD contribution。所有业务模块关闭后主窗口、模块管理与诊断仍能运行。
+
+遥测转发默认关闭，由 Hub 内部的 `TelemetryForwarder` 消费已解析的 Live 原始包，保持全部 324 字节不变。独立发送任务使用容量 64 的 `DropOldest` 队列，接收热路径只入队，目标错误不反压遥测；Simulator／Replay 不发送。切换目标或关闭会取消旧发送任务并释放 socket；本机监听端口不能作为转发目标，监听重配置也检查同一约束。监听端口 5200–5300 是可忽略的建议，数值范围与实际 socket 绑定检查仍然有效。
 
 ## 项目边界
 

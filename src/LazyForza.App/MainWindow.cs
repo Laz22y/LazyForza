@@ -3200,6 +3200,7 @@ internal sealed partial class MainWindow : Window
     {
         var panel = new StackPanel();
         panel.Children.Add(BuildTelemetryListenerSettings());
+        panel.Children.Add(BuildTelemetryForwardingSettings());
         panel.Children.Add(BuildRecordingSettingsCard());
         panel.Children.Add(AnalysisCard(new LapStoragePanel(store, AppLocalization.CurrentLanguage == "en")));
         return panel;
@@ -3301,7 +3302,7 @@ internal sealed partial class MainWindow : Window
     {
         SettingsCategory.Telemetry => AppLocalization.Text(
             "settings.category.telemetry.pageDetail",
-            "配置 FH6 遥测监听、比赛自动录制与录制文件管理。"),
+            "配置 FH6 遥测监听与转发、比赛自动录制和录制文件管理。"),
         SettingsCategory.Hud => AppLocalization.Text(
             "settings.category.hud.pageDetail",
             "调整 Overlay 布局、显示部件、透明度、动态与显示时序。"),

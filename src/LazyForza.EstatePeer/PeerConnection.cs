@@ -64,6 +64,8 @@ public sealed class PeerConnection(PeerInvitation invitation, PeerEndpoint endpo
 
     public static async Task<PeerConnection> FindAsync(PeerInvitation invitation, CancellationToken cancellationToken)
     {
+        var attempt = PeerDiagnostics.Start(PeerStage.Tcp);
+        var winnerFound = 0;
         using var attempts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         attempts.CancelAfter(TimeSpan.FromSeconds(10));
         var tasks = invitation.Candidates.Select((candidate, index) => ProbeAsync(candidate, index)).ToList();
@@ -73,7 +75,8 @@ public sealed class PeerConnection(PeerInvitation invitation, PeerEndpoint endpo
             {
                 var completed = await Task.WhenAny(tasks).ConfigureAwait(false);
                 tasks.Remove(completed);
-                if (await completed.ConfigureAwait(false) is { } result) return result;
+                if (await completed.ConfigureAwait(false) is { } result)
+                { Interlocked.Exchange(ref winnerFound, 1); PeerDiagnostics.Record(PeerStage.Identity, PeerOutcome.Succeeded, attempt); return result; }
             }
             cancellationToken.ThrowIfCancellationRequested();
             throw new IOException("未找到可达的房主。请检查双方 IPv6、房主端口映射和防火墙；此模式没有中继后备。");
@@ -86,6 +89,7 @@ public sealed class PeerConnection(PeerInvitation invitation, PeerEndpoint endpo
 
         async Task<PeerConnection?> ProbeAsync(PeerEndpoint candidate, int index)
         {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 await Task.Delay(index * 180, attempts.Token).ConfigureAwait(false);
@@ -94,11 +98,14 @@ public sealed class PeerConnection(PeerInvitation invitation, PeerEndpoint endpo
                 client.Timeout = TimeSpan.FromSeconds(4);
                 client.MaxResponseContentBufferSize = 4096;
                 var identity = await client.GetFromJsonAsync<PeerIdentity>("peer/identity", attempts.Token).ConfigureAwait(false);
-                return identity is not null && identity.RoomId == invitation.RoomId &&
-                    identity.Generation == invitation.Generation && identity.ProtocolVersion == 2 ? connection : null;
+                if (identity is not null && identity.RoomId == invitation.RoomId &&
+                    identity.Generation == invitation.Generation && identity.ProtocolVersion == 2) return connection;
+                PeerDiagnostics.Record(PeerStage.Identity, PeerOutcome.Rejected, attempt, candidate.Address);
+                return null;
             }
             catch (Exception error) when (error is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException or IOException)
             {
+                PeerDiagnostics.Record(PeerStage.Tcp, PeerDiagnostics.Failure(error, cancellationToken.IsCancellationRequested || Volatile.Read(ref winnerFound) != 0), attempt, candidate.Address, System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
                 return null;
             }
         }
