@@ -107,7 +107,7 @@ RaceServer 0.6.0 将项目、规则与赛程、赛果记录分开管理。一项
 
 ### 地产赛事直连（实验）
 
-[地产赛事直连房间（实验）](docs/ESTATE_PEER_ROOMS.md)由房主在本机运行赛事服务，其他成员使用邀请代码和密码加入。**直连需要双方的网络环境支持，参与者之间须有可达的 TCP 或 UDP／QUIC 通路。** 客户端 1.5.4 配套房主组件 0.6.0-r5，加入者无需安装组件。连接失败后可交换回执尝试 UDP 与反向 TCP；UDP／QUIC 需要支持 QUIC 的 Windows 11，反向 TCP 需要加入者有可入站地址。房主组件通过 [GitHub](https://github.com/Laz22y/LazyForza.Components/releases)／[GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases) 按需下载并独立更新，支持签名校验、离线导入、项目备份与恢复上一版。
+[地产赛事直连房间（实验）](docs/ESTATE_PEER_ROOMS.md)由房主在本机运行赛事服务，其他成员使用邀请代码和密码加入。**直连需要双方的网络环境支持，参与者之间须有可达的 TCP 或 UDP／QUIC 通路。** 客户端 1.5.4 配套房主组件 0.6.0-r6，加入者无需安装组件。连接失败后可交换回执尝试 UDP 与反向 TCP；UDP／QUIC 需要支持 QUIC 的 Windows 11，反向 TCP 需要加入者有可入站地址。房主组件通过 [GitHub](https://github.com/Laz22y/LazyForza.Components/releases)／[GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases) 按需下载并独立更新，支持签名校验、离线导入、项目备份与恢复上一版。
 
 ## 本地构建
 
@@ -226,7 +226,7 @@ RaceServer 0.6.0 separates event projects, rules and schedules, and results for 
 
 ### Direct estate races (experimental)
 
-[Experimental direct rooms](docs/ESTATE_PEER_ROOMS.md) run the race service on the host computer; other participants join with an invitation code and password. **Both networks must support a reachable TCP or UDP/QUIC path.** Client 1.5.4 uses host component 0.6.0-r5, downloaded only by hosts. A connection receipt can try UDP and reverse TCP after an ordinary connection fails. UDP/QUIC requires QUIC-capable Windows 11 on both ends; reverse TCP requires an incoming path to the joining player. The component updates independently through [GitHub](https://github.com/Laz22y/LazyForza.Components/releases) or [GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases), with signed manifests, offline import, project backups and rollback.
+[Experimental direct rooms](docs/ESTATE_PEER_ROOMS.md) run the race service on the host computer; other participants join with an invitation code and password. **Both networks must support a reachable TCP or UDP/QUIC path.** Client 1.5.4 uses host component 0.6.0-r6, downloaded only by hosts. A connection receipt can try UDP and reverse TCP after an ordinary connection fails. UDP/QUIC requires QUIC-capable Windows 11 on both ends; reverse TCP requires an incoming path to the joining player. The component updates independently through [GitHub](https://github.com/Laz22y/LazyForza.Components/releases) or [GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases), with signed manifests, offline import, project backups and rollback.
 
 ### Development
 
