@@ -185,6 +185,8 @@ public sealed class PeerPathTests
         Assert.IsTrue(room.Coordinator.Snapshot().Participants.Any(item => item.Id == accepted.ParticipantId));
         await PeerTests.Send(socket, RaceMessageTypes.Leave, new { });
         _ = await PeerTests.Receive(socket, RaceMessageTypes.Left);
+        await socket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, string.Empty, timeout.Token);
+        Assert.AreEqual(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, socket.CloseStatus);
     }
 
     [TestMethod]

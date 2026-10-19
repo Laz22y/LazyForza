@@ -181,6 +181,8 @@ public sealed class PeerTests
         Assert.IsTrue(room.Coordinator.Snapshot().Participants.Any(item => item.Id == accepted.ParticipantId));
         await Send(socket, RaceMessageTypes.Leave, new { });
         _ = await Receive(socket, RaceMessageTypes.Left);
+        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, timeout.Token);
+        Assert.AreEqual(WebSocketCloseStatus.NormalClosure, socket.CloseStatus, "Leaving must finish the WebSocket close handshake after its acknowledgement.");
     }
 
     [TestMethod]
@@ -281,6 +283,9 @@ public sealed class PeerTests
         Assert.AreEqual("observerReadOnly", error.Code);
         await Send(driver, RaceMessageTypes.Leave, new { });
         _ = await Receive(driver, RaceMessageTypes.Left);
+        using var closeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await driver.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, closeTimeout.Token);
+        Assert.AreEqual(WebSocketCloseStatus.NormalClosure, driver.CloseStatus);
         Assert.IsTrue(room.Coordinator.Snapshot().Participants.All(participant => participant.Id != accepted.ParticipantId));
     }
 

@@ -11,6 +11,7 @@ internal sealed class PeerSocket : IAsyncDisposable
     private readonly SemaphoreSlim wake = new(0, 1);
     private readonly Task sending;
     private byte[]? snapshot;
+    private int closing;
 
     public PeerSocket(WebSocket socket, CancellationToken token)
     {
@@ -21,6 +22,7 @@ internal sealed class PeerSocket : IAsyncDisposable
 
     public void Snapshot(byte[] value)
     {
+        if (Volatile.Read(ref closing) != 0) return;
         Interlocked.Exchange(ref snapshot, value);
         Signal();
     }
@@ -56,6 +58,7 @@ internal sealed class PeerSocket : IAsyncDisposable
                     try { await WriteAsync(outgoing.Bytes); outgoing.Sent.TrySetResult(); }
                     catch { outgoing.Sent.TrySetCanceled(); throw; }
                 }
+                if (Volatile.Read(ref closing) != 0) return;
                 if (Interlocked.Exchange(ref snapshot, null) is { } latest) await WriteAsync(latest);
             }
         }
@@ -72,6 +75,18 @@ internal sealed class PeerSocket : IAsyncDisposable
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(2));
         await socket.SendAsync(bytes, WebSocketMessageType.Text, true, timeout.Token);
+    }
+
+    public async Task CloseAsync()
+    {
+        Interlocked.Exchange(ref closing, 1);
+        commands.Writer.TryComplete();
+        Signal();
+        await sending;
+        // Stop the single sender before closing, and let the last reliable message reach the peer.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, timeout.Token);
     }
 
     public async ValueTask DisposeAsync()

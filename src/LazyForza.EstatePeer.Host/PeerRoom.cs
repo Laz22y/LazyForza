@@ -342,6 +342,7 @@ public sealed class PeerRoom : IAsyncDisposable
                             identity = updated;
                         }
                         await peer.SendAsync(Message(RaceMessageTypes.Left, new { }));
+                        await peer.CloseAsync();
                     }
                     break;
                 }
