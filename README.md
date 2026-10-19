@@ -8,7 +8,7 @@
 
 ## 简体中文
 
-当前正式版：[`1.5.3 · Radio Check`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3)）。地产赛事推荐搭配 RaceServer `0.6.0`，使用协议 v2。
+当前正式版：[`1.5.4 · Grid Link / 赛道相连`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.4)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.4)）。地产赛事推荐搭配 RaceServer `0.6.0`，使用协议 v2。
 
 <p align="center">
   <a href="https://laz22y.github.io/LazyForza/">官网</a> ·
@@ -19,7 +19,7 @@
 
 LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、不注入 DLL、不修改游戏进程。设置、圈速、车辆学习和录制默认保存在本机。
 
-1.5.3「Radio Check」新增语音比赛工程师和弯道分析，更新主窗口与设置体验，并改进维修区计圈及赛事连接。
+1.5.4「赛道相连 / Grid Link」增加地产赛事直连、按场次整理的圈记录和遥测转发，并完善记录管理、语音控制与关于页。
 
 ## 功能
 
@@ -105,6 +105,10 @@ LazyForza.App.exe --data-dir "D:\LazyForza_Data"
 
 RaceServer 0.6.0 将项目、规则与赛程、赛果记录分开管理。一项目对应一场赛事，准备新一场保留旧赛果并释放离线占位；客户端主动退出房间后释放身份与名额，暂时掉线可恢复原身份。原生服务端支持重启恢复，进行中的赛事等待管理员确认后续赛。部署与升级步骤见 [RaceServer 说明](https://github.com/Laz22y/LazyForza.RaceServer#原生重启恢复)。
 
+### 地产赛事直连（实验）
+
+[地产赛事直连房间（实验）](docs/ESTATE_PEER_ROOMS.md)由房主在本机运行赛事服务，其他成员使用邀请代码和密码加入。**直连需要双方的网络环境支持，参与者之间须有可达的 TCP 或 UDP／QUIC 通路。** 客户端 1.5.4 配套房主组件 0.6.0-r5，加入者无需安装组件。连接失败后可交换回执尝试 UDP 与反向 TCP；UDP／QUIC 需要支持 QUIC 的 Windows 11，反向 TCP 需要加入者有可入站地址。房主组件通过 [GitHub](https://github.com/Laz22y/LazyForza.Components/releases)／[GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases) 按需下载并独立更新，支持签名校验、离线导入、项目备份与恢复上一版。
+
 ## 本地构建
 
 需要 Windows 10/11 x64、.NET SDK 9 和 PowerShell 7：
@@ -126,8 +130,6 @@ dotnet run --project src/LazyForza.App/LazyForza.App.csproj -- --replay "C:\path
 
 ## 开发资料
 
-预览版提供[地产赛事直连房间（实验）](docs/ESTATE_PEER_ROOMS.md)：加入能力内置，房主组件按需安装，比赛只在参与者之间通信。1.5.4-alpha-3 配合房主组件 0.6.0-r3，可通过连接回执同时尝试 UDP 与反向 TCP，并改善多网卡、端口变化和小报文路径的处理。新版邀请需要房主和加入者使用配套客户端；反向 TCP 仍需玩家具有可入站地址。房主组件通过独立的 [GitHub](https://github.com/Laz22y/LazyForza.Components/releases)／[GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases) 分发仓库更新，编号跟随服务端版本并带组件修订号；支持签名校验、离线导入、升级前备份及恢复上一版本。完整公网联机和真实 FH6 多机验证尚未完成。
-
 GPT-5.6 Sol 参与了此前版本的开发。1.5.3 版本起由 GPT-6 Astra 开发。
 
 - [Coding Agent 开发入口](AGENTS.md)
@@ -147,11 +149,11 @@ FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与
 
 ## English
 
-Current stable release: [`1.5.3 · Radio Check`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.3) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.3)). RaceServer `0.6.0` is recommended for estate racing, using protocol v2.
+Current stable release: [`1.5.4 · Grid Link / 赛道相连`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.4) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.4)). RaceServer `0.6.0` is recommended for estate racing, using protocol v2.
 
 LazyForza is a local telemetry, driving-analysis and estate-racing tool for Forza Horizon 6. It uses only official FH6 UDP Data Out: no game-memory access, DLL injection or game-process modification. Settings, laps, vehicle learning and recordings stay on your PC by default.
 
-Version 1.5.3, Radio Check, adds a race engineer and corner analysis, refreshes the main window and settings, and improves pit-lane timing and race connections.
+Version 1.5.4, Grid Link, adds direct estate races, session-based lap records and telemetry forwarding, with improved record management, speech controls and About.
 
 ### Features
 
@@ -221,6 +223,10 @@ See the [complete documentation](https://laz22y.github.io/LazyForza/docs/) for s
 [LazyForza.RaceServer](https://github.com/Laz22y/LazyForza.RaceServer) is the independent estate-racing server. It provides 1–12 driver slots plus observers, practice, multi-session qualifying, races, stable gaps, flags, penalties, collision investigations, optional disconnected-lap recovery, pit lanes, teams, hosted track files and archived session results. The client can save frequently used servers and test reachability and protocol compatibility before joining. Race Control supports separate super-admin, administrator and steward accounts, warning-only pre-race checks, reusable rule templates and event packages, and token-protected public live timing. Native Windows/Linux/macOS packages and a Cloudflare Durable Objects implementation are available.
 
 RaceServer 0.6.0 separates event projects, rules and schedules, and results for consecutive events. Explicit departure releases slots and identities; temporary disconnections retain recovery. Native servers restore saved races after a restart and wait for administrator confirmation to resume. RaceServer is not required for the live HUD or lap analysis. Read the [deployment and connection guide](https://laz22y.github.io/LazyForza/docs/#race-server) before hosting or upgrading a server.
+
+### Direct estate races (experimental)
+
+[Experimental direct rooms](docs/ESTATE_PEER_ROOMS.md) run the race service on the host computer; other participants join with an invitation code and password. **Both networks must support a reachable TCP or UDP/QUIC path.** Client 1.5.4 uses host component 0.6.0-r5, downloaded only by hosts. A connection receipt can try UDP and reverse TCP after an ordinary connection fails. UDP/QUIC requires QUIC-capable Windows 11 on both ends; reverse TCP requires an incoming path to the joining player. The component updates independently through [GitHub](https://github.com/Laz22y/LazyForza.Components/releases) or [GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases), with signed manifests, offline import, project backups and rollback.
 
 ### Development
 

@@ -5,10 +5,10 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Version>1.5.3</Version>
+    <Version>1.5.4</Version>
     <!-- Release names belong to an exact version; version overrides must not inherit an older name. -->
-    <ReleaseNameZh Condition="'$(Version)' == '1.5.3'">Radio Check</ReleaseNameZh>
-    <ReleaseNameEn Condition="'$(Version)' == '1.5.3'">Radio Check</ReleaseNameEn>
+    <ReleaseNameZh Condition="'$(Version)' == '1.5.4'">赛道相连</ReleaseNameZh>
+    <ReleaseNameEn Condition="'$(Version)' == '1.5.4'">Grid Link</ReleaseNameEn>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\LazyForza.ico</ApplicationIcon>
   </PropertyGroup>

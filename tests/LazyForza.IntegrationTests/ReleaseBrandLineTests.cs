@@ -221,8 +221,8 @@ public sealed class ReleaseBrandLineTests
     [TestMethod]
     public void BuildMetadataHasTheRequestedBilingualReleaseName()
     {
-        Assert.AreEqual("Radio Check", ApplicationVersionInfo.ReleaseNameForLanguage("zh-Hans"));
-        Assert.AreEqual("Radio Check", ApplicationVersionInfo.ReleaseNameForLanguage("en"));
+        Assert.AreEqual("赛道相连", ApplicationVersionInfo.ReleaseNameForLanguage("zh-Hans"));
+        Assert.AreEqual("Grid Link", ApplicationVersionInfo.ReleaseNameForLanguage("en"));
     }
 
     [TestMethod]
