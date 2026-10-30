@@ -2,6 +2,8 @@
 
 这个临时工具用于分别采集 Forza Horizon 5 墨西哥主地图、Hot Wheels Park 和 Sierra Nueva 的官方 Data Out 坐标，以判断不同地图的坐标范围是否重叠及其跨会话稳定性。
 
+已采集的三地图原始样本及数据说明见 [2026-08-28 数据集](../../datasets/fh5-map-probe/2026-08-28/README.md)，包含坐标 CSV、人工地标、采集摘要和原始 UDP 包。
+
 ## 使用方法
 
 1. 退出 LazyForza 主程序，启动本工具。
