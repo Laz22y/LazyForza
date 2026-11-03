@@ -42,8 +42,9 @@ internal sealed partial class MainWindow
         enabled.Checked += (_, _) => RefreshEnabledText();
         enabled.Unchecked += (_, _) => RefreshEnabledText();
         RefreshEnabledText();
-        Grid.SetColumn(enabled, 1);
-        header.Children.Add(enabled);
+        var enabledWithPin = WithQuickSettingPin(enabled, SidebarQuickSettings.AutomaticRecording);
+        Grid.SetColumn(enabledWithPin, 1);
+        header.Children.Add(enabledWithPin);
         panel.Children.Add(header);
 
         var choices = new Grid { Margin = new Thickness(0, 16, 0, 8) };

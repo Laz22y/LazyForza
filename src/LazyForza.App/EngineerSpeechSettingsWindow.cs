@@ -6,7 +6,7 @@ using LazyForza.Speech;
 namespace LazyForza.App;
 
 /// <summary>Owned settings window; draft changes and API requests end when the window closes.</summary>
-internal sealed partial class EngineerSpeechSettingsWindow : Window
+internal sealed partial class EngineerSpeechSettingsWindow : AppWindow
 {
     private readonly bool english;
     private readonly CancellationTokenSource lifetime = new();

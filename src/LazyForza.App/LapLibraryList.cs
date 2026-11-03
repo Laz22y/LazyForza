@@ -78,15 +78,15 @@ internal sealed class LapLibraryRow : INotifyPropertyChanged
         else Time = "—";
         Badges = string.Join(" · ", new[] { lap.Annotation.IsFavorite ? AppLocalization.Literal("收藏") : null,
             lap.Annotation.IsReference ? AppLocalization.Literal("固定参考") : null,
-            !lap.IsValid ? AppLocalization.Literal("无效") : null }.Where(value => value is not null));
+            !lap.IsValid ? AppLocalization.Literal(RecordedLapText.IsPartial(lap.InvalidReason) ? "未完成" : "无效") : null }.Where(value => value is not null));
         TimeBrush = (Brush)Application.Current.Resources[!lap.IsValid ? "DangerBrush" : historicalBest ? "PurpleBrush" : lap.Annotation.IsReference ? "AccentBrush" : "TextBrush"];
         Search = $"{Name} {Detail} {lap.Vehicle.CarOrdinal} {lap.Annotation.Notes} {VehicleNameCatalog.TryGetName(lap.Vehicle.CarOrdinal)}";
-        Tooltip = string.Join("\n", new[] { Name, Detail, lap.Annotation.Notes, lap.InvalidReason }.Where(value => !string.IsNullOrEmpty(value)));
+        Tooltip = string.Join("\n", new[] { Name, Detail, lap.Annotation.Notes, RecordedLapText.Reason(lap.InvalidReason) }.Where(value => !string.IsNullOrEmpty(value)));
         Tooltip = string.Join("\n", new[] { Badges, historicalBest ? AppLocalization.Literal("同等级最快") : null, Tooltip,
             string.Join("  ", lap.Segments.Select(segment => $"S{segment.Index + 1} {segment.TimeSeconds:0.000} s")) }.Where(value => !string.IsNullOrEmpty(value)));
         if (AppLocalization.CurrentLanguage == "en")
             Badges = string.Join(" · ", new[] { lap.Annotation.IsFavorite ? "★" : null,
-                lap.Annotation.IsReference ? "REF" : null, !lap.IsValid ? "Invalid" : null }.Where(value => value is not null));
+                lap.Annotation.IsReference ? "REF" : null, !lap.IsValid ? RecordedLapText.IsPartial(lap.InvalidReason) ? "Incomplete" : "Invalid" : null }.Where(value => value is not null));
         SelectCommand = new LapAction(() =>
         {
             if (IsChosen) selected.Remove(lap.Id);

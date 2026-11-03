@@ -231,7 +231,9 @@ internal sealed partial class MainWindow
         volumeLabel.VerticalAlignment = VerticalAlignment.Center;
         value.VerticalAlignment = VerticalAlignment.Center;
         controls.Children.Add(volumeLabel);
-        controls.Children.Add(volume); controls.Children.Add(value); controls.Children.Add(mute);
+        controls.Children.Add(volume); controls.Children.Add(value);
+        controls.Children.Add(CreateQuickSettingPin(SidebarQuickSettings.Volume));
+        controls.Children.Add(WithQuickSettingPin(mute, SidebarQuickSettings.Mute));
         engineerPreviewButton = new Button
         {
             Content = EngineerText("试听", "Preview"), Padding = new Thickness(12, 5, 12, 5),

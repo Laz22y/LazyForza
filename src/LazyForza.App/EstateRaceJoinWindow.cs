@@ -10,7 +10,7 @@ using LazyForza.Modules.EstateRace;
 
 namespace LazyForza.App;
 
-internal sealed class EstateRaceJoinWindow : Window
+internal sealed class EstateRaceJoinWindow : AppWindow
 {
     private static readonly FontFamily UiFont = new("Microsoft YaHei UI");
     private static readonly (string Name, string Value)[] Palette =

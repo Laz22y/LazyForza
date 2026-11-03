@@ -260,7 +260,7 @@ public partial class App : Application
                 ShowMainWindow,
                 () => ExitApplication());
             if (captureDirectory is null && recordSeconds is null)
-                _ = ((MainWindow)MainWindow).CheckForUpdatesOnStartupAsync();
+                _ = ((MainWindow)MainWindow).CheckStartupUpdatesAsync();
             if (captureDirectory is not null)
             {
                 _ = CaptureQaAsync(

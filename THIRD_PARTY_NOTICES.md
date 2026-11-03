@@ -31,11 +31,14 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 - `https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f`
 - 文件：`Forza Horizon 6 Car Ordinals.json`
-- 当前内置修订：`edd5ac8dbb000c024cd2c6359140feb21d609ba9`
+- 发行包内置修订、更新时间与车辆数量见 `BUILDINFO.txt` 的 `VehicleNameCatalog` 项。
 - 快照只包含车辆编号与名称映射，并附带来源、作者、修订和更新时间元数据。
 
-该数据不是 Playground Games 或 Xbox 的官方资料。LazyForza 在运行时不会联网抓取此
-Gist；维护者仅通过 `scripts/Update-VehicleNameCatalog.ps1` 显式生成、审核和提交新的离线
-快照。本项目的 MIT License 不改变该社区数据来源及其作者所保留的权利。
+该数据不是 Playground Games 或 Xbox 的官方资料。LazyForza 启动时通过 GitHub Gist API
+检查修订元数据，用户确认后下载指定修订的名称数据并缓存到当前数据目录。用户可稍后更新或
+忽略该修订；离线或更新失败时沿用有效缓存或内置快照。打包时通过
+`scripts/Update-VehicleNameCatalog.ps1` 下载并校验固定修订；获取失败时使用经过校验的仓库快照。
+源码内的兜底快照由维护者显式更新。本项目的 MIT License
+不改变该社区数据来源及其作者所保留的权利。
 
 Forza、Forza Horizon、Xbox 和相关商标属于其各自权利人。LazyForza 不是官方 Forza 产品，HUD 参考不包含 Forza/Xbox 商标。

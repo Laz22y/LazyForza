@@ -136,7 +136,7 @@ internal static class AppDialog
         };
 }
 
-internal sealed class AppDialogWindow : Window
+internal sealed class AppDialogWindow : AppWindow
 {
     private readonly MessageBoxResult safeResult;
 

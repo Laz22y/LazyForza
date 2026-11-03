@@ -10,8 +10,11 @@ internal static class SidebarQuickSettings
     internal const string ShiftIndicators = "shiftIndicators";
     internal const string HudOpacity = "hudOpacity", EstateBackdropOpacity = "estateBackdropOpacity";
     internal const string AutomaticRecording = "automaticRecording";
+    internal const string HudProfiles = "hudProfiles";
+    internal const string ContinuousDelta = "continuousDelta", DeltaComparison = "deltaComparison";
+    internal const string RecordUnmatchedTracks = "recordUnmatchedTracks";
     internal static readonly string[] Available =
-        [Mute, ShiftIndicators, ShiftRecommendations, Volume, HudOpacity, EstateBackdropOpacity, AutomaticRecording, Motion];
+        [Mute, ShiftIndicators, HudProfiles, ContinuousDelta, DeltaComparison, RecordUnmatchedTracks, ShiftRecommendations, Volume, HudOpacity, EstateBackdropOpacity, AutomaticRecording, Motion];
     internal static string[] Default => [Mute, ShiftIndicators];
 
     internal static string[] Load(string? json)

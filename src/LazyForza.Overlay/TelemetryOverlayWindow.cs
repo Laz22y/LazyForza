@@ -1603,20 +1603,25 @@ internal sealed partial class HudSurface : FrameworkElement
 
     private void DrawCumulativeLapDelta(DrawingContext dc, Modules.LapAnalysis.LapHudState state)
     {
-        if (state.CumulativeHistoricalDeltaSeconds is not double delta || !double.IsFinite(delta)) return;
-        var faster = delta < -0.0005;
-        var slower = delta > 0.0005;
-        var color = faster
-            ? BrushOf(0x54, 0xE0, 0x91)
-            : slower
-                ? BrushOf(0xF5, 0xC8, 0x4B)
-                : BrushOf(0xF8, 0xFA, 0xFC);
-        var sign = slower ? "+" : faster ? "−" : "±";
-        var value = $"{sign}{Math.Abs(delta):0.000} s";
-        Text(dc, value, ActualWidth * 0.5 + 1, ActualHeight * 0.18 + 1,
-            ActualHeight * 0.034, BrushOf(0x00, 0x00, 0x00, 0.8), TextAlignment.Center, true);
-        Text(dc, value, ActualWidth * 0.5, ActualHeight * 0.18,
-            ActualHeight * 0.034, color, TextAlignment.Center, true);
+        if (state.ContinuousDeltaEnabled)
+            DrawDelta(state.ContinuousDeltaSeconds, OverlayTextLocalization.Text("实时"), .125, .034);
+        if (state.CumulativeHistoricalDeltaSeconds is { } split && double.IsFinite(split))
+            DrawDelta(split, state.ContinuousDeltaEnabled
+                ? OverlayTextLocalization.Text(state.CumulativeDeltaIsCompletedLap ? "整圈" : "分段") : "", .18,
+                state.ContinuousDeltaEnabled ? .025 : .034);
+
+        void DrawDelta(double? seconds, string label, double y, double fontSize)
+        {
+            var valid = seconds is { } number && double.IsFinite(number);
+            var delta = valid ? seconds!.Value : 0;
+            var faster = delta < -.0005; var slower = delta > .0005;
+            var color = faster ? BrushOf(0x54, 0xE0, 0x91) : slower ? BrushOf(0xF5, 0xC8, 0x4B) : BrushOf(0xF8, 0xFA, 0xFC);
+            var value = valid ? $"{(slower ? "+" : faster ? "−" : "±")}{Math.Abs(delta):0.000} s" : "—";
+            if (label.Length > 0) value = label + "  " + value;
+            Text(dc, value, ActualWidth * .5 + 1, ActualHeight * y + 1, ActualHeight * fontSize,
+                BrushOf(0x00, 0x00, 0x00, .8), TextAlignment.Center, true);
+            Text(dc, value, ActualWidth * .5, ActualHeight * y, ActualHeight * fontSize, color, TextAlignment.Center, true);
+        }
     }
 
     private static void DrawEllipticalArc(DrawingContext dc, Point center, double radiusX, double radiusY, double startDegrees, double endDegrees, Brush brush, double thickness, int steps)

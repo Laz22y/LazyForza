@@ -99,7 +99,11 @@ internal sealed partial class MainWindow
                 laps[0].SectorSchemaVersion,
                 playerCode,
                 laps,
-                lifetimeCancellation.Token);
+                lifetimeCancellation.Token,
+                saved.Track.CatalogKind == TrackCatalogKind.UserCustom && saved.Track.TimingKind == TrackTimingKind.GameEvent
+                    && laps.All(lap => lap.TrackRevision == LapTrackRevision.Create(saved.Track)) ? saved.Track : null,
+                saved.Track.CatalogKind == TrackCatalogKind.UserCustom && saved.Track.TimingKind == TrackTimingKind.GameEvent
+                    && laps.All(lap => lap.TrackRevision == LapTrackRevision.Create(saved.Track)) ? saved.Sectors : null);
             AppDialog.Show(
                 this,
                 AppLocalization.Format("lap.exchange.exported", "已导出 {0} 圈：\n{1}", laps.Length, dialog.FileName),
@@ -148,12 +152,20 @@ internal sealed partial class MainWindow
             var package = await LapAnalysisExchangeFile.ReadAsync(
                 sourcePath,
                 lifetimeCancellation.Token);
-            if (store.LoadTrack(package.TrackId) is not { } saved)
+            var localRoute = store.LoadTrack(package.TrackId);
+            var embeddedRoute = package.Route is { } route && package.Sectors is { } embeddedSectors
+                ? (Track: route with { IsRecordOnly = true }, Sectors: embeddedSectors)
+                : ((TrackTemplate Track, IReadOnlyList<SectorDefinition> Sectors)?)null;
+            if ((localRoute ?? embeddedRoute) is not { } saved)
                 throw new InvalidOperationException(
                     AppLocalization.Format(
                         "lap.exchange.missingTrack",
                         "本机没有“{0}”的赛道数据。请先导入或录入对应赛道。",
                         package.TrackName));
+            if (embeddedRoute is { } embedded &&
+                (embedded.Track.Source != CurrentTrackSource || localRoute is { } existing &&
+                    LapTrackRevision.Create(existing.Track) != LapTrackRevision.Create(embedded.Track)))
+                throw new InvalidOperationException(AppLocalization.Literal("圈速文件的路线来源或版本与本地数据不一致。"));
             if (saved.Track.Direction != package.Direction ||
                 saved.Sectors.All(sector => sector.SectorSchemaVersion != package.SectorSchemaVersion))
                 throw new InvalidOperationException(AppLocalization.Text(
@@ -188,6 +200,7 @@ internal sealed partial class MainWindow
                         lap.PlayerCode ?? package.ExportedByPlayerCode))
                 })
                 .ToArray();
+            if (localRoute is null) store.SaveTrack(saved.Track, saved.Sectors);
             foreach (var lap in imported) store.SaveLap(lap);
 
             if (module.Snapshot is not null)

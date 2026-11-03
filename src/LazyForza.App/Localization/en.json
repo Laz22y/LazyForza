@@ -1,4 +1,29 @@
 {
+  "lap.recording.saveFailed": "Could not save records: {0}",
+  "literal:未收录路线": "Unlisted route",
+  "literal:未收录": "Not in track library",
+  "literal:未完成": "Incomplete",
+  "literal: · 未完成": " · Incomplete",
+  "literal:收录到个人赛道库": "Add to personal track library",
+  "literal:收录失败": "Could not add route",
+  "literal:可查看圈速、曲线和路线，或收录到个人赛道库。": "Analyze laps, charts and the route, or add it to your personal track library.",
+  "literal:可查看已记录的曲线和路线。完整圈可收录到个人赛道库。": "View recorded charts and the route. A complete lap can be added to your personal track library.",
+  "literal:赛道未识别，正在记录。": "Unmatched track. Recording.",
+  "literal:完成一圈后可分析或收录路线。": "Complete a lap to analyze or add the route.",
+  "literal:缺少起点数据": "Start data missing",
+  "literal:缺少终点数据": "Finish data missing",
+  "literal:记录数据不足": "Insufficient recorded data",
+  "literal:遥测数据中断": "Telemetry interrupted",
+  "literal:车辆位置跳变": "Vehicle position jumped",
+  "literal:记录中车辆发生变化": "Vehicle changed during recording",
+  "literal:记录中发生倒带": "Rewind during recording",
+  "literal:已达到单圈记录上限": "Lap recording limit reached",
+  "literal:遥测数据异常": "Invalid telemetry data",
+  "literal:路线数据不完整": "Incomplete route data",
+  "literal:圈速文件中的路线数据无效或与记录不一致。": "The route in this lap file is invalid or does not match its records.",
+  "literal:圈速文件的路线来源或版本与本地数据不一致。": "The route source or version in this lap file does not match the local data.",
+  "literal:没有可用于收录的完整圈。": "No complete lap is available to add this route.",
+  "literal:记录的路线版本与本地路线不一致。": "The recorded route version does not match the local route.",
   "literal:直连房间 · 实验": "Direct room · Experimental",
   "literal:直连房间": "Direct room",
   "literal:房主承载比赛，玩家直接连接。无需房间目录或中继服务。": "The host runs the race; players connect directly. No room directory or relay service is used.",
@@ -540,6 +565,10 @@
   ,"literal:未选择赛道": "No track selected"
   ,"literal:从上方选择赛道，或进入比赛后自动识别。": "Select a track above, or let LazyForza identify it when a session starts."
   ,"literal:未选择性能等级": "No performance class selected"
+  ,"literal:无圈速记录": "No lap records"
+  ,"literal:记录未匹配赛道": "Record unmatched tracks"
+  ,"literal:赛道未识别。": "Track not identified."
+  ,"literal:可在圈速分析中开启“记录未匹配赛道”。": "Enable Record unmatched tracks in Lap analysis."
   ,"literal:选择至少一个性能等级。": "Select at least one performance class."
   ,"literal:未选择对比圈": "No comparison laps selected"
   ,"literal:勾选最多 4 圈，再点击“显示勾选圈数据”。": "Select up to four laps, then choose Show selected laps."
@@ -3127,4 +3156,55 @@
   ,"literal:当前遥测源不支持转发。": "This telemetry source does not support forwarding."
   ,"telemetry.forwarding.counts": "Sent {0} packets · Queue drops {1} · Send errors {2}"
   ,"literal:忽略此建议": "Dismiss recommendation"
+  ,"hud.profiles.title": "HUD layouts"
+  ,"hud.profiles.autoSave": "Autosaved"
+  ,"hud.profiles.new": "New layout"
+  ,"hud.profiles.rename": "Rename layout"
+  ,"hud.profiles.delete": "Delete layout"
+  ,"hud.profiles.name": "Layout name"
+  ,"hud.profiles.failed": "Could not save HUD layout: {0}"
+  ,"hud.profiles.nameInUse": "Name is already used or contains invalid characters"
+  ,"hud.profiles.numberedName": "Layout {0}"
+  ,"hud.profiles.create": "Create"
+  ,"hud.profiles.deletePrompt": "Delete layout “{0}”?"
+  ,"hud.profiles.manage": "Manage layouts"
+  ,"hud.profiles.reset": "Reset current layout"
+  ,"hud.profiles.resetTip": "Restore default placement and display settings for this layout"
+  ,"hud.profiles.resetPrompt": "Restore default placement and display settings for the current layout?"
+  ,"quick.pin.add": "Pin to sidebar: {0}"
+  ,"quick.pin.remove": "Unpin from sidebar: {0}"
+  ,"delta.continuous": "Live delta"
+  ,"delta.comparison": "Delta reference"
+  ,"delta.trackBest": "Track best"
+  ,"delta.classBest": "Class best"
+  ,"delta.piBest": "PI best"
+  ,"delta.carBest": "Car best"
+  ,"delta.nextLap": "Applies next lap"
+  ,"literal:实时": "Live"
+  ,"literal:整圈": "Lap"
+  ,"literal:应用、模块设置与车辆名称库": "App and module settings, vehicle names"
+  ,"literal:车辆档案、学习结果与名称库": "Vehicle profiles, learned models and names"
+  ,"backup.vehicleNames": "\nVehicle names: {0} · {1:yyyy-MM-dd}",
+  "literal:江户环道赛": "Edo Circuit",
+  "literal:首都冲锋赛": "Shuto Charge",
+  "literal:归入已有赛道": "Assign to an existing track",
+  "literal:删除路线记录": "Delete route records",
+  "literal:需要完整圈": "A complete lap is required",
+  "literal:请在比赛结束后管理路线记录。": "Manage route records after the race ends.",
+  "literal:目标赛道": "Destination track",
+  "literal:归入": "Assign",
+  "literal:强制归入": "Force assignment",
+  "literal:路线明显不匹配。强制归入后不计入最快圈。": "The routes differ significantly. Forced assignments do not count toward best laps.",
+  "literal:未收录路线（灰） · 目标赛道（主题色）": "Recorded route (gray) · Destination track (accent)",
+  "literal:与归入赛道不匹配": "Does not match the assigned track",
+  "literal:操作失败": "Operation failed",
+  "literal:路线已变化，请重新选择。": "The route has changed. Select it again.",
+  "literal:圈记录已变化，请重新选择。": "Lap records have changed. Select them again.",
+  "literal:只能删除未收录路线。": "Only unlisted routes can be deleted here.",
+  "literal:路线已不存在。": "The route no longer exists.",
+  "literal:请选择已收录的普通赛道。": "Select a saved game-event track.",
+  "literal:路线与目标赛道不匹配。": "The route does not match the destination track.",
+  "route.assign.source": "{0} · {1} laps",
+  "route.assign.metrics": "Route overlap {0:P0} · Mean deviation {1:0.0} m · Length difference {2:P0}",
+  "route.delete.confirm": "Delete “{0}” and its {1} lap records?"
 }

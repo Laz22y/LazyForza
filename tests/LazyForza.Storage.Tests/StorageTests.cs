@@ -752,10 +752,10 @@ public sealed class StorageTests
         {
             using var store = new LazyForzaStore(path);
             var firstImport = PlaygroundOfficialTrackCatalog.EnsureImported(store);
-            Assert.AreEqual("2026.08.11.1", firstImport.Version);
-            Assert.AreEqual(86, firstImport.TotalTracks);
-            Assert.AreEqual(86, firstImport.ImportedTracks);
-            Assert.AreEqual(86, store.CountTracks(TrackCatalogKind.PlaygroundOfficial));
+            Assert.AreEqual("2026.11.03.1", firstImport.Version);
+            Assert.AreEqual(88, firstImport.TotalTracks);
+            Assert.AreEqual(88, firstImport.ImportedTracks);
+            Assert.AreEqual(88, store.CountTracks(TrackCatalogKind.PlaygroundOfficial));
 
             var official = store.ListTracks()
                 .First(track => track.CatalogKind == TrackCatalogKind.PlaygroundOfficial);
@@ -777,13 +777,22 @@ public sealed class StorageTests
             Assert.AreEqual(207, maodou.Value.Track.Points.Count);
             Assert.AreEqual(4, maodou.Value.Sectors.Count);
 
+            var edo = store.LoadTrack(Guid.Parse("a93e1034-a926-4a38-a75e-a1d9550d7d6b"))!.Value.Track;
+            Assert.AreEqual("江户环道赛", edo.Name);
+            Assert.AreEqual("公路", edo.Category);
+            Assert.AreEqual(TrackLayoutKind.Circuit, edo.LayoutKind);
+            var shuto = store.LoadTrack(Guid.Parse("42cdb456-a1f3-4125-9b08-f1e90b004e1f"))!.Value.Track;
+            Assert.AreEqual("首都冲锋赛", shuto.Name);
+            Assert.AreEqual("街头", shuto.Category);
+            Assert.AreEqual(TrackLayoutKind.PointToPoint, shuto.LayoutKind);
+
             Assert.ThrowsExactly<InvalidOperationException>(() => store.RenameTrack(official.Id, "不可修改"));
             Assert.ThrowsExactly<InvalidOperationException>(() => store.DeleteTrack(official.Id));
             Assert.IsNotNull(store.LoadTrack(official.Id));
 
             var secondImport = PlaygroundOfficialTrackCatalog.EnsureImported(store);
             Assert.AreEqual(0, secondImport.ImportedTracks);
-            Assert.AreEqual(86, store.CountTracks(TrackCatalogKind.PlaygroundOfficial));
+            Assert.AreEqual(88, store.CountTracks(TrackCatalogKind.PlaygroundOfficial));
         }
         finally
         {

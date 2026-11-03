@@ -11,13 +11,16 @@ namespace LazyForza.IntegrationTests;
 public sealed class EndToEndTests
 {
     [TestMethod]
-    public void FreeRoamDoesNotStartTrackLearningAndCompetitionDoes()
+    [DataRow(false)]
+    [DataRow(true)]
+    public void FreeRoamNeverRecordsAndUnmatchedCompetitionRequiresOptIn(bool enabled)
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-context-{Guid.NewGuid():N}.db");
         try
         {
             using var store = new LazyForzaStore(databasePath);
             var module = new LapAnalysisModule(store);
+            module.SetRecordUnmatchedTracks(enabled);
             var parser = new Fh6PacketParser();
             var freeRoamPacket = Fh6PacketBuilder.BuildDemoPacket(60);
             freeRoamPacket[314] = 0;
@@ -39,7 +42,8 @@ public sealed class EndToEndTests
             var visible = module.Snapshot as LapHudState;
             Assert.IsNotNull(visible);
             Assert.IsTrue(visible.IsCompetitionActive);
-            Assert.AreEqual(TrackLearningPhase.WaitingForStartLine, visible.Phase);
+            Assert.AreEqual(enabled ? TrackLearningPhase.CapturingReferenceLap : TrackLearningPhase.MatchingTrack, visible.Phase);
+            Assert.AreEqual(enabled ? "赛道未识别，正在记录。" : "赛道未识别。", visible.Status);
         }
         finally
         {
@@ -66,6 +70,7 @@ public sealed class EndToEndTests
             var context = new TestContext(hub, hud, store, store);
             var dashboard = new DashboardModule();
             var lap = new LapAnalysisModule(store);
+            lap.SetRecordUnmatchedTracks(true);
             var manager = new ModuleManager([dashboard, lap], context);
             await manager.InitializeAsync(CancellationToken.None);
             await manager.SetEnabledAsync(DashboardModule.ModuleId, true, CancellationToken.None);

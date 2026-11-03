@@ -38,6 +38,11 @@ public sealed record LapHudState(
     public Guid CompetitionSessionId { get; init; }
     public double CurrentLapSeconds { get; init; }
     public double? CumulativeHistoricalDeltaSeconds { get; init; }
+    public bool CumulativeDeltaIsCompletedLap { get; init; }
+    public bool ContinuousDeltaEnabled { get; init; }
+    public double? ContinuousDeltaSeconds { get; init; }
+    public Guid? DeltaReferenceLapId { get; init; }
+    public LapDeltaComparison ActiveDeltaComparison { get; init; } = LapDeltaComparison.ClassBest;
     public bool MatchRejectionEligible { get; init; }
     public bool IsPointToPoint { get; init; }
 }

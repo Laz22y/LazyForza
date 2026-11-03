@@ -99,12 +99,15 @@ internal sealed partial class MainWindow : Window
         ApplicationUpdateManager updateManager,
         DiagnosticCaptureService diagnosticCapture,
         DriftDashboardActivationController moduleActivation,
-        StartupProfileStore startupProfileStore)
+        StartupProfileStore startupProfileStore,
+        VehicleNameUpdateManager? vehicleNameUpdates = null)
     {
         this.moduleManager = moduleManager;
         this.telemetry = telemetry;
         this.overlay = overlay;
         this.store = store;
+        hudProfiles = new OverlayLayoutProfileStore(store, overlay.CurrentLayout,
+            AppLocalization.Format("hud.profiles.numberedName", "布局 {0}", 1));
         this.directories = directories;
         this.recorder = recorder;
         this.sourceKind = sourceKind;
@@ -112,11 +115,13 @@ internal sealed partial class MainWindow : Window
         this.diagnosticCapture = diagnosticCapture;
         this.moduleActivation = moduleActivation;
         this.startupProfileStore = startupProfileStore;
+        this.vehicleNameUpdates = vehicleNameUpdates ?? new VehicleNameUpdateManager(store, directories);
+        VehicleNameCatalog.Activate(this.vehicleNameUpdates.Snapshot);
         showDiagnosticsNavigation = bool.TryParse(
             store.GetAppSetting(ShowDiagnosticsNavigationSetting),
             out var showDiagnostics) && showDiagnostics;
         Title = $"LazyForza {ApplicationVersionInfo.Display}";
-        Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/LazyForza.png", UriKind.Absolute));
+        Icon = BitmapFrame.Create(new Uri("pack://application:,,,/LazyForza.App;component/Assets/LazyForza.png", UriKind.Absolute));
         SetStartupWindowSize(SystemParameters.WorkArea.Size);
         Background = Brush("WindowBrush");
         Foreground = Brush("TextBrush");
@@ -151,6 +156,7 @@ internal sealed partial class MainWindow : Window
             raceEngineer?.Dispose();
             refreshTimer.Stop();
             lifetimeCancellation.Cancel();
+            this.vehicleNameUpdates.Dispose();
             lifetimeCancellation.Dispose();
         };
     }
@@ -693,6 +699,7 @@ internal sealed partial class MainWindow : Window
         settingApplications.Clear();
         var previousOffset = preserveScroll && content.Content is ScrollViewer currentScroll ? currentScroll.VerticalOffset : 0;
         refreshVisiblePage = null;
+        refreshVehicleNameSettings = null;
         refreshEngineerControls = null;
         engineerBroadcastPanel = null;
         refreshShiftControls = null;
@@ -729,6 +736,7 @@ internal sealed partial class MainWindow : Window
         var stack = PageStack("当前比赛", showingRecent
             ? "上一场比赛结果将在结束后保留 5 分钟。"
             : "查看本场分段与已完成圈；暂停、菜单或倒转不会结束比赛。");
+        stack.Children.Add(BuildDeltaSettings());
         if (module.Snapshot is not LapHudState)
         {
             stack.Children.Add(EmptyCard("圈速分析未启用", "请先在“模块”中启用。"));
@@ -918,6 +926,7 @@ internal sealed partial class MainWindow : Window
     {
         var stack = PageStack("圈速分析", "按比赛整理圈记录，查看整场节奏或深入对比单圈。");
         var module = moduleManager.Modules.OfType<LapAnalysisModule>().Single();
+        stack.Children.Add(BuildRecordedRouteRecordingSwitch());
         var toolbar = BuildLapAnalysisToolbar(module, out var exportSelectedLaps,
             out var deleteSelectedLaps, out var deleteTrackLaps);
         var hud = module.Snapshot as LapHudState;
@@ -942,7 +951,8 @@ internal sealed partial class MainWindow : Window
                     module.CurrentTrack?.Id == item.Id
                         ? module.VisibleLaps.Count(lap => lap.TrackId == item.Id)
                         : 0)))
-            .Where(item => item.Loaded is { } loaded && loaded.Sectors.Count > 0 && loaded.Sectors.All(sector =>
+            .Where(item => (!item.Summary.IsRecordOnly || item.RecordedLaps > 0) &&
+                item.Loaded is { } loaded && loaded.Sectors.Count > 0 && loaded.Sectors.All(sector =>
                 sector.SectorSchemaVersion == TrackAlgorithms.SectorSchemaVersion &&
                 sector.AlgorithmVersion == TrackAlgorithms.SectorAlgorithmVersion))
             .OrderByDescending(item => item.RecordedLaps)
@@ -984,7 +994,7 @@ internal sealed partial class MainWindow : Window
                     Content = AppLocalization.Format(
                         "lap.trackSelector.item",
                         "{0} · {1} · {2} 圈",
-                        candidate.Summary.Name,
+                        AppLocalization.Literal(candidate.Summary.Name),
                         AppLocalization.Literal(TrackAnalysisKind(candidate.Summary)),
                         candidate.RecordedLaps),
                     Tag = candidate.Summary.Id
@@ -1091,7 +1101,7 @@ internal sealed partial class MainWindow : Window
             }
 
             deleteTrackLaps.IsEnabled = selectedTrackLaps.Length > 0;
-            deleteTrackLaps.Click += (_, _) =>
+            deleteTrackLaps.Click += async (_, _) =>
             {
                 if (selector.SelectedItem is not ComboBoxItem { Tag: Guid selectedTrackId }) return;
                 var selectedTrack = compatibleTracks.First(item => item.Summary.Id == selectedTrackId).Summary;
@@ -1109,6 +1119,7 @@ internal sealed partial class MainWindow : Window
                     ? selectedClasses.ToHashSet()
                     : null;
                 module.DeleteTrackLaps(selectedTrackId, confirmation.DeleteHistoricalBests, deletionClasses);
+                if (!await RefreshAfterLapDeletionAsync(module, selectedTrackId)) return;
                 selectedLapIds.Clear();
                 displayedLapIds.Clear();
                 RenderSelectedPage(true);
@@ -1116,7 +1127,7 @@ internal sealed partial class MainWindow : Window
 
             var selectedTrackLapIds = selectedTrackLaps.Select(lap => lap.Id).ToHashSet();
             deleteSelectedLaps.IsEnabled = selectedLapIds.Any(selectedTrackLapIds.Contains);
-            deleteSelectedLaps.Click += (_, _) =>
+            deleteSelectedLaps.Click += async (_, _) =>
             {
                 if (selector.SelectedItem is not ComboBoxItem { Tag: Guid selectedTrackId }) return;
                 var laps = TrackLaps(selectedTrackId);
@@ -1159,6 +1170,7 @@ internal sealed partial class MainWindow : Window
                         AppLocalization.Literal("删除所选圈速"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
                 foreach (var lap in selectedLaps) module.DeleteLap(lap.Id);
+                if (!await RefreshAfterLapDeletionAsync(module, selectedTrackId)) return;
                 selectedLapIds.ExceptWith(selectedLaps.Select(lap => lap.Id));
                 displayedLapIds.ExceptWith(selectedLaps.Select(lap => lap.Id));
                 RenderSelectedPage(true);
@@ -1195,23 +1207,28 @@ internal sealed partial class MainWindow : Window
 
         if (pointToPointTimingApproximate) stack.Children.Add(PointToPointTimingNotice());
         var activeTrack = module.CurrentTrack;
+        if (module.PersistenceFailure is { } persistenceFailure)
+            stack.Children.Add(AnalysisCard(Label(AppLocalization.Format("lap.recording.saveFailed",
+                "记录保存失败：{0}", persistenceFailure), 12, FontWeights.Normal, "DangerBrush")));
+        if (activeTrack is not null && (store.LoadTrack(activeTrack.Id)?.Track.IsRecordOnly ?? activeTrack.IsRecordOnly))
+            stack.Children.Add(RecordedRouteActions(module, activeTrack));
         var activePerformanceClasses = activeTrack is not null &&
                                        selectedLapPerformanceClasses.TryGetValue(activeTrack.Id, out var savedClassFilter)
             ? savedClassFilter
             : [];
-        var comparableLaps = activeTrack is null
+        var activeTrackLaps = activeTrack is null
             ? []
             : module.VisibleLaps
                 .Where(lap => lap.TrackId == activeTrack.Id && lap.Direction == activeTrack.Direction &&
-                              lap.SectorSchemaVersion == TrackAlgorithms.SectorSchemaVersion &&
-                              activePerformanceClasses.Contains(lap.Vehicle.CarClass))
-                .OrderByDescending(lap => lap.StartedAt)
+                              lap.SectorSchemaVersion == TrackAlgorithms.SectorSchemaVersion)
                 .ToArray();
+        var comparableLaps = activeTrackLaps
+            .Where(lap => activePerformanceClasses.Contains(lap.Vehicle.CarClass))
+            .OrderByDescending(lap => lap.StartedAt)
+            .ToArray();
         TabControl? archiveTabs = null;
         archiveTabs = AnalysisTabs(
-            ("比赛记录", () => BuildLapSessionHistory(activeTrack,
-                activeTrack is null ? [] : module.VisibleLaps.Where(lap => lap.TrackId == activeTrack.Id &&
-                    lap.Direction == activeTrack.Direction && lap.SectorSchemaVersion == TrackAlgorithms.SectorSchemaVersion).ToArray(),
+            ("比赛记录", () => BuildLapSessionHistory(activeTrack, activeTrackLaps,
                 activePerformanceClasses, pointToPointTimingApproximate, lap =>
                 {
                     selectedLapIds.Clear();
@@ -1249,6 +1266,8 @@ internal sealed partial class MainWindow : Window
         var initialTrackId = module.CurrentTrack?.Id;
         var initialTrackTimingKind = module.CurrentTrack?.TimingKind;
         var initialCompletedLaps = hud.CompletedLaps;
+        var initialRecordedRoutesVersion = module.RecordedRoutesVersion;
+        var initialPersistenceFailure = module.PersistenceFailure;
         refreshVisiblePage = () =>
         {
             if (initialTrackId is Guid estateTrackId &&
@@ -1263,7 +1282,8 @@ internal sealed partial class MainWindow : Window
             }
             if (module.Snapshot is not LapHudState current ||
                 current.CompletedLaps != initialCompletedLaps ||
-                module.CurrentTrack?.Id != initialTrackId)
+                module.CurrentTrack?.Id != initialTrackId || module.RecordedRoutesVersion != initialRecordedRoutesVersion ||
+                module.PersistenceFailure != initialPersistenceFailure)
             {
                 RenderSelectedPage(true);
                 return;
@@ -1273,7 +1293,7 @@ internal sealed partial class MainWindow : Window
         return Scroll(stack);
 
 
-        static string TrackAnalysisKind(TrackSummary summary) => summary.TimingKind == TrackTimingKind.EstateGeometry
+        static string TrackAnalysisKind(TrackSummary summary) => summary.IsRecordOnly ? "未收录" : summary.TimingKind == TrackTimingKind.EstateGeometry
             ? "地产环道"
             : summary.LayoutKind == TrackLayoutKind.PointToPoint
                 ? "定点"
@@ -1377,6 +1397,8 @@ internal sealed partial class MainWindow : Window
                         ? module.HasCurrentCompetitionSession
                             ? AnalysisEmptyState(hud.TrackName, AppLocalization.Literal(hud.Status))
                             : AnalysisEmptyState("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。")
+                        : activeTrackLaps.Length == 0
+                            ? AnalysisEmptyState("无圈速记录")
                         : activePerformanceClasses.Count == 0
                             ? AnalysisEmptyState("未选择性能等级", "选择至少一个性能等级。")
                             : comparableLaps.Length > 0 && displayedLapIds.Count == 0
@@ -1405,7 +1427,7 @@ internal sealed partial class MainWindow : Window
                         $"{(role is null ? string.Empty : $" · {role}")}",
                         $"{PerformanceClassName(lap.Vehicle.CarClass)} {pi} · " +
                         $"{lap.StartedAt.ToLocalTime():MM-dd HH:mm:ss}" +
-                        $"{(lap.IsValid ? string.Empty : AppLocalization.Literal(" · 无效"))}"));
+                        $"{(lap.IsValid ? string.Empty : AppLocalization.Literal(RecordedLapText.IsPartial(lap.InvalidReason) ? " · 未完成" : " · 无效"))}"));
                 }
 
                 IReadOnlyList<CornerMapAnnotation> cornerAnnotations = [];
@@ -1887,7 +1909,7 @@ internal sealed partial class MainWindow : Window
 
         var allTracks = store.ListTracks();
         var customTracks = allTracks
-            .Where(track => track.CatalogKind == TrackCatalogKind.UserCustom &&
+            .Where(track => !track.IsRecordOnly && track.CatalogKind == TrackCatalogKind.UserCustom &&
                             track.TimingKind == TrackTimingKind.GameEvent &&
                             string.Equals(track.Source, CurrentTrackSource, StringComparison.Ordinal))
             .ToArray();
@@ -2406,7 +2428,7 @@ internal sealed partial class MainWindow : Window
                 "|",
                 profiles.Select(profile =>
                     $"{profile.Id}:{profile.CustomName}:{profile.ShiftRecommendationsEnabled}"));
-            nextSignature = $"{activeProfileId ?? "none"}|{nextSignature}";
+            nextSignature = $"{VehicleNameCatalog.Info?.Revision}|{activeProfileId ?? "none"}|{nextSignature}";
             if (!force && string.Equals(profileListSignature, nextSignature, StringComparison.Ordinal)) return;
             profileListSignature = nextSignature;
             profilesPanel.Children.Clear();
@@ -2429,10 +2451,7 @@ internal sealed partial class MainWindow : Window
                 for (var index = 0; index < orderedTunes.Length; index++)
                 {
                     var profile = orderedTunes[index];
-                    var displayName = profile.CustomName ??
-                                      (orderedTunes.Length > 1
-                                          ? AppLocalization.Format("shift.tuneName", "调校 {0}", index + 1)
-                                          : AppLocalization.Literal("车辆配置"));
+                    var displayName = VehicleProfileDisplayName(profile, index, orderedTunes.Length);
                     tunePanel.Children.Add(VehicleProfileCard(
                         profile,
                         displayName,
@@ -2691,7 +2710,7 @@ internal sealed partial class MainWindow : Window
             recommendation.Content = AppLocalization.Literal(enabled ? "推荐挡位：开" : "推荐挡位：关");
             refreshProfiles();
         };
-        actions.Children.Add(recommendation);
+        actions.Children.Add(WithQuickSettingPin(recommendation, SidebarQuickSettings.ShiftRecommendations));
 
         var rename = new Button
         {
@@ -2836,7 +2855,7 @@ internal sealed partial class MainWindow : Window
             "MutedBrush");
         dataDescription.Margin = new Thickness(0, 3, 0, 14);
         stack.Children.Add(dataDescription);
-        var backupService = new DataBackupService(store, CurrentApplicationVersion());
+        var backupService = new DataBackupService(store, CurrentApplicationVersion(), directories);
         var automaticBackups = Directory.Exists(directories.BackupsPath)
             ? Directory.EnumerateFiles(directories.BackupsPath, "auto-*.lfzbackup").Count()
             : 0;
@@ -2890,8 +2909,8 @@ internal sealed partial class MainWindow : Window
         var vehicles = new CheckBox { IsChecked = true };
         var laps = new CheckBox { IsChecked = true };
         var tracks = new CheckBox { IsChecked = true };
-        selections.Children.Add(DataSelectionOption(settings, "配置", "应用与模块设置"));
-        selections.Children.Add(DataSelectionOption(vehicles, "车辆与换挡模型", "车辆档案与学习结果"));
+        selections.Children.Add(DataSelectionOption(settings, "配置", "应用、模块设置与车辆名称库"));
+        selections.Children.Add(DataSelectionOption(vehicles, "车辆与换挡模型", "车辆档案、学习结果与名称库"));
         selections.Children.Add(DataSelectionOption(laps, "个人圈速", "圈速、分段和遥测样本"));
         selections.Children.Add(DataSelectionOption(tracks, "自定义赛道", "个人学习和编辑的路线"));
         selectionPanel.Children.Add(selections);
@@ -3087,6 +3106,9 @@ internal sealed partial class MainWindow : Window
                     preview.Conflicts.Count,
                     conflictLines,
                     warnings);
+                if (preview.VehicleNames is { } names)
+                    previewLabel.Text += AppLocalization.Format("backup.vehicleNames", "\n车辆名称库：{0} 辆 · {1:yyyy-MM-dd}",
+                        names.VehicleCount, names.UpdatedAt.ToLocalTime());
                 importButton.IsEnabled = true;
             }
             catch (Exception exception)
@@ -3141,6 +3163,9 @@ internal sealed partial class MainWindow : Window
                             lifetimeCancellation.Token);
                     },
                     lifetimeCancellation.Token);
+                vehicleNameUpdates.Reload();
+                VehicleNameCatalog.Activate(vehicleNameUpdates.Snapshot);
+                refreshVehicleNameSettings?.Invoke();
                 previewLabel.Text += AppLocalization.Format(
                     "backup.import.result",
                     "\n完成：配置 {0} · 车辆 {1} · 圈速 {2} · 自定义赛道 {3}。",
@@ -3294,6 +3319,7 @@ internal sealed partial class MainWindow : Window
         panel.Children.Add(Card(interfacePanel));
 
         panel.Children.Add(BuildUpdateSettingsCard());
+        panel.Children.Add(BuildVehicleNameSettingsCard());
         panel.Children.Add(BuildDataProtectionSettings());
         return panel;
     }
@@ -3945,83 +3971,4 @@ internal sealed partial class MainWindow : Window
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int valueSize);
-}
-
-internal sealed class TrackNameDialog : Window
-{
-    private readonly TextBox textBox;
-    private TrackNameDialog(Window owner, string current)
-    {
-        Owner = owner;
-        Title = "重命名赛道";
-        Width = 420;
-        Height = 170;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        ResizeMode = ResizeMode.NoResize;
-        var stack = new StackPanel { Margin = new Thickness(18) };
-        stack.Children.Add(new TextBlock { Text = "赛道名称", Margin = new Thickness(0, 0, 0, 6) });
-        textBox = new TextBox { Text = current, Padding = new Thickness(8), MaxLength = 80 };
-        stack.Children.Add(textBox);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
-        var cancel = new Button { Content = "取消", IsCancel = true };
-        var save = new Button { Content = "保存", IsDefault = true };
-        save.Click += (_, _) => { if (!string.IsNullOrWhiteSpace(textBox.Text)) DialogResult = true; };
-        buttons.Children.Add(cancel); buttons.Children.Add(save); stack.Children.Add(buttons);
-        Content = stack;
-        AppLocalization.ApplyTo(this);
-        Loaded += (_, _) => { textBox.SelectAll(); textBox.Focus(); };
-    }
-
-    public static string? Ask(Window owner, string current)
-    {
-        var dialog = new TrackNameDialog(owner, current);
-        return dialog.ShowDialog() == true ? dialog.textBox.Text.Trim() : null;
-    }
-}
-
-internal sealed class VehicleProfileNameDialog : Window
-{
-    private readonly TextBox textBox;
-
-    private VehicleProfileNameDialog(Window owner, string current)
-    {
-        Owner = owner;
-        Title = "重命名车辆配置";
-        Width = 420;
-        Height = 170;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        ResizeMode = ResizeMode.NoResize;
-        var stack = new StackPanel { Margin = new Thickness(18) };
-        stack.Children.Add(new TextBlock { Text = "配置名称", Margin = new Thickness(0, 0, 0, 6) });
-        textBox = new TextBox { Text = current, Padding = new Thickness(8), MaxLength = 80 };
-        stack.Children.Add(textBox);
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 14, 0, 0)
-        };
-        var cancel = new Button { Content = "取消", IsCancel = true };
-        var save = new Button { Content = "保存", IsDefault = true };
-        save.Click += (_, _) =>
-        {
-            if (!string.IsNullOrWhiteSpace(textBox.Text)) DialogResult = true;
-        };
-        buttons.Children.Add(cancel);
-        buttons.Children.Add(save);
-        stack.Children.Add(buttons);
-        Content = stack;
-        AppLocalization.ApplyTo(this);
-        Loaded += (_, _) =>
-        {
-            textBox.SelectAll();
-            textBox.Focus();
-        };
-    }
-
-    public static string? Ask(Window owner, string current)
-    {
-        var dialog = new VehicleProfileNameDialog(owner, current);
-        return dialog.ShowDialog() == true ? dialog.textBox.Text.Trim() : null;
-    }
 }

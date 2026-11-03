@@ -18,6 +18,7 @@ internal sealed partial class MainWindow
         IReadOnlySet<int> classes, bool approximate, Action<LapSummary> inspect, Action<LapSummary>? edit = null)
     {
         if (track is null) return AnalysisEmptyState("未选择赛道", "从上方选择赛道，或进入比赛后自动识别。");
+        if (laps.Count == 0) return AnalysisEmptyState("无圈速记录");
         if (classes.Count == 0) return AnalysisEmptyState("未选择性能等级", "选择至少一个性能等级。");
         // Filter whole sessions, never silently compute a partial race after class filtering.
         var sessions = LapSessionAnalyzer.Group(laps)
@@ -104,7 +105,7 @@ internal sealed partial class MainWindow
             index + 1, AnalysisTime(lap.TotalSeconds, approximate),
             review.MedianLapSeconds is double median ? $"{lap.TotalSeconds - median:+0.000;-0.000;0.000}" : "—",
             $"{PerformanceClassName(lap.Vehicle.CarClass)} {lap.Vehicle.PerformanceIndex}",
-            AppLocalization.Literal(!lap.IsValid ? "无效" : lap.TotalSeconds == review.BestLapSeconds ? "最快" : "有效"),
+            AppLocalization.Literal(!lap.IsValid ? RecordedLapText.IsPartial(lap.InvalidReason) ? "未完成" : "无效" : lap.TotalSeconds == review.BestLapSeconds ? "最快" : "有效"),
             !lap.IsValid ? Brush("DangerBrush") : lap.TotalSeconds == review.BestLapSeconds ? Brush("PurpleBrush") : Brush("MutedBrush"),
             lap)).ToArray();
         var lapList = new ListBox { ItemsSource = rows, MaxHeight = 320, MinHeight = 54,
@@ -164,5 +165,5 @@ internal sealed record SessionLapRow(int Number, string Time, string Delta, stri
 {
     public string Label => string.Join(" · ", new[] { Lap.Annotation.IsFavorite ? AppLocalization.Literal("收藏") : null,
         Lap.Annotation.IsReference ? AppLocalization.Literal("固定参考") : null, Lap.Annotation.Name }.Where(value => value is not null));
-    public string? Tooltip => Lap.Annotation.Notes ?? Lap.InvalidReason;
+    public string? Tooltip => Lap.Annotation.Notes ?? RecordedLapText.Reason(Lap.InvalidReason);
 }

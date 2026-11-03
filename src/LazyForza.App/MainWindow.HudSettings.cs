@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Automation;
-using System.Text.Json;
 using LazyForza.Domain;
 using LazyForza.Overlay;
 
@@ -38,6 +37,7 @@ internal sealed partial class MainWindow
         var visibleEstateRaceWidgetCount = estateRaceWidgetKinds
             .Count(kind => currentEstateRaceWidgets.Get(kind).IsVisible);
         var controls = new StackPanel();
+        controls.Children.Add(BuildHudProfiles());
         var hudAppearance = new StackPanel();
         var hudComponents = new StackPanel();
         var hudOpacity = new StackPanel();
@@ -94,22 +94,22 @@ internal sealed partial class MainWindow
         headerActions.Children.Add(editLayout);
         var resetDefaults = new Button
         {
-            Content = "重置 Overlay",
+            Content = AppLocalization.Text("hud.profiles.reset", "重置当前方案"),
             Margin = new Thickness(12, 0, 0, 0),
             Padding = new Thickness(12, 7, 12, 7),
-            ToolTip = "恢复 HUD 的默认布局与显示设置。"
+            ToolTip = AppLocalization.Text("hud.profiles.resetTip", "恢复当前方案的默认布局与显示设置")
         };
         resetDefaults.Click += async (_, _) =>
         {
             if (AppDialog.Show(
-                    AppLocalization.Literal("确定重置 Overlay 设置吗？\n\n位置、尺寸、仪表盘部件、地产赛事部件、透明度、动态和时间参数将恢复默认值。监听 IP、UDP 端口与本地数据不受影响。"),
-                    AppLocalization.Literal("重置 Overlay"),
+                    AppLocalization.Text("hud.profiles.resetPrompt", "将当前方案的布局与显示设置恢复默认值？"),
+                    AppLocalization.Text("hud.profiles.reset", "重置当前方案"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
             var defaultLayout = LazyForzaDefaults.CreateOverlayLayout();
-            store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(defaultLayout));
-            await overlay.SetLayoutAsync(defaultLayout, CancellationToken.None);
+            await FlushSettingsAsync();
+            await SaveHudLayoutAsync(defaultLayout);
             RenderSelectedPage();
         };
         headerActions.Children.Add(resetDefaults);
@@ -188,7 +188,7 @@ internal sealed partial class MainWindow
             IsChecked = current.DashboardMotionEnabled,
             ToolTip = "让仪表盘随车辆加速度轻微移动"
         };
-        toggleRow.Children.Add(reduceMotion);
+        toggleRow.Children.Add(WithQuickSettingPin(reduceMotion, SidebarQuickSettings.Motion));
         toggleRow.Children.Add(dashboardMotion);
         interaction.Children.Add(toggleRow);
         var motionIntensity = AddValueSlider(
@@ -275,7 +275,8 @@ internal sealed partial class MainWindow
             shiftIndicators.IsChecked = overlay.TimingLayout.ShowShiftIndicators;
             RefreshShiftIndicators();
         };
-        hudComponents.Children.Add(SettingGroup("HUD 换挡提示", "显示仪表盘与漂移 HUD 的换挡提示符号。", shiftIndicators));
+        hudComponents.Children.Add(SettingGroup("HUD 换挡提示", "显示仪表盘与漂移 HUD 的换挡提示符号。",
+            WithQuickSettingPin(shiftIndicators, SidebarQuickSettings.ShiftIndicators)));
 
         var estateRaceComponentItems = new[]
         {
@@ -511,8 +512,7 @@ internal sealed partial class MainWindow
                 Math.Abs(dashboardScale.Value - lapScale.Value) <
                 OverlayScaleSettings.Step / 2)
                 next = OverlayLayoutGeometry.AttachLapToDashboard(next);
-            store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
-            await overlay.SetLayoutAsync(next, CancellationToken.None);
+            await SaveHudLayoutAsync(next);
             applyStatus.Visibility = Visibility.Collapsed;
             RefreshSidebar();
         }, applyStatus);
@@ -563,7 +563,8 @@ internal sealed partial class MainWindow
             AutomationProperties.SetName(slider, AppLocalization.Literal(title));
             AutomationProperties.SetHelpText(slider, AppLocalization.Literal(description));
             slider.ValueChanged += (_, _) => valueLabel.Text = format(slider.Value);
-            container.Children.Add(slider);
+            container.Children.Add(title == "整体不透明度" ? WithQuickSettingPin(slider, SidebarQuickSettings.HudOpacity)
+                : title == "地产赛事底板不透明度" ? WithQuickSettingPin(slider, SidebarQuickSettings.EstateBackdropOpacity) : slider);
             parent.Children.Add(container);
             return slider;
         }

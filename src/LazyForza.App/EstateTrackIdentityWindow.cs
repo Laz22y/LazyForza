@@ -5,7 +5,7 @@ using LazyForza.Storage;
 
 namespace LazyForza.App;
 
-internal sealed class EstateTrackIdentityWindow : Window
+internal sealed class EstateTrackIdentityWindow : AppWindow
 {
     private static readonly FontFamily UiFont = new("Microsoft YaHei UI");
     private readonly EstateTrackPackageIdentity identity;

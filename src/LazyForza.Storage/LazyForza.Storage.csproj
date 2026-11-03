@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net9.0-windows</TargetFramework>
+    <VehicleNameCatalogPath Condition="'$(VehicleNameCatalogPath)' == ''">$(MSBuildThisFileDirectory)Assets\Fh6VehicleNames.json.gz</VehicleNameCatalogPath>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\LazyForza.Domain\LazyForza.Domain.csproj" />
@@ -8,6 +9,6 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\PlaygroundOfficialTracks.json.gz" />
-    <EmbeddedResource Include="Assets\Fh6VehicleNames.json.gz" />
+    <EmbeddedResource Include="$(VehicleNameCatalogPath)" LogicalName="LazyForza.Storage.Assets.Fh6VehicleNames.json.gz" />
   </ItemGroup>
 </Project>

@@ -42,6 +42,15 @@ public sealed class DataBackupTests
                     output.Write(bytes);
                 }
                 var data = Read("data.json");
+                var tableData = data["tables"]!.AsArray();
+                var tracks = tableData.Single(table => table!["name"]!.GetValue<string>() == "TrackTemplates")!;
+                var trackColumns = tracks["columns"]!.AsArray();
+                trackColumns.RemoveAt(trackColumns.Count - 1);
+                foreach (var row in tracks["rows"]!.AsArray())
+                {
+                    var values = row!.AsArray(); values.RemoveAt(values.Count - 1);
+                }
+                tableData.Remove(tableData.Single(table => table!["name"]!.GetValue<string>() == "PendingLapCaptures"));
                 var laps = data["tables"]!.AsArray().Single(table => table!["name"]!.GetValue<string>() == "Laps")!;
                 var columns = laps["columns"]!.AsArray();
                 for (var i = 0; i < removedColumns; i++) columns.RemoveAt(columns.Count - 1);

@@ -24,7 +24,7 @@ public sealed class LapLibraryTests
             var annotation = new LapAnnotation("  雨天练习 '  ", "制动点\n第二段慢一些", true, true);
             using (var store = new LazyForzaStore(path))
             {
-                Assert.AreEqual(15, store.SchemaVersion);
+                Assert.AreEqual(LazyForzaStore.CurrentSchemaVersion, store.SchemaVersion);
                 Assert.AreEqual(new LapAnnotation(), store.LoadLap(lap.Id)!.Annotation);
                 store.UpdateLapAnnotation(lap.Id, annotation);
                 store.SetLapCapacity(1500);

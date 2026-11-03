@@ -42,7 +42,10 @@ public sealed record BackupPreview(
     int Laps,
     int CustomTracks,
     IReadOnlyList<BackupConflict> Conflicts,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings)
+{
+    public VehicleNameCatalogInfo? VehicleNames { get; init; }
+}
 
 public sealed record BackupImportResult(
     int ImportedSettings,
@@ -87,7 +90,7 @@ public sealed class DataBackupService
         new("TrackTemplates",
             ["Id", "Name", "Direction", "Source", "GameBuild", "LengthMeters", "ToleranceMeters",
                 "Confidence", "CaptureLapCount", "CreatedAt", "UpdatedAt", "LayoutKind",
-                "CatalogKind", "Category", "TimingKind"],
+                "CatalogKind", "Category", "TimingKind", "IsRecordOnly"],
             ["Id"]),
         new("TrackPoints",
             ["TrackId", "PointIndex", "X", "Y", "Z", "S", "TangentX", "TangentZ"],
@@ -107,6 +110,7 @@ public sealed class DataBackupService
                 "RightX", "RightY", "RightZ", "ForwardX", "ForwardZ", "HeightTolerance", "EndpointMargin"],
             ["TrackId", "CheckpointIndex"]),
         new("EstatePitDefinitions", ["TrackId", "DefinitionJson"], ["TrackId"]),
+        new("PendingLapCaptures", ["Id", "Source", "Payload"], ["Id"]),
         new("Sessions", ["Id", "Source", "StartedAt", "RawRecordingPath"], ["Id"]),
         new("Laps",
             ["Id", "TrackId", "Direction", "SectorSchemaVersion", "SessionId",
@@ -124,10 +128,13 @@ public sealed class DataBackupService
 
     private readonly LazyForzaStore store;
     private readonly string applicationVersion;
+    private readonly VehicleNameCatalogCache? vehicleNames;
+    private const string VehicleNamesEntry = "vehicle-names.json";
 
-    public DataBackupService(LazyForzaStore store, string applicationVersion)
+    public DataBackupService(LazyForzaStore store, string applicationVersion, DataDirectoryService? directories = null)
     {
         this.store = store;
+        vehicleNames = directories is null ? null : VehicleNameCatalogCache.ForDirectory(directories.Root);
         this.applicationVersion = string.IsNullOrWhiteSpace(applicationVersion)
             ? "unknown"
             : applicationVersion;
@@ -163,6 +170,10 @@ public sealed class DataBackupService
             }
 
             var dataHash = ComputeSha256(dataPath);
+            var names = vehicleNames is not null && (selection.Settings || selection.Vehicles)
+                ? VehicleNameCatalogCache.Serialize(vehicleNames.Load(VehicleNameCatalog.EmbeddedSnapshot)) : null;
+            var files = new Dictionary<string, string>(StringComparer.Ordinal) { ["data.json"] = dataHash };
+            if (names is not null) files[VehicleNamesEntry] = Convert.ToHexString(SHA256.HashData(names));
             var manifest = new BackupManifest(
                 CurrentFormatVersion,
                 PortableKind,
@@ -170,14 +181,16 @@ public sealed class DataBackupService
                 applicationVersion,
                 store.SchemaVersion,
                 selection,
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["data.json"] = dataHash
-                });
+                files);
 
             using (var archive = ZipFile.Open(temporaryArchive, ZipArchiveMode.Create))
             {
                 archive.CreateEntryFromFile(dataPath, "data.json", CompressionLevel.Optimal);
+                if (names is not null)
+                {
+                    using var output = archive.CreateEntry(VehicleNamesEntry, CompressionLevel.Optimal).Open();
+                    output.Write(names);
+                }
                 WriteJsonEntry(archive, "manifest.json", manifest);
             }
 
@@ -209,9 +222,9 @@ public sealed class DataBackupService
             archive.Payload.Table("ModuleSettings").Rows.Count,
             archive.Payload.Table("VehicleProfiles").Rows.Count,
             archive.Payload.Table("Laps").Rows.Count,
-            archive.Payload.Table("TrackTemplates").Rows.Count(row => !IsOfficialTrackRow(row)),
+            archive.Payload.Table("TrackTemplates").Rows.Count(row => !IsOfficialTrackRow(row) && row[15] != "1"),
             conflicts,
-            warnings);
+            warnings) { VehicleNames = archive.VehicleNames?.Info };
     }
 
     public BackupImportResult Import(
@@ -226,7 +239,15 @@ public sealed class DataBackupService
         var preview = PreviewFromArchive(archive);
         var destination = DestinationKeys();
         var commands = BuildImportCommands(archive.Payload, mode, destination, cancellationToken);
-        store.ExecuteBackupTransaction(commands);
+        if (archive.VehicleNames is { } names)
+        {
+            if (vehicleNames is null) throw new InvalidOperationException("恢复车辆名称库需要指定数据目录。");
+            // Stage the catalog before changing the database. Failed DB transactions restore its old cache.
+            var selected = VehicleNameCatalog.EmbeddedSnapshot.Info is { } embedded && names.Info!.UpdatedAt < embedded.UpdatedAt
+                ? VehicleNameCatalog.EmbeddedSnapshot : names;
+            vehicleNames.Merge(selected, () => store.ExecuteBackupTransaction(commands), cancellationToken);
+        }
+        else store.ExecuteBackupTransaction(commands);
 
         var preserved = mode == BackupImportMode.Merge ? preview.Conflicts.Count : 0;
         return new BackupImportResult(
@@ -353,7 +374,7 @@ public sealed class DataBackupService
         if (selection.Laps)
             trackClauses.Add("Id IN (SELECT DISTINCT TrackId FROM Laps)");
         if (selection.CustomTracks)
-            trackClauses.Add("CatalogKind='UserCustom'");
+            trackClauses.Add("CatalogKind='UserCustom' AND IsRecordOnly=0");
         if (trackClauses.Count > 0)
         {
             var trackWhere = string.Join(" OR ", trackClauses.Select(clause => $"({clause})"));
@@ -370,6 +391,7 @@ public sealed class DataBackupService
         cancellationToken.ThrowIfCancellationRequested();
         if (selection.Laps)
         {
+            requests.Add(("PendingLapCaptures", null));
             requests.Add(("Sessions", "Id IN (SELECT DISTINCT SessionId FROM Laps)"));
             requests.Add(("Laps", null));
             requests.Add(("LapSegments", null));
@@ -424,6 +446,7 @@ public sealed class DataBackupService
             throw new InvalidDataException("这是数据库升级安全快照，不能作为可合并的迁移备份导入。");
         if (!entries.TryGetValue("data.json", out var dataEntries))
             throw new InvalidDataException("备份包缺少 data.json。");
+        if (!manifest.Files.ContainsKey("data.json")) throw new InvalidDataException("备份清单缺少 data.json。");
         if (dataEntries[0].Length > MaximumPortableDataBytes)
             throw new InvalidDataException("备份数据超过 1 GB 安全限制。");
         var allowedEntries = manifest.Files.Keys
@@ -432,6 +455,19 @@ public sealed class DataBackupService
         var unexpectedEntry = entries.Keys.FirstOrDefault(name => !allowedEntries.Contains(name));
         if (unexpectedEntry is not null)
             throw new InvalidDataException($"备份包包含未列入清单的文件：{unexpectedEntry}。");
+
+        VehicleNameSnapshot? names = null;
+        if (entries.TryGetValue(VehicleNamesEntry, out var nameEntries))
+        {
+            if (!manifest.Selection.Settings && !manifest.Selection.Vehicles)
+                throw new InvalidDataException("备份选择范围不包含车辆名称库。");
+            if (nameEntries[0].Length > VehicleNameSnapshot.MaximumBytes)
+                throw new InvalidDataException("备份中的车辆名称库过大。");
+            using var input = nameEntries[0].Open();
+            using var buffer = new MemoryStream();
+            input.CopyTo(buffer);
+            names = VehicleNameCatalogCache.Deserialize(buffer.ToArray());
+        }
 
         foreach (var (name, expectedHash) in manifest.Files)
         {
@@ -447,7 +483,7 @@ public sealed class DataBackupService
         var payload = NormalizeLegacyPayload(
             ReadJsonEntry<BackupPayload>(dataEntries[0], MaximumPortableDataBytes));
         ValidatePayload(payload);
-        return new PortableArchive(manifest, payload);
+        return new PortableArchive(manifest, payload, names);
     }
 
     private BackupPreview PreviewFromArchive(PortableArchive archive)
@@ -459,7 +495,7 @@ public sealed class DataBackupService
             archive.Payload.Table("ModuleSettings").Rows.Count,
             archive.Payload.Table("VehicleProfiles").Rows.Count,
             archive.Payload.Table("Laps").Rows.Count,
-            archive.Payload.Table("TrackTemplates").Rows.Count(row => !IsOfficialTrackRow(row)),
+            archive.Payload.Table("TrackTemplates").Rows.Count(row => !IsOfficialTrackRow(row) && row[15] != "1"),
             conflicts,
             []);
     }
@@ -630,6 +666,13 @@ public sealed class DataBackupService
             }
         }
 
+        var pendingCaptures = payload.Table("PendingLapCaptures");
+        foreach (var row in pendingCaptures.Rows)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return mode == BackupImportMode.Merge ? InsertIgnoreSql(pendingCaptures, row) : UpsertSql(pendingCaptures, row);
+        }
+
         var sessions = payload.Table("Sessions");
         foreach (var row in sessions.Rows)
         {
@@ -700,6 +743,9 @@ public sealed class DataBackupService
         ];
         var tables = payload.Tables.Select(table =>
         {
+            if (table.Name == "TrackTemplates" && table.Columns.SequenceEqual(Spec("TrackTemplates").Columns[..^1], StringComparer.Ordinal))
+                return new BackupTableData(table.Name, Spec("TrackTemplates").Columns,
+                    table.Rows.Select(row => row.Concat(new string?[] { "0" }).ToArray()).ToList());
             if (string.Equals(table.Name, "Laps", StringComparison.Ordinal) &&
                 (table.Columns.SequenceEqual(legacyLapColumns, StringComparer.Ordinal) ||
                  table.Columns.SequenceEqual(legacyLapColumns.Append("PlayerCode"), StringComparer.Ordinal) ||
@@ -852,7 +898,7 @@ public sealed class DataBackupService
             ?? new BackupTableData(name, Spec(name).Columns, []);
     }
 
-    private sealed record PortableArchive(BackupManifest Manifest, BackupPayload Payload);
+    private sealed record PortableArchive(BackupManifest Manifest, BackupPayload Payload, VehicleNameSnapshot? VehicleNames);
 
     private sealed record DestinationData(
         IReadOnlyDictionary<string, string> AppSettings,

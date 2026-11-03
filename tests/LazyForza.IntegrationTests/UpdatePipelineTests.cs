@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using LazyForza.Update;
+using LazyForza.Storage;
+using LazyForza.App;
 
 namespace LazyForza.IntegrationTests;
 
@@ -1118,6 +1120,13 @@ public sealed class UpdatePipelineTests
                 ["LazyForza.Preview"] = Encoding.UTF8.GetBytes("preview-package")
             });
             File.WriteAllText(Path.Combine(target, "user-note.txt"), "preserve");
+            var data = new DataDirectoryService(Path.Combine(target, "Data"));
+            var catalog = VehicleNameSnapshot.FromUpstream(JsonSerializer.Serialize(
+                Enumerable.Range(1, 100).ToDictionary(i => "Cached car " + i, i => i)), new string('d', 40),
+                new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            await VehicleNameCatalogCache.ForDirectory(data.Root).SaveAsync(catalog, CancellationToken.None);
+            var cachePath = Path.Combine(data.Root, "Cache", "vehicle-names.json");
+            var cacheBytes = await File.ReadAllBytesAsync(cachePath);
             WritePackage(source, new Dictionary<string, byte[]>
             {
                 ["LazyForza.App.exe"] = Encoding.UTF8.GetBytes("new-app"),
@@ -1140,6 +1149,10 @@ public sealed class UpdatePipelineTests
             Assert.IsFalse(File.Exists(Path.Combine(target, "LazyForza.Preview")));
             Assert.AreEqual("preserve", File.ReadAllText(Path.Combine(target, "user-note.txt")));
             Assert.IsTrue(File.Exists(Path.Combine(work, "install.complete")));
+            CollectionAssert.AreEqual(cacheBytes, await File.ReadAllBytesAsync(cachePath));
+            using var store = new LazyForzaStore(data.DatabasePath);
+            using var manager = new VehicleNameUpdateManager(store, data);
+            Assert.AreEqual(catalog.Info, manager.Snapshot.Info, "A new application starts from the preserved catalog without downloading it again.");
         }
         finally
         {

@@ -13,12 +13,16 @@ public sealed record LapAnalysisExchangePackage(
     int Direction,
     int SectorSchemaVersion,
     string? ExportedByPlayerCode,
-    IReadOnlyList<LapRecord> Laps);
+    IReadOnlyList<LapRecord> Laps)
+{
+    public TrackTemplate? Route { get; init; }
+    public IReadOnlyList<SectorDefinition>? Sectors { get; init; }
+}
 
 public static class LapAnalysisExchangeFile
 {
     private const ushort ContainerVersion = 1;
-    private const int PayloadSchemaVersion = 1;
+    private const int PayloadSchemaVersion = 2;
     private const int MaximumLapCount = 4;
     private const int MaximumCompressedPayloadBytes = 64 * 1024 * 1024;
     private const int MaximumUncompressedPayloadBytes = 128 * 1024 * 1024;
@@ -36,7 +40,9 @@ public static class LapAnalysisExchangeFile
         int sectorSchemaVersion,
         string? exportedByPlayerCode,
         IReadOnlyList<LapRecord> laps,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TrackTemplate? route = null,
+        IReadOnlyList<SectorDefinition>? sectors = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(laps);
@@ -49,16 +55,17 @@ public static class LapAnalysisExchangeFile
             })
             .ToArray();
         Validate(trackId, direction, sectorSchemaVersion, normalizedLaps);
+        ValidateRoute(route, sectors, trackId, direction, sectorSchemaVersion, normalizedLaps);
 
         var payload = new LapAnalysisPayload(
-            PayloadSchemaVersion,
+            route is null ? 1 : PayloadSchemaVersion,
             DateTimeOffset.UtcNow,
             trackId,
             string.IsNullOrWhiteSpace(trackName) ? "未知赛道" : trackName.Trim(),
             direction,
             sectorSchemaVersion,
             exportedBy,
-            normalizedLaps);
+            normalizedLaps) { Route = route, Sectors = sectors };
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
         byte[] compressedPayload;
         await using (var compressed = new MemoryStream())
@@ -157,7 +164,7 @@ public static class LapAnalysisExchangeFile
                           payloadStream.ToArray(),
                           JsonOptions) ??
                       throw new InvalidDataException("圈速分析文件缺少数据。");
-        if (payload.SchemaVersion != PayloadSchemaVersion)
+        if (payload.SchemaVersion is < 1 or > PayloadSchemaVersion)
             throw new InvalidDataException($"不支持的圈速分析数据版本：{payload.SchemaVersion}。");
         var exportedBy = NullIfWhiteSpace(PlayerIdentitySettings.Normalize(payload.ExportedByPlayerCode));
         var laps = payload.Laps
@@ -168,6 +175,7 @@ public static class LapAnalysisExchangeFile
             })
             .ToArray();
         Validate(payload.TrackId, payload.Direction, payload.SectorSchemaVersion, laps);
+        ValidateRoute(payload.Route, payload.Sectors, payload.TrackId, payload.Direction, payload.SectorSchemaVersion, laps);
         return new LapAnalysisExchangePackage(
             payload.CreatedAt,
             payload.TrackId,
@@ -175,7 +183,30 @@ public static class LapAnalysisExchangeFile
             payload.Direction,
             payload.SectorSchemaVersion,
             exportedBy,
-            laps);
+            laps) { Route = payload.Route, Sectors = payload.Sectors };
+    }
+
+    private static void ValidateRoute(TrackTemplate? route, IReadOnlyList<SectorDefinition>? sectors,
+        Guid id, int direction, int schema, IReadOnlyList<LapRecord> laps)
+    {
+        if (route is null && sectors is null) return;
+        if (route is null || sectors is null || route.Id != id || route.Direction != direction ||
+            route.TimingKind != TrackTimingKind.GameEvent || route.CatalogKind != TrackCatalogKind.UserCustom ||
+            route.Points is null || route.Points.Count is < 4 or > 100_000 ||
+            !double.IsFinite(route.LengthMeters) || route.LengthMeters <= 0 ||
+            !double.IsFinite(route.MatchingToleranceMeters) || route.MatchingToleranceMeters is <= 0 or > 100 ||
+            sectors.Count is < 2 or > 16 ||
+            route.Points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y) || !double.IsFinite(point.Z) ||
+                !double.IsFinite(point.S) || !double.IsFinite(point.TangentX) || !double.IsFinite(point.TangentZ)) ||
+            route.Points.Zip(route.Points.Skip(1), (a, b) => b.S < a.S).Any(value => value) ||
+            Math.Abs(route.Points[0].S) > 0.01 || Math.Abs(route.Points[^1].S - route.LengthMeters) > 0.01 ||
+            sectors.Where((sector, index) => sector.Index != index || sector.TrackId != id ||
+                sector.SectorSchemaVersion != schema || !double.IsFinite(sector.StartS) || !double.IsFinite(sector.EndS) ||
+                sector.StartS < 0 || sector.EndS <= sector.StartS || sector.EndS > route.LengthMeters + 0.01 ||
+                index > 0 && Math.Abs(sector.StartS - sectors[index - 1].EndS) > 0.01).Any() ||
+            Math.Abs(sectors[0].StartS) > 0.01 || Math.Abs(sectors[^1].EndS - route.LengthMeters) > 0.01 ||
+            laps.Any(lap => lap.TrackRevision != LapTrackRevision.Create(route)))
+            throw new InvalidDataException("圈速文件中的路线数据无效或与记录不一致。");
     }
 
     private static void Validate(
@@ -221,5 +252,9 @@ public static class LapAnalysisExchangeFile
         int Direction,
         int SectorSchemaVersion,
         string? ExportedByPlayerCode,
-        IReadOnlyList<LapRecord> Laps);
+        IReadOnlyList<LapRecord> Laps)
+    {
+        public TrackTemplate? Route { get; init; }
+        public IReadOnlyList<SectorDefinition>? Sectors { get; init; }
+    }
 }

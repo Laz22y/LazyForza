@@ -91,17 +91,23 @@ New-Item -ItemType Directory -Force -Path $stagePath | Out-Null
 
 $catalogPath = Join-Path $repositoryRoot 'src\LazyForza.Storage\Assets\PlaygroundOfficialTracks.json.gz'
 $catalogHash = (Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash
-$expectedCatalogHash = '9EFD7EC2A8799E733E8CDB60819245534E45B6F0A6BF0FA2B334831A7E0330B6'
+$expectedCatalogHash = '463A49C49566820577BC4FDFE786C83ADFA4F8B9AEC589251D18D4F0D053BF14'
 if ($catalogHash -ne $expectedCatalogHash) {
     throw "Embedded official track catalog hash mismatch. Expected $expectedCatalogHash, found $catalogHash."
 }
 
 # Keep packages flat while 1.1.0-1.1.1 update clients remain in use; those clients reject nested satellite paths.
+$vehicleCatalog = & (Join-Path $PSScriptRoot 'Update-VehicleNameCatalog.ps1') `
+    -OutputPath (Join-Path $workRoot 'Fh6VehicleNames.json.gz') `
+    -FallbackPath (Join-Path $repositoryRoot 'src\LazyForza.Storage\Assets\Fh6VehicleNames.json.gz') -AllowCached
+Write-Output "VEHICLE_NAMES=$($vehicleCatalog.Status); $($vehicleCatalog.Revision); $($vehicleCatalog.UpdatedAtUtc); $($vehicleCatalog.VehicleCount) vehicles"
+
 & dotnet publish (Join-Path $repositoryRoot 'src\LazyForza.App\LazyForza.App.csproj') `
     -c Release `
     -r $Runtime `
     --self-contained true `
     -p:Version=$Version `
+    "-p:VehicleNameCatalogPath=$($vehicleCatalog.Path)" `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -p:PublishTrimmed=false `
@@ -144,9 +150,14 @@ $buildInfo = @(
     "LazyForza $Version"
     "Runtime: $Runtime self-contained"
     "BuiltUtc: $([DateTimeOffset]::UtcNow.ToString('O'))"
-    "OfficialTrackCatalog: 2026.08.11.1"
+    "OfficialTrackCatalog: 2026.11.03.1"
     "OfficialTrackCatalogSha256: $catalogHash"
-    "OfficialTracks: 86"
+    "OfficialTracks: 88"
+    "VehicleNameCatalogRevision: $($vehicleCatalog.Revision)"
+    "VehicleNameCatalogUpdatedUtc: $($vehicleCatalog.UpdatedAtUtc)"
+    "VehicleNameCatalogCount: $($vehicleCatalog.VehicleCount)"
+    "VehicleNameCatalogSha256: $($vehicleCatalog.Sha256)"
+    "VehicleNameCatalogStatus: $($vehicleCatalog.Status)"
 )
 Set-Content -LiteralPath (Join-Path $stagePath 'BUILDINFO.txt') -Value $buildInfo -Encoding UTF8
 

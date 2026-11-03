@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -53,6 +52,7 @@ internal sealed partial class MainWindow
         var diagnostics = telemetry.Diagnostics;
         UpdateSidebarConnection(sourceKind, diagnostics.State, diagnostics.ListenPort);
         foreach (var refresh in refreshQuickSettings) refresh();
+        DeltaOptionsChanged?.Invoke();
     }
 
     private void UpdateSidebarConnection(TelemetrySourceKind source, TelemetryStreamState state, int port)
@@ -87,6 +87,10 @@ internal sealed partial class MainWindow
         SidebarQuickSettings.HudOpacity => "HUD 整体不透明度",
         SidebarQuickSettings.EstateBackdropOpacity => "地产赛事底板不透明度",
         SidebarQuickSettings.AutomaticRecording => "比赛自动录制",
+        SidebarQuickSettings.HudProfiles => HudLayoutProfilesPanel.Title,
+        SidebarQuickSettings.ContinuousDelta => AppLocalization.Text("delta.continuous", "连续实时 Delta"),
+        SidebarQuickSettings.DeltaComparison => AppLocalization.Text("delta.comparison", "Delta 对比"),
+        SidebarQuickSettings.RecordUnmatchedTracks => "记录未匹配赛道",
         _ => "减少动态"
     });
 
@@ -131,6 +135,10 @@ internal sealed partial class MainWindow
                     SidebarQuickSettings.HudOpacity => overlay.TimingLayout.Opacity.ToString(CultureInfo.InvariantCulture),
                     SidebarQuickSettings.EstateBackdropOpacity => overlay.TimingLayout.EstateRaceBackdropOpacity.ToString(CultureInfo.InvariantCulture),
                     SidebarQuickSettings.AutomaticRecording => recorder.AutomaticOptions.Enabled.ToString(),
+                    SidebarQuickSettings.HudProfiles => hudProfiles.Active.Name,
+                    SidebarQuickSettings.ContinuousDelta => DeltaModule.DeltaOptions.Continuous.ToString(),
+                    SidebarQuickSettings.DeltaComparison => $"{DeltaModule.DeltaOptions.Comparison}:{DeltaModule.DeltaComparisonPending}",
+                    SidebarQuickSettings.RecordUnmatchedTracks => DeltaModule.RecordUnmatchedTracks.ToString(),
                     _ => overlay.TimingLayout.ReduceMotion.ToString()
                 };
                 state += $":{busy}";
@@ -143,9 +151,18 @@ internal sealed partial class MainWindow
                 var active = mute ? !engineerMuted && engineerEnabled : shift
                     ? dashboard.ActiveVehicleProfileId is not null && dashboard.ShiftRecommendationsEnabled
                     : indicators ? overlay.TimingLayout.ShowShiftIndicators : recording ? recorder.AutomaticOptions.Enabled
+                    : id == SidebarQuickSettings.RecordUnmatchedTracks ? DeltaModule.RecordUnmatchedTracks
                     : id is SidebarQuickSettings.HudOpacity or SidebarQuickSettings.EstateBackdropOpacity || overlay.TimingLayout.ReduceMotion;
                 action.IsEnabled = !busy && (shift ? dashboard.ActiveVehicleProfileId is not null : !mute || engineerEnabled);
-                action.Content = id == SidebarQuickSettings.Volume ? Label($"{engineerVolume}", 11)
+                action.Content = id == SidebarQuickSettings.ContinuousDelta
+                    ? QuickIcon("M2 17 L7 11 L12 14 L22 4 M2 21 H22", DeltaModule.DeltaOptions.Continuous)
+                    : id == SidebarQuickSettings.RecordUnmatchedTracks
+                    ? QuickIcon("M4 20 V8 Q4 3 9 3 H15 Q20 3 20 8 V13 Q20 18 15 18 H10 M8 16 L10 18 L8 20", active)
+                    : id == SidebarQuickSettings.DeltaComparison
+                    ? QuickIcon("M3 6 H21 M3 12 H15 M3 18 H9 M17 16 L20 19 L23 16", true)
+                    : id == SidebarQuickSettings.HudProfiles
+                    ? QuickIcon("M2 3 H22 V21 H2 Z M2 9 H22 M9 9 V21", true)
+                    : id == SidebarQuickSettings.Volume ? Label($"{engineerVolume}", 11)
                     : QuickIcon(id == SidebarQuickSettings.HudOpacity
                         ? "M12 2 A10 10 0 1 1 12 22 A10 10 0 1 1 12 2 Z M12 2 V22 M12 6 H20 M12 10 H22 M12 14 H22 M12 18 H20"
                         : id == SidebarQuickSettings.EstateBackdropOpacity
@@ -160,6 +177,10 @@ internal sealed partial class MainWindow
                     SidebarQuickSettings.Mute => EngineerText(!engineerEnabled ? "语音未启用" : engineerMuted ? "恢复声音" : "立即静音",
                         !engineerEnabled ? "Speech is disabled" : engineerMuted ? "Unmute" : "Mute now"),
                     SidebarQuickSettings.Volume => QuickSettingTitle(id) + $" · {engineerVolume}%",
+                    SidebarQuickSettings.HudProfiles => QuickSettingTitle(id) + " · " + hudProfiles.Active.Name,
+                    SidebarQuickSettings.ContinuousDelta => QuickSettingTitle(id) + " · " + AppLocalization.Literal(DeltaModule.DeltaOptions.Continuous ? "开" : "关"),
+                    SidebarQuickSettings.DeltaComparison => DeltaComparisonName(DeltaModule.DeltaOptions.Comparison) +
+                        (DeltaModule.DeltaComparisonPending ? " · " + AppLocalization.Text("delta.nextLap", "下圈生效") : ""),
                     SidebarQuickSettings.HudOpacity => QuickSettingTitle(id) + $" · {overlay.TimingLayout.Opacity:P0}",
                     SidebarQuickSettings.EstateBackdropOpacity => QuickSettingTitle(id) + $" · {overlay.TimingLayout.EstateRaceBackdropOpacity:P0}",
                     SidebarQuickSettings.ShiftIndicators => AppLocalization.Literal(active
@@ -178,7 +199,18 @@ internal sealed partial class MainWindow
                 busy = true; Refresh();
                 try
                 {
-                    if (id == SidebarQuickSettings.Mute)
+                    if (id == SidebarQuickSettings.ContinuousDelta)
+                        SetDeltaOptions(DeltaModule.DeltaOptions with { Continuous = !DeltaModule.DeltaOptions.Continuous });
+                    else if (id == SidebarQuickSettings.RecordUnmatchedTracks)
+                        SetRecordedRouteRecording(!DeltaModule.RecordUnmatchedTracks);
+                    else if (id == SidebarQuickSettings.DeltaComparison)
+                        OpenQuickDeltaComparison(action);
+                    else if (id == SidebarQuickSettings.HudProfiles)
+                    {
+                        await FlushSettingsAsync();
+                        if (action.IsLoaded) OpenQuickHudProfiles(action);
+                    }
+                    else if (id == SidebarQuickSettings.Mute)
                     {
                         engineerMuted = !engineerMuted;
                         ApplyEngineerPreferences();
@@ -199,8 +231,7 @@ internal sealed partial class MainWindow
                     {
                         await FlushSettingsAsync();
                         var next = overlay.CurrentLayout with { ShowShiftIndicators = !overlay.TimingLayout.ShowShiftIndicators };
-                        store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
-                        await overlay.SetLayoutAsync(next, lifetimeCancellation.Token);
+                        await SaveHudLayoutAsync(next);
                         syncHudShiftPreference?.Invoke();
                     }
                     else if (id == SidebarQuickSettings.ShiftRecommendations)
@@ -213,9 +244,9 @@ internal sealed partial class MainWindow
                     }
                     else
                     {
+                        await FlushSettingsAsync();
                         var next = overlay.CurrentLayout with { ReduceMotion = !overlay.TimingLayout.ReduceMotion };
-                        store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
-                        await overlay.SetLayoutAsync(next, lifetimeCancellation.Token);
+                        await SaveHudLayoutAsync(next);
                         syncHudMotionPreference?.Invoke();
                     }
                 }
@@ -274,8 +305,7 @@ internal sealed partial class MainWindow
                 var next = id == SidebarQuickSettings.HudOpacity
                     ? overlay.CurrentLayout with { Opacity = slider.Value / 100 }
                     : overlay.CurrentLayout with { EstateRaceBackdropOpacity = slider.Value / 100 };
-                store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(next));
-                await overlay.SetLayoutAsync(next, lifetimeCancellation.Token);
+                await SaveHudLayoutAsync(next);
                 syncHudOpacityPreferences?.Invoke();
                 RefreshSidebar();
             }
@@ -314,11 +344,11 @@ internal sealed partial class MainWindow
                 Margin = new Thickness(0, 0, 22, 8) };
             choice.Click += (_, _) =>
             {
-                quickSettingIds = SidebarQuickSettings.Normalize(choice.IsChecked == true
-                    ? quickSettingIds.Append(id) : quickSettingIds.Where(value => value != id));
-                store.SetAppSetting(SidebarQuickSettings.StoreKey, SidebarQuickSettings.Save(quickSettingIds));
-                BuildSidebarQuickSettings();
+                SetQuickSettingPinned(id, choice.IsChecked == true);
             };
+            void SyncChoice() => choice.IsChecked = quickSettingIds.Contains(id);
+            choice.Loaded += (_, _) => { QuickSettingPinsChanged += SyncChoice; SyncChoice(); };
+            choice.Unloaded += (_, _) => QuickSettingPinsChanged -= SyncChoice;
             choices.Children.Add(choice);
         }
         panel.Children.Add(choices);

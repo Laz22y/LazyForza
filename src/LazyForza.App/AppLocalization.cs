@@ -319,6 +319,7 @@ internal static class AppLocalization
     public static string Literal(string text)
     {
         if (string.IsNullOrEmpty(text) || CurrentLanguage == StartupProfile.DefaultLanguage) return text;
+        if (text.StartsWith("未命名路线 ", StringComparison.Ordinal)) return "Unnamed route " + text[6..];
         if (translations.TryGetValue($"literal:{text}", out var localized) &&
             !string.IsNullOrWhiteSpace(localized))
             return localized;

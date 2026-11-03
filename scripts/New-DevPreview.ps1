@@ -44,12 +44,18 @@ foreach ($path in @($workRoot, $archivePath, $hashPath)) {
 }
 New-Item -ItemType Directory -Force -Path $stagePath | Out-Null
 
+$vehicleCatalog = & (Join-Path $PSScriptRoot 'Update-VehicleNameCatalog.ps1') `
+    -OutputPath (Join-Path $workRoot 'Fh6VehicleNames.json.gz') `
+    -FallbackPath (Join-Path $repositoryRoot 'src\LazyForza.Storage\Assets\Fh6VehicleNames.json.gz') -AllowCached
+Write-Output "VEHICLE_NAMES=$($vehicleCatalog.Status); $($vehicleCatalog.Revision); $($vehicleCatalog.UpdatedAtUtc); $($vehicleCatalog.VehicleCount) vehicles"
+
 # Keep the preview package flat for the same legacy-updater compatibility as a formal release.
 & dotnet publish (Join-Path $repositoryRoot 'src\LazyForza.App\LazyForza.App.csproj') `
     -c Release `
     -r $Runtime `
     --self-contained true `
     -p:Version=$Version `
+    "-p:VehicleNameCatalogPath=$($vehicleCatalog.Path)" `
     -p:IncludeSourceRevisionInInformationalVersion=false `
     -p:DebugType=None `
     -p:DebugSymbols=false `
@@ -82,6 +88,11 @@ $buildInfo = @(
     'Development preview - not a formal release'
     "Runtime: $Runtime self-contained"
     "BuiltUtc: $([DateTimeOffset]::UtcNow.ToString('O'))"
+    "VehicleNameCatalogRevision: $($vehicleCatalog.Revision)"
+    "VehicleNameCatalogUpdatedUtc: $($vehicleCatalog.UpdatedAtUtc)"
+    "VehicleNameCatalogCount: $($vehicleCatalog.VehicleCount)"
+    "VehicleNameCatalogSha256: $($vehicleCatalog.Sha256)"
+    "VehicleNameCatalogStatus: $($vehicleCatalog.Status)"
 )
 Set-Content -LiteralPath (Join-Path $stagePath 'BUILDINFO.txt') -Value $buildInfo -Encoding UTF8
 

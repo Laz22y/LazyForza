@@ -5,7 +5,7 @@ using LazyForza.Storage;
 
 namespace LazyForza.Modules.LapAnalysis;
 
-public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
+public sealed partial class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 {
     public const string ModuleId = "lap-analysis";
     private const double AutomaticMatchMaximumTravelMeters = 1_200;
@@ -13,8 +13,9 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private const double AutomaticMatchMaximumProgressMeters = 220;
     private const double SharedStartMaximumTravelMeters = 1_800;
     private const int MaximumFineMatchCandidates = 12;
-    private const string AutomaticMatchRejectedStatus = "没有找到匹配赛道，本场不会记录圈速。";
-    private const string AutomaticMatchRejectedInstruction = "圈速 HUD 即将隐藏。可在赛道页添加自定义赛道。";
+    private string AutomaticMatchRejectedStatus => RecordUnmatchedTracks ? "赛道未识别，正在记录。" : "赛道未识别。";
+    private string AutomaticMatchRejectedInstruction => RecordUnmatchedTracks
+        ? "完成一圈后可分析或收录路线。" : "可在圈速分析中开启“记录未匹配赛道”。";
     private const string AutomaticMatchRejectedTrackName = "未识别赛事";
     private static readonly TimeSpan AutomaticMatchMaximumDuration = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SharedStartMaximumDuration = TimeSpan.FromSeconds(60);
@@ -120,6 +121,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             true))
     {
         this.store = store;
+        LoadDeltaOptions();
+        recordUnmatchedTracks = bool.TryParse(store.GetAppSetting(RecordUnmatchedTracksSettingKey), out var recordUnmatched) && recordUnmatched;
         this.getOverlayLayout = getOverlayLayout ?? (() => new OverlayLayout());
         this.diagnosticSink = diagnosticSink;
         this.playerCodeProvider = playerCodeProvider ?? (() => null);
@@ -130,8 +133,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 "lap.persistence-failed",
                 $"圈速写入失败：{exception.Message}",
                 true,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow),
+            () => Interlocked.Increment(ref recordedRoutesVersion));
         expectedTrackSource = expectedSource is null ? null : TelemetryDataPartition.TrackSource(expectedSource.Value);
+        RecoverUnmatchedCaptures();
+        ReconcileRecordedRoutes();
         selectionSettingKey = $"lap.selectedTrack.{expectedTrackSource ?? "all"}";
         foreach (var candidateId in store.ListTracks(expectedTrackSource).Select(candidate => candidate.Id))
         {
@@ -142,7 +148,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         if (compatibleTracks.Count == 0)
         {
             var latestGameEventTrack = store.ListTracks(expectedTrackSource)
-                .Where(summary => summary.TimingKind == TrackTimingKind.GameEvent)
+                .Where(summary => summary.TimingKind == TrackTimingKind.GameEvent && !summary.IsRecordOnly)
                 .Select(summary => store.LoadTrack(summary.Id))
                 .Where(saved => saved is not null)
                 .Select(saved => saved!.Value)
@@ -293,6 +299,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             try { await runTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
         }
 
+        FinishUnmatchedCapture(false);
         await persistence.StopAsync().ConfigureAwait(false);
 
         await Context.Hud.DetachAsync(Id, cancellationToken).ConfigureAwait(false);
@@ -316,6 +323,16 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     public void Observe(TelemetryFrame frame)
     {
+        lock (recordedRouteManagementGate)
+        {
+            if (managingRecordedRoutes) return;
+            ObserveFrame(frame);
+        }
+    }
+
+    private void ObserveFrame(TelemetryFrame frame)
+    {
+        ApplyEnrolledTrack();
         var raw = frame.Raw;
         if (!TelemetryContextClassifier.IsCompetition(raw))
         {
@@ -445,9 +462,11 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
                 $"Rewind detected: lap={raw.LapNumber}, current={raw.CurrentLap:0.000}; preserving session {sessionId}.");
         if (crossed) waitingForInitialStartLine = false;
 
-        if (!forceTrackLearning && compatibleTracks.Count > 0 && !automaticMatchLocked)
+        if (!forceTrackLearning && !automaticMatchLocked && track?.TimingKind != TrackTimingKind.EstateGeometry)
         {
-            ObserveAutomaticTrackMatch(frame, initialStartCrossing);
+            if (compatibleTracks.Count > 0) ObserveAutomaticTrackMatch(frame, initialStartCrossing);
+            if (automaticMatchLocked) DiscardUnmatchedCapture();
+            else ObserveUnmatchedCapture(frame, crossed, rewound, lastLapUpdated && previousLastLap != raw.LastLap);
             UpdatePrevious(raw);
             return;
         }
@@ -576,8 +595,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             else
             {
                 LapRecord? completedLap = null;
-                var performanceClass = PerformanceClassCatalog.Resolve(frame.Raw.CarClass, frame.Raw.CarPerformanceIndex);
-                var historicalReference = HistoricalFastestLap(performanceClass);
+                var historicalReference = EnsureDeltaReference(frame);
                 if (lapArmed && currentSamples.Count >= 20) completedLap = CompleteLap(frame);
                 if (completedLap is null && lapArmed)
                 {
@@ -616,6 +634,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             }
         }
 
+        ObserveRecordedRouteCapture(frame, rewound, crossed);
+
         var projection = TrackAlgorithms.ProjectConstrained(
             track.Points,
             raw.Position.X,
@@ -643,7 +663,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         }
 
         if (!rewound &&
-            automaticMatchLocked &&
+            automaticMatchLocked && track.Id != recordedSessionTrackId &&
             !validProjection &&
             ObserveSevereDeviation(frame))
         {
@@ -1305,11 +1325,13 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     {
         lifecycle.BeginLap(currentLap, lastLap, arrivalTime, sectors.Count);
         ResetLiveCumulativeHistoricalDelta();
+        BeginDeltaLap();
     }
 
     private LapRecord? CompleteLap(TelemetryFrame frame)
     {
         if (track is null) return null;
+        if (track.Id == recordedSessionTrackId) return CompleteRecordedLap(frame);
         var projectionRatio = validProjectionSamples / (double)Math.Max(1, validProjectionSamples + invalidProjectionSamples);
         var lapProjectionValid = projectionRatio >= 0.95 && !currentLapInvalidated;
         var sampledTotal = currentSamples.Count == 0 ? 0 : currentSamples.Max(sample => sample.ElapsedSeconds);
@@ -1416,6 +1438,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         if (store.LoadTrack(trackId) is not { } saved || !IsCompatible(saved.Track, saved.Sectors))
             throw new InvalidOperationException("所选赛道与当前遥测来源或分段算法版本不兼容。");
 
+        FinishUnmatchedCapture(false);
+        recordedSessionTrackId = null;
         var previousTrackName = track?.Name;
         var compatibleTrack = compatibleTracks.FirstOrDefault(candidate => candidate.Track.Id == saved.Track.Id) ??
                               new CompatibleTrack(saved.Track, saved.Sectors);
@@ -1595,6 +1619,8 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     public void ResetTrackLearning()
     {
+        FinishUnmatchedCapture(false);
+        recordedSessionTrackId = null;
         forceTrackLearning = true;
         track = null;
         trackSpatialIndex = null;
@@ -1655,7 +1681,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     public void RenameCurrentTrack(Guid trackId, string name)
     {
-        if (track?.Id == trackId) track = track with { Name = name, UpdatedAt = DateTimeOffset.UtcNow };
+        if (track?.Id == trackId) track = track with { Name = name };
     }
 
     private void PublishWaitingForCompetition(TelemetryFrame? frame = null)
@@ -1743,6 +1769,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     private void PublishComparison(TelemetryFrame frame, TrackMatchState matchState, int currentSector, bool validProjection)
     {
         if (track is null) return;
+        EnsureDeltaReference(frame);
         var showingPreviousLap = heldComparisons is not null && frame.ArrivalTime < holdComparisonsUntil;
         if (!showingPreviousLap)
         {
@@ -1754,7 +1781,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         {
             liveCumulativeHistoricalDeltaSector = currentSector;
             liveCumulativeHistoricalDeltaSeconds =
-                CurrentCumulativeHistoricalDelta(currentSector, performanceClass);
+                CurrentCumulativeHistoricalDelta(currentSector);
             liveCumulativeHistoricalDeltaUntil = liveCumulativeHistoricalDeltaSeconds is null
                 ? DateTimeOffset.MinValue
                 : frame.ArrivalTime + LapHudDisplayTiming.CumulativeHistoricalDeltaDuration;
@@ -1809,12 +1836,22 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
             matchState, Math.Clamp(confidentProjectionCount / 30d, 0, 1), track.Name, currentSector,
             comparisons, 1, VisibleLapCount, validProjection && !currentLapInvalidated, showingPreviousLap)
         {
-            CumulativeHistoricalDeltaSeconds = cumulativeDelta
+            CumulativeHistoricalDeltaSeconds = cumulativeDelta,
+            CumulativeDeltaIsCompletedLap = heldCumulativeHistoricalDeltaSeconds is not null,
+            ContinuousDeltaEnabled = DeltaOptions.Continuous,
+            ContinuousDeltaSeconds = ContinuousDelta(frame, validProjection),
+            DeltaReferenceLapId = deltaReference?.Id,
+            ActiveDeltaComparison = activeDeltaComparison
         });
     }
 
     private void ResetCompetitionSession()
     {
+        deltaReferenceSelected = false;
+        deltaReference = null; deltaTrackId = null; deltaCurve = null; deltaCurveId = null;
+        deltaPreviousTime = null; deltaPreviousProgress = null; deltaDiscontinuous = false;
+        FinishUnmatchedCapture(false);
+        recordedSessionTrackId = null;
         Volatile.Write(ref currentCompetitionSnapshot, null);
         captureArmed = false;
         captureStartConfirmed = false;
@@ -1850,8 +1887,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
     {
         if (lastCompetitionFrame is not { } frame ||
             !IsPendingRouteCompleteAtFinish(frame.Raw.Position, frame.Raw.CurrentLap, false)) return null;
-        var performanceClass = PerformanceClassCatalog.Resolve(frame.Raw.CarClass, frame.Raw.CarPerformanceIndex);
-        var historicalReference = HistoricalFastestLap(performanceClass);
+        var historicalReference = EnsureDeltaReference(frame);
         var completedLap = CompleteLap(frame);
         if (completedLap is null) return null;
         lapArmed = false;
@@ -1933,7 +1969,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     private void PublishCompetitionState(LapHudState state)
     {
-        var matchRejectionEligible = !forceTrackLearning &&
+        var matchRejectionEligible = unmatchedCapture is null && track?.IsRecordOnly != true && !forceTrackLearning &&
                                      compatibleTracks.Count > 0 &&
                                      (automaticMatchRejected ||
                                       !trackMatchEverPlausible && !currentTrackGeometryPlausible);
@@ -2099,32 +2135,12 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         return (Best(comparable.Where(lap => lap.SessionId == sessionId)), Best(comparable));
     }
 
-    private LapSummary? HistoricalFastestLap(int performanceClass)
-    {
-        if (track is null) return null;
-        lock (lapGate)
-        {
-            return visibleLaps
-                .Where(lap => lap.IsValid &&
-                              lap.TrackId == track.Id &&
-                              lap.Direction == track.Direction &&
-                              lap.SectorSchemaVersion == TrackAlgorithms.SectorSchemaVersion &&
-                              lap.Vehicle.CarClass == performanceClass &&
-                              lap.Segments.Count == sectors.Count &&
-                              lap.Segments.All(segment => segment.IsValid && segment.TimeSeconds > 0))
-                .OrderBy(lap => lap.TotalSeconds)
-                .ThenBy(lap => lap.StartedAt)
-                .ThenBy(lap => lap.Id)
-                .FirstOrDefault();
-        }
-    }
-
-    private double? CurrentCumulativeHistoricalDelta(int currentSector, int performanceClass)
+    private double? CurrentCumulativeHistoricalDelta(int currentSector)
     {
         if (currentSector <= 0 || currentSector >= sectorStartTimes.Length) return null;
         var currentCumulative = sectorStartTimes[currentSector] - sectorStartTimes[0];
         if (currentCumulative <= 0) return null;
-        var historical = HistoricalFastestLap(performanceClass);
+        var historical = deltaReference;
         if (historical is null) return null;
 
         var referenceCumulative = 0d;
@@ -2262,6 +2278,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
 
     private bool IsCompatible(TrackTemplate candidate, IReadOnlyList<SectorDefinition> candidateSectors) =>
         (expectedTrackSource is null || candidate.Source == expectedTrackSource) &&
+        !candidate.IsRecordOnly &&
         candidate.TimingKind == TrackTimingKind.GameEvent &&
         HasCompatibleSectors(candidateSectors);
 
@@ -2311,6 +2328,7 @@ public sealed class LapAnalysisModule : LazyForzaModuleBase, IHudContribution
         }
 
         confidentProjectionCount = Math.Min(10, currentSamples.Count);
+        deltaDiscontinuous = true;
     }
 
     private void UpdatePrevious(Fh6RawTelemetry raw)

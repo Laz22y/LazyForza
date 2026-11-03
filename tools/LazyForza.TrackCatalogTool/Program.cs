@@ -18,6 +18,7 @@ return args[0].ToLowerInvariant() switch
     "rank-prefix" when args.Length >= 3 && Guid.TryParse(args[2], out var targetId) =>
         RankPrefix(args[1], targetId),
     "export" when args.Length >= 4 => Export(args[1], args[2], args[3]),
+    "append" when args.Length >= 5 => Append(args[1], args[2], args[3], args[4..].Select(Guid.Parse).ToArray()),
     "verify" => Verify(args[1]),
     _ => InvalidUsage()
 };
@@ -158,6 +159,30 @@ static int Export(string databasePath, string outputPath, string catalogVersion)
     return Verify(fullOutputPath);
 }
 
+static int Append(string databasePath, string outputPath, string catalogVersion, Guid[] trackIds)
+{
+    if (!Regex.IsMatch(catalogVersion, @"^\d{4}\.\d{2}\.\d{2}\.\d+$"))
+        throw new ArgumentException("Catalog version must use YYYY.MM.DD.revision format.");
+    using var store = new LazyForzaStore(databasePath);
+    var existing = PlaygroundOfficialTrackCatalog.LoadEmbedded();
+    var entries = existing.Tracks.ToList();
+    foreach (var id in trackIds.Distinct())
+    {
+        if (entries.Any(entry => entry.Track.Id == id)) throw new InvalidOperationException($"Track already exists: {id}");
+        var saved = store.LoadTrack(id) ?? throw new InvalidOperationException($"Track not found: {id}");
+        if (saved.Track.Source != "fh6_udp_live" || saved.Track.IsRecordOnly || saved.Track.TimingKind != TrackTimingKind.GameEvent)
+            throw new InvalidOperationException("Only explicitly selected, enrolled live game routes can enter the official catalog.");
+        var (category, name) = ResolveOfficialIdentity(saved.Track);
+        entries.Add(new(saved.Track with { Name = name, Category = category, CatalogKind = TrackCatalogKind.PlaygroundOfficial }, saved.Sectors));
+    }
+    var document = existing with { Version = catalogVersion, GeneratedAt = DateTimeOffset.UtcNow, Tracks = entries };
+    var fullPath = Path.GetFullPath(outputPath);
+    Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+    using (var file = File.Create(fullPath))
+    using (var gzip = new GZipStream(file, CompressionLevel.SmallestSize)) JsonSerializer.Serialize(gzip, document);
+    return Verify(fullPath);
+}
+
 static (string Category, string DisplayName) ResolveOfficialIdentity(TrackTemplate track)
 {
     if (track.CatalogKind == TrackCatalogKind.PlaygroundOfficial &&
@@ -227,5 +252,6 @@ static void Usage()
     Console.Error.WriteLine("  LazyForza.TrackCatalogTool setting <lazyforza.db> <key>");
     Console.Error.WriteLine("  LazyForza.TrackCatalogTool rank-prefix <lazyforza.db> <track-id>");
     Console.Error.WriteLine("  LazyForza.TrackCatalogTool export <lazyforza.db> <catalog.json.gz> <YYYY.MM.DD.revision>");
+    Console.Error.WriteLine("  LazyForza.TrackCatalogTool append <snapshot.db> <catalog.json.gz> <YYYY.MM.DD.revision> <track-id> [track-id...]");
     Console.Error.WriteLine("  LazyForza.TrackCatalogTool verify <catalog.json.gz>");
 }

@@ -6,7 +6,7 @@ using LazyForza.Domain;
 
 namespace LazyForza.App;
 
-internal sealed class LapRecordEditor : Window
+internal sealed class LapRecordEditor : AppWindow
 {
     private readonly TextBox name, notes;
     private readonly CheckBox favorite, reference;

@@ -6,7 +6,7 @@ using LazyForza.Modules.LapAnalysis;
 
 namespace LazyForza.App;
 
-internal sealed class TrackCorrectionWindow : Window
+internal sealed class TrackCorrectionWindow : AppWindow
 {
     private readonly IReadOnlyList<TrackCorrectionCandidate> candidates;
     private readonly ListBox trackList;

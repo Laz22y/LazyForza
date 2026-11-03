@@ -8,7 +8,7 @@
 
 ## 简体中文
 
-当前正式版：[`1.5.4 · Grid Link / 赛道相连`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.4)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.4)）。地产赛事推荐搭配 RaceServer `0.6.0`，使用协议 v2。
+当前正式版：[`1.5.5 · City Life`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.5)（[GitCode 镜像](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.5)）。地产赛事推荐搭配 RaceServer `0.6.0`，使用协议 v2。
 
 <p align="center">
   <a href="https://laz22y.github.io/LazyForza/">官网</a> ·
@@ -19,7 +19,7 @@
 
 LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、不注入 DLL、不修改游戏进程。设置、圈速、车辆学习和录制默认保存在本机。
 
-1.5.4「赛道相连 / Grid Link」增加地产赛事直连、按场次整理的圈记录和遥测转发，并完善记录管理、语音控制与关于页。
+1.5.5「City Life」新增车辆名称库独立更新、可选的未匹配赛道记录、HUD 布局方案和连续实时 Delta，补充江户环道赛与首都冲锋赛，并改进圈记录管理与弹窗显示。
 
 ## 功能
 
@@ -27,6 +27,7 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 | --- | --- |
 | 实时 HUD | 速度、挡位、转速、踏板、方向、轮胎、动力和换挡提示；部件可独立移动、缩放和调节透明度 |
 | 圈速分析 | 已保存圈速与分段、速度与驾驶输入、走线和距离游标联动 |
+| 未匹配路线记录 | 默认关闭，在圈速分析页顶部开启；无需收录即可分析；重复完整路线自动归并，可删除或归入已有赛道，完整圈可加入个人赛道库 |
 | 车辆学习 | 按车型、性能等级和可观测调校特征学习换挡目标，离线识别车辆名称 |
 | 录制与回放 | 可选自动录制、容量保护、`.lfztelemetry` 导入导出和联动回放 |
 | 地产赛事 | 可暂存和局部修订的环道录入、维修区轨迹校验、路线收益切弯证据、赛事 HUD 与弱网提醒，并可连接独立 RaceServer |
@@ -70,6 +71,10 @@ LazyForza 通过 FH6 官方 UDP Data Out 获取数据，不读取游戏内存、
 
 侧栏底部显示遥测状态与当前 UDP 端口，模拟／回放模式显示对应来源。设置 → 常规 → 快速设置可选择显示语音工程师静音、HUD 换挡提示、本车换挡推荐、语音音量、HUD 整体不透明度、地产赛事底板不透明度、比赛自动录制和减少动态，默认显示静音与 HUD 换挡提示，已有自定义列表保持原有选择。音量与不透明度通过滑块浮窗调整，与设置页同步并自动保存；关闭比赛自动录制时会保存当前自动录制。HUD 换挡提示控制主仪表盘与漂移 HUD 的提示符号显示，可随时切换；本车换挡推荐控制当前车辆配置是否提供升降挡建议，与「车辆与换挡」页同步，车辆配置就绪后可用。两项独立保存，隐藏符号时继续学习车辆数据。较短窗口或选择较多项目时，快速入口合并为图标行，设置入口固定在底部。
 
+「设置 → HUD → HUD 布局方案」可新建、重命名、切换和删除方案。新建会复制当前配置，布局编辑器、显示设置和侧栏调整自动保存到当前方案；重启后继续使用上次选择。方案包含位置、缩放、部件、透明度、动态与显示时序，配置备份同时保存全部方案。「设置 → 常规 → 快速设置」可添加 HUD 布局方案入口，在侧栏直接切换。
+
+「当前比赛」顶部可开启「连续实时 Delta」，与原有分段 Delta 同时显示；「Delta 对比」可选择同赛道、同性能等级、同性能分或同车辆的最佳有效圈，默认同性能等级。圈中更改对比范围于下圈生效；没有可用参考采样时实时值显示「—」。这两项及其他快速设置都可通过原控件旁的图钉固定或移出侧栏，与常规设置的勾选列表同步。
+
 HUD 设置中的“地产赛事底板不透明度”只调整面板底色，文字、旗语与状态标识保持清晰；“整体不透明度”仍同时影响所有 HUD，并与各赛事部件的不透明度叠加。设置保存后在重启时保留。开启“减少动态”可立即显示赛事状态，关闭淡入、位移和闪动效果。
 
 “赛事组件”可独立调整 11 个组件的显示开关与不透明度，修改后自动生效并保存。当前使用经典主题，组件位置、缩放与不透明度分别保存。
@@ -107,7 +112,7 @@ RaceServer 0.6.0 将项目、规则与赛程、赛果记录分开管理。一项
 
 ### 地产赛事直连（实验）
 
-[地产赛事直连房间（实验）](docs/ESTATE_PEER_ROOMS.md)由房主在本机运行赛事服务，其他成员使用邀请代码和密码加入。**直连需要双方的网络环境支持，参与者之间须有可达的 TCP 或 UDP／QUIC 通路。** 客户端 1.5.4 配套房主组件 0.6.0-r6，加入者无需安装组件。连接失败后可交换回执尝试 UDP 与反向 TCP；UDP／QUIC 需要支持 QUIC 的 Windows 11，反向 TCP 需要加入者有可入站地址。房主组件通过 [GitHub](https://github.com/Laz22y/LazyForza.Components/releases)／[GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases) 按需下载并独立更新，支持签名校验、离线导入、项目备份与恢复上一版。
+[地产赛事直连房间（实验）](docs/ESTATE_PEER_ROOMS.md)由房主在本机运行赛事服务，其他成员使用邀请代码和密码加入。**直连需要双方的网络环境支持，参与者之间须有可达的 TCP 或 UDP／QUIC 通路。** 客户端 1.5.5 配套房主组件 0.6.0-r6，加入者无需安装组件。连接失败后可交换回执尝试 UDP 与反向 TCP；UDP／QUIC 需要支持 QUIC 的 Windows 11，反向 TCP 需要加入者有可入站地址。房主组件通过 [GitHub](https://github.com/Laz22y/LazyForza.Components/releases)／[GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases) 按需下载并独立更新，支持签名校验、离线导入、项目备份与恢复上一版。
 
 ## 本地构建
 
@@ -141,7 +146,9 @@ FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与
 
 ## 致谢
 
-感谢 [HDR 维护并提供 FH6 Car Ordinals 车辆标识符文档](https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f)。LazyForza 使用其内置快照完成离线车辆名称映射。
+感谢 [HDR 维护并提供 FH6 Car Ordinals 车辆标识符文档](https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f)。LazyForza 使用内置快照和本地缓存识别车辆名称，启动时检查上游修订，确认后独立下载更新，无需升级或重启程序。可选择稍后更新或忽略该修订，也可在「设置 → 维护 → 车辆名称库」手动检查。离线或更新失败时继续使用已有名称；未手动命名的车辆配置随名称库刷新，手动名称保留。
+
+应用升级保留较新的名称缓存；配置与车辆备份附带名称库，恢复时也保留较新版本。设置中更换数据目录会携带名称库。新预览目录首次启动可选择原数据目录继续使用已有数据。
 
 ## License
 
@@ -149,11 +156,11 @@ FH6 UDP 不提供官方赛事 ID、对手遥测或调校 ID。推导数据会与
 
 ## English
 
-Current stable release: [`1.5.4 · Grid Link / 赛道相连`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.4) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.4)). RaceServer `0.6.0` is recommended for estate racing, using protocol v2.
+Current stable release: [`1.5.5 · City Life`](https://github.com/Laz22y/LazyForza/releases/tag/v1.5.5) ([GitCode mirror](https://gitcode.com/Laz22y/LazyForza/releases/tag/v1.5.5)). RaceServer `0.6.0` is recommended for estate racing, using protocol v2.
 
 LazyForza is a local telemetry, driving-analysis and estate-racing tool for Forza Horizon 6. It uses only official FH6 UDP Data Out: no game-memory access, DLL injection or game-process modification. Settings, laps, vehicle learning and recordings stay on your PC by default.
 
-Version 1.5.4, Grid Link, adds direct estate races, session-based lap records and telemetry forwarding, with improved record management, speech controls and About.
+Version 1.5.5, City Life, adds independent vehicle-name updates, optional unmatched-track recording, HUD layout profiles and continuous live Delta, includes Edo Circuit and Shuto Charge, and improves lap-record management and dialogs.
 
 ### Features
 
@@ -175,6 +182,8 @@ Track identification accommodates rear grid positions and waits for route diverg
 Lap comparison, post-race review and the replay workbench support manually marked corner intervals. Click the start and end points on the racing-line preview, fine-tune the distances if needed, and choose another recorded valid reference lap. Zoom with the wheel, drag to pan and double-click to reset. Compare interval time, brake onset, minimum speed and throttle recovery position on the same distance axis. Up to three localized observations link to the curves. Up to 32 intervals are saved locally per track revision; split intervals that cross the finish line.
 
 Lap analysis groups saved laps into sessions by default. Estate practice, qualifying, races and solo timing are kept separate; ordinary maps use locally detected game sessions. Select a session to review recorded time, typical pace, variation and lap-by-lap progress, then inspect an individual lap. In Lap comparison, expand “Choose laps to compare” to compare up to four. Each track retains up to 50 complete sessions, prioritizing sessions containing the best lap in each performance class. Older records use their existing session IDs; missing laps are not reconstructed, and recorded time excludes missing laps and server penalties. Charts, racing lines and corners share a consistent tab layout, with import, export and record management near the top. Live sectors are shown in Current race. Replay groups playback controls, the timeline and readouts together. Collapsing the corner editor preserves its draft, and switching views keeps the distance cursor linked.
+
+Recording unmatched game-event routes is off by default. Enable Record unmatched tracks at the top of Lap analysis; its pin adds a sidebar shortcut. Turning it off stops capture and discards the unfinished fragment while keeping saved laps. Select an unnamed route to analyze its laps, charts and racing line without adding a preset. Complete routes are matched across sessions and grouped together. After a race, delete route records or assign them to an existing track with a geometry preview; a severe mismatch requires explicit force and cannot contribute a best lap. A complete lap can also be added to the personal track library. Incomplete records remain viewable but are excluded from best laps and enrollment. Fragments under 10 seconds, 100 meters of continuous travel or 40 samples are discarded. Recording checkpoints are saved every five seconds for recovery, and lap exports and backups include the analysis route.
 
 Corner comparisons require compatible route revisions, directions, sector versions and vehicle conditions. Older laps remain viewable and replayable. Intervals with sufficient samples provide observations; other intervals explain the missing evidence. Observations describe recorded inputs and time differences; interpreting causes also requires considering tune, weather and other conditions.
 
@@ -202,6 +211,10 @@ The sidebar footer shows telemetry status and the active UDP port, or the simula
 
 About sits immediately above Settings. It shows the brand graphic, installed version and release name, with icon cards for the website, documentation, client GitHub/GitCode repositories and server GitHub repository. Release announcements show the release history five versions per page, with expandable notes in the interface language. Pagination affects only the announcements panel. Stable builds show stable releases; preview builds also include previews. Announcements use the selected update source with automatic fallback and a local offline cache; refresh is also available on the page.
 
+Settings → HUD → HUD layouts lets you create, rename, switch and delete layouts. New layouts copy the current configuration. Changes in the layout editor, display settings and sidebar save to the active layout, which remains selected after a restart. Layouts include placement, scale, widgets, opacity, motion and display timing, and are included in settings backups. Add HUD layouts under Settings → General → Quick settings to switch from the sidebar.
+
+The top of Current session offers Live delta alongside the existing sector delta. Delta reference selects the best valid lap for the track, performance class, exact PI or car; class best is the default. Changes during a lap apply to the next lap. Live delta shows “—” when reference samples are unavailable. Pin buttons beside these and all other quick settings add or remove sidebar actions and stay synchronized with the General settings checklist.
+
 In HUD settings, Estate race panel opacity changes panel backgrounds while keeping text, flags and status indicators clear. Overall opacity still affects all HUD content and combines with individual race widget opacity. Saved settings persist across restarts. Reduce motion shows race states immediately without fades, movement or pulsing.
 
 Race widgets use the Classic appearance, with independent visibility, position, scale and opacity for all 11 widgets. Changes apply and save automatically.
@@ -226,7 +239,7 @@ RaceServer 0.6.0 separates event projects, rules and schedules, and results for 
 
 ### Direct estate races (experimental)
 
-[Experimental direct rooms](docs/ESTATE_PEER_ROOMS.md) run the race service on the host computer; other participants join with an invitation code and password. **Both networks must support a reachable TCP or UDP/QUIC path.** Client 1.5.4 uses host component 0.6.0-r6, downloaded only by hosts. A connection receipt can try UDP and reverse TCP after an ordinary connection fails. UDP/QUIC requires QUIC-capable Windows 11 on both ends; reverse TCP requires an incoming path to the joining player. The component updates independently through [GitHub](https://github.com/Laz22y/LazyForza.Components/releases) or [GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases), with signed manifests, offline import, project backups and rollback.
+[Experimental direct rooms](docs/ESTATE_PEER_ROOMS.md) run the race service on the host computer; other participants join with an invitation code and password. **Both networks must support a reachable TCP or UDP/QUIC path.** Client 1.5.5 uses host component 0.6.0-r6, downloaded only by hosts. A connection receipt can try UDP and reverse TCP after an ordinary connection fails. UDP/QUIC requires QUIC-capable Windows 11 on both ends; reverse TCP requires an incoming path to the joining player. The component updates independently through [GitHub](https://github.com/Laz22y/LazyForza.Components/releases) or [GitCode](https://gitcode.com/Laz22y/LazyForza.Components/releases), with signed manifests, offline import, project backups and rollback.
 
 ### Development
 
@@ -255,7 +268,9 @@ FH6 UDP does not provide official race IDs, opponent telemetry or tune IDs. Deri
 
 ### Acknowledgements
 
-Thanks to [HDR for maintaining and sharing the FH6 Car Ordinals documentation](https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f). LazyForza uses a bundled snapshot for offline vehicle-name mapping.
+Thanks to [HDR for maintaining and sharing the FH6 Car Ordinals documentation](https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f). LazyForza resolves vehicle names from a bundled snapshot and local cache. Startup checks offer independent catalog downloads with revision details; choose Download, Later, or Ignore this revision. Check manually under Settings → Maintenance → Vehicle name catalog. No application upgrade or restart is required. Offline or failed updates retain existing names. Automatic profile names follow catalog changes; custom names stay unchanged.
+
+Application upgrades retain newer cached names. Settings and vehicle backups include the catalog, and restoring keeps the newer valid version. Changing the data directory in Settings carries the catalog over. On first launch from a new preview folder, select the existing data directory to reuse its data.
 
 ### License
 

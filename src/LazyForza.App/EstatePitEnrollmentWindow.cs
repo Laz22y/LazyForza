@@ -8,7 +8,7 @@ using LazyForza.Modules.LapAnalysis;
 
 namespace LazyForza.App;
 
-internal sealed class EstatePitEnrollmentWindow : Window
+internal sealed class EstatePitEnrollmentWindow : AppWindow
 {
     private static readonly FontFamily UiFont = new("Microsoft YaHei UI");
     private readonly EstateCircuitModule module;

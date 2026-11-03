@@ -140,6 +140,7 @@ public sealed partial class LapAnalysisBehaviorTests
         {
             using var store = new LazyForzaStore(databasePath);
             var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            module.ResetTrackLearning();
             var feed = new CircleFrameFeed(module);
             var gridPosition = new Vector3F(180, 0, 0);
 
@@ -306,7 +307,7 @@ public sealed partial class LapAnalysisBehaviorTests
     }
 
     [TestMethod]
-    public void UnmatchedSavedTrackPublishesRejectionEvidenceWithoutEndingCompetition()
+    public void UnmatchedSavedTrackRecordsWithoutSuppressingTheCompetitionHud()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"lazyforza-no-match-{Guid.NewGuid():N}.db");
         try
@@ -314,15 +315,15 @@ public sealed partial class LapAnalysisBehaviorTests
             using var store = new LazyForzaStore(databasePath);
             SaveCircleTrack(store);
             var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            module.SetRecordUnmatchedTracks(true);
             var feed = new CircleFrameFeed(module);
 
             feed.Send(0, 20, new Vector3F(10_000, 10_000, 10_000), raceTimeOverride: 2.1f);
             var unmatched = Hud(module);
             Assert.IsTrue(unmatched.IsCompetitionActive);
-            Assert.IsTrue(unmatched.MatchRejectionEligible);
-            Assert.AreEqual("未识别赛事", unmatched.TrackName,
-                "No-match evidence must show the existing rejection prompt before the overlay fade begins.");
-            Assert.AreEqual("没有找到匹配赛道，本场不会记录圈速。", unmatched.Status);
+            Assert.IsFalse(unmatched.MatchRejectionEligible);
+            Assert.AreEqual("未识别赛事", unmatched.TrackName);
+            Assert.AreEqual("赛道未识别，正在记录。", unmatched.Status);
             var session = unmatched.CompetitionSessionId;
 
             feed.Send(0, 21, Position(20), raceTimeOverride: 2.2f);
@@ -387,6 +388,7 @@ public sealed partial class LapAnalysisBehaviorTests
             var second = SaveCircleTrack(store, "Shared route B");
             store.SetAppSetting("lap.selectedTrack.simulator", second.Id.ToString());
             var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            module.SetRecordUnmatchedTracks(true);
             var feed = new CircleFrameFeed(module);
 
             feed.Send(0, 20, raceTimeOverride: 2.1f);
@@ -395,9 +397,10 @@ public sealed partial class LapAnalysisBehaviorTests
             feed.Send(1, 0);
 
             Console.WriteLine(DescribeMatchDiagnostics(module));
-            Assert.HasCount(0, module.VisibleLaps);
-            Assert.IsTrue(Hud(module).MatchRejectionEligible);
-            Assert.AreEqual("未识别赛事", Hud(module).TrackName);
+            Assert.HasCount(1, module.VisibleLaps);
+            Assert.IsTrue(module.CurrentTrack!.IsRecordOnly);
+            Assert.IsFalse(Hud(module).MatchRejectionEligible);
+            Assert.AreNotEqual(second.Id, module.CurrentTrack.Id);
             Assert.AreEqual(string.Empty, store.GetAppSetting("lap.selectedTrack.simulator"),
                 "An ambiguous match must not replace the empty selection with an arbitrary candidate.");
             Assert.AreNotEqual(first.Id, module.VisibleLaps.FirstOrDefault()?.TrackId);
@@ -1346,6 +1349,7 @@ public sealed partial class LapAnalysisBehaviorTests
         {
             using var store = new LazyForzaStore(databasePath);
             var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            module.SetRecordUnmatchedTracks(true);
             var feed = new PointToPointFrameFeed(module);
 
             feed.Send(1);
@@ -1374,6 +1378,7 @@ public sealed partial class LapAnalysisBehaviorTests
         {
             using var store = new LazyForzaStore(databasePath);
             var module = new LapAnalysisModule(store, TelemetrySourceKind.Simulator);
+            module.ResetTrackLearning();
             var feed = new PointToPointFrameFeed(module);
 
             feed.Send(1);

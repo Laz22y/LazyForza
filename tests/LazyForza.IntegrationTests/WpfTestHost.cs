@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Threading;
+using System.Xml.Linq;
 using LazyForza.App;
 
 namespace LazyForza.IntegrationTests;
@@ -46,6 +48,18 @@ internal static class WpfTestHost
                 {
                     Source = new Uri("/LazyForza.App;component/Themes/Controls.xaml", UriKind.Relative)
                 });
+                // App.xaml owns the dropdown templates; Controls.xaml alone falls
+                // back to the Windows theme. Keep previews on the shipping templates.
+                using var appXaml = typeof(WpfTestHost).Assembly.GetManifestResourceStream("LazyForzaApp.xaml")!;
+                var xml = XDocument.Load(appXaml);
+                foreach (var type in new[] { typeof(ComboBox), typeof(ComboBoxItem) })
+                {
+                    var style = xml.Descendants().Single(element => element.Name.LocalName == "Style" &&
+                        (string?)element.Attribute("TargetType") == type.Name);
+                    // Event handlers require the real App instance and are not visual resources.
+                    style.Elements().Where(element => element.Name.LocalName == "EventSetter").Remove();
+                    application.Resources[type] = (Style)System.Windows.Markup.XamlReader.Parse(style.ToString());
+                }
                 ready.SetResult(application);
                 Dispatcher.Run();
             }

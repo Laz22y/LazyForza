@@ -1,13 +1,11 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Runtime.InteropServices;
-using System.Windows.Interop;
 using LazyForza.Update;
 
 namespace LazyForza.App;
 
-internal sealed class UpdateProgressWindow : Window
+internal sealed class UpdateProgressWindow : AppWindow
 {
     private readonly TextBlock status;
     private readonly ProgressBar progressBar;
@@ -20,31 +18,26 @@ internal sealed class UpdateProgressWindow : Window
         Owner = owner;
         Title = "更新 LazyForza";
         Width = 460;
-        Height = 190;
+        SizeToContent = SizeToContent.Height;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = (Brush)Application.Current.FindResource("PanelBrush");
         Foreground = (Brush)Application.Current.FindResource("TextBrush");
         FontFamily = new FontFamily("Microsoft YaHei UI");
-        SourceInitialized += (_, _) =>
-        {
-            var dark = 1;
-            var handle = new WindowInteropHelper(this).Handle;
-            if (DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int)) != 0)
-                _ = DwmSetWindowAttribute(handle, 19, ref dark, sizeof(int));
-        };
 
         var stack = new StackPanel { Margin = new Thickness(24, 20, 24, 18) };
         stack.Children.Add(new TextBlock
         {
             Text = AppLocalization.Format("update.progress.preparing", "正在准备 LazyForza {0}", version),
             FontSize = 17,
+            TextWrapping = TextWrapping.Wrap,
             FontWeight = FontWeights.SemiBold
         });
         status = new TextBlock
         {
             Text = "正在连接 GitCode，必要时使用 GitHub…",
             FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
             Foreground = (Brush)Application.Current.FindResource("MutedBrush"),
             Margin = new Thickness(0, 7, 0, 10)
         };
@@ -109,6 +102,4 @@ internal sealed class UpdateProgressWindow : Window
         cancellation.Dispose();
     }
 
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int valueSize);
 }

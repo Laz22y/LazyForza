@@ -48,7 +48,7 @@ internal sealed partial class MainWindow
         CornerRadius = new CornerRadius(12), Padding = new Thickness(20), Margin = new Thickness(0, 0, 0, 16), Child = child
     };
 
-    private static Border AnalysisEmptyState(string title, string message)
+    private static Border AnalysisEmptyState(string title, string? message = null)
     {
         var content = new StackPanel
         {
@@ -64,11 +64,14 @@ internal sealed partial class MainWindow
         var heading = Label(title, 20, FontWeights.SemiBold);
         heading.TextAlignment = TextAlignment.Center;
         content.Children.Add(heading);
-        var description = Label(message, 13, FontWeights.Normal, "MutedBrush");
-        description.TextAlignment = TextAlignment.Center;
-        description.TextWrapping = TextWrapping.Wrap;
-        description.Margin = new Thickness(0, 10, 0, 0);
-        content.Children.Add(description);
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            var description = Label(message, 13, FontWeights.Normal, "MutedBrush");
+            description.TextAlignment = TextAlignment.Center;
+            description.TextWrapping = TextWrapping.Wrap;
+            description.Margin = new Thickness(0, 10, 0, 0);
+            content.Children.Add(description);
+        }
         var card = AnalysisCard(content);
         card.MinHeight = 220;
         card.Margin = new Thickness(0, 8, 0, 24);

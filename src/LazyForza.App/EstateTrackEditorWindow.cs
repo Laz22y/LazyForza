@@ -7,7 +7,7 @@ using LazyForza.Storage;
 
 namespace LazyForza.App;
 
-internal sealed class EstateTrackEditorWindow : Window
+internal sealed class EstateTrackEditorWindow : AppWindow
 {
     private readonly LazyForzaStore store;
     private readonly EstateCircuitModule module;

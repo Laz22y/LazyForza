@@ -238,8 +238,16 @@ internal sealed partial class MainWindow
         {
             var path = Path.GetFullPath(selectedDataDirectory);
             if (PathsEqual(profile.DataDirectory, path)) return;
-            profile = startupProfileStore.Load() with { DataDirectory = path };
-            startupProfileStore.Save(profile);
+            var next = startupProfileStore.Load() with { DataDirectory = path };
+            try { vehicleNameUpdates.MigrateTo(path, () => startupProfileStore.Save(next)); }
+            catch (Exception exception)
+            {
+                selectedDataDirectory = profile.DataDirectory;
+                AppDialog.Show(this, AppLocalization.Format("settings.auto.failed", "未能应用：{0}", exception.Message),
+                    AppLocalization.Text("settings.app.storage", "数据存储目录"), MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+            profile = next;
             AppRestartPrompt.Show(this, AppLocalization.Literal("数据目录已保存，重启后切换到新目录。"));
         }
 

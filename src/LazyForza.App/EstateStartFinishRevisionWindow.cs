@@ -8,7 +8,7 @@ using LazyForza.Modules.LapAnalysis;
 
 namespace LazyForza.App;
 
-internal sealed class EstateStartFinishRevisionWindow : Window
+internal sealed class EstateStartFinishRevisionWindow : AppWindow
 {
     private readonly EstateCircuitModule module;
     private readonly EstateGeometryPreview preview = new();

@@ -5,7 +5,7 @@ using LazyForza.Update;
 
 namespace LazyForza.App;
 
-internal sealed class UpdateOfferWindow : Window
+internal sealed class UpdateOfferWindow : AppWindow
 {
     public UpdateOfferWindow(
         Window owner,
@@ -49,6 +49,7 @@ internal sealed class UpdateOfferWindow : Window
         {
             Text = $"LazyForza {release.ArtifactVersion}",
             FontSize = 16,
+            TextWrapping = TextWrapping.Wrap,
             FontWeight = FontWeights.SemiBold
         });
         version.Children.Add(new TextBlock

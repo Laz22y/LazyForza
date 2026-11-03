@@ -9,7 +9,7 @@ using LazyForza.Modules.EstateRace;
 
 namespace LazyForza.App;
 
-internal sealed class EstatePeerWindow : Window
+internal sealed class EstatePeerWindow : AppWindow
 {
     private readonly EstateRaceConnectionProfile saved;
     private readonly IReadOnlyList<PeerTrackChoice> tracks;

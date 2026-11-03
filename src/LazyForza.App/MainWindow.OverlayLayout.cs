@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using LazyForza.Domain;
@@ -10,6 +9,7 @@ internal sealed partial class MainWindow
 {
     private async Task ConfigureOverlayLayoutAsync(Button trigger)
     {
+        await FlushSettingsAsync();
         var hasFreshTelemetry = HasFreshLiveFh6Telemetry();
         var hasForzaWindow = ForzaHorizonWindow.TryFind(out var targetWindow);
         string? setupNotice = null;
@@ -75,8 +75,7 @@ internal sealed partial class MainWindow
             Hide();
             var result = overlay.EditLayout(targetWindow, setupNotice);
             if (result is null) return;
-            store.SetAppSetting("overlay.layout", JsonSerializer.Serialize(result));
-            await overlay.SetLayoutAsync(result, CancellationToken.None);
+            await SaveHudLayoutAsync(result);
         }
         catch (Exception exception)
         {

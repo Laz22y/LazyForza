@@ -1,5 +1,4 @@
 using System.IO.Compression;
-using System.Reflection;
 using System.Text.Json;
 
 namespace LazyForza.Storage;
@@ -13,17 +12,23 @@ public sealed record VehicleNameCatalogInfo(
 
 public static class VehicleNameCatalog
 {
-    private static readonly Lazy<CatalogState> State = new(Load);
+    private static readonly Lazy<VehicleNameSnapshot> Embedded = new(Load);
+    private static VehicleNameSnapshot? current;
 
-    public static VehicleNameCatalogInfo? Info => State.Value.Info;
+    public static VehicleNameSnapshot EmbeddedSnapshot => Embedded.Value;
+    public static VehicleNameSnapshot Current => Volatile.Read(ref current) ?? Embedded.Value;
+    public static VehicleNameCatalogInfo? Info => Current.Info;
+
+    public static void Activate(VehicleNameSnapshot snapshot) =>
+        Interlocked.Exchange(ref current, snapshot ?? throw new ArgumentNullException(nameof(snapshot)));
 
     public static string? TryGetName(int carOrdinal) =>
-        State.Value.Names.GetValueOrDefault(carOrdinal);
+        Current.Names.GetValueOrDefault(carOrdinal);
 
     public static string DisplayName(int carOrdinal) =>
         TryGetName(carOrdinal) ?? $"车辆 {carOrdinal}";
 
-    private static CatalogState Load()
+    private static VehicleNameSnapshot Load()
     {
         try
         {
@@ -58,19 +63,18 @@ public static class VehicleNameCatalog
                 out var parsedUpdatedAt)
                 ? parsedUpdatedAt
                 : DateTimeOffset.MinValue;
-            return new CatalogState(
-                names,
+            return new VehicleNameSnapshot(
                 new VehicleNameCatalogInfo(
                     document.Source,
                     document.Author,
                     document.Revision,
                     updatedAt,
-                    names.Count));
+                    names.Count), names);
         }
         catch
         {
             // Vehicle naming is auxiliary. Missing/corrupt snapshots must not block Live UDP.
-            return new CatalogState(new Dictionary<int, string>(), null);
+            return new VehicleNameSnapshot(null, new Dictionary<int, string>());
         }
     }
 
@@ -81,7 +85,4 @@ public static class VehicleNameCatalog
         string UpdatedAtUtc,
         Dictionary<string, string> Cars);
 
-    private sealed record CatalogState(
-        IReadOnlyDictionary<int, string> Names,
-        VehicleNameCatalogInfo? Info);
 }

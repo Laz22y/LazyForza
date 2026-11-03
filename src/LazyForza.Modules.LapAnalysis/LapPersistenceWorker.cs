@@ -1,6 +1,7 @@
 using LazyForza.Domain;
 using LazyForza.Storage;
 using System.Threading.Channels;
+using System.Collections.Concurrent;
 
 namespace LazyForza.Modules.LapAnalysis;
 
@@ -13,17 +14,23 @@ internal sealed class LapPersistenceWorker
     private readonly LazyForzaStore store;
     private readonly Action<string> log;
     private readonly Action<Exception> reportFailure;
+    private readonly Action recordedLapSaved;
     private Channel<LapPersistenceCommand>? queue;
     private Task? workerTask;
+    private Exception? lastFailure;
+    private readonly ConcurrentDictionary<Guid, RecordedLapCapture> checkpoints = new();
+    public string? FailureMessage => Volatile.Read(ref lastFailure)?.Message;
 
     public LapPersistenceWorker(
         LazyForzaStore store,
         Action<string> log,
-        Action<Exception> reportFailure)
+        Action<Exception> reportFailure,
+        Action recordedLapSaved)
     {
         this.store = store;
         this.log = log;
         this.reportFailure = reportFailure;
+        this.recordedLapSaved = recordedLapSaved;
     }
 
     public void Start()
@@ -40,6 +47,15 @@ internal sealed class LapPersistenceWorker
 
     public void Enqueue(LapPersistenceCommand command)
     {
+        if (command is { Capture: { } checkpoint, Lap: null } && queue is not null)
+        {
+            lock (checkpoints)
+            {
+                var markerNeeded = checkpoints.TryAdd(checkpoint.Id, checkpoint);
+                if (!markerNeeded) { checkpoints[checkpoint.Id] = checkpoint; return; }
+            }
+            command = default(LapPersistenceCommand) with { CheckpointId = checkpoint.Id };
+        }
         if (queue?.Writer.TryWrite(command) == true) return;
         Execute(command);
     }
@@ -69,6 +85,7 @@ internal sealed class LapPersistenceWorker
             }
             catch (Exception exception)
             {
+                lastFailure = exception;
                 log($"Lap persistence failed: {exception}");
                 reportFailure(exception);
             }
@@ -77,10 +94,32 @@ internal sealed class LapPersistenceWorker
 
     private void Execute(LapPersistenceCommand command)
     {
-        if (command.Completion is { } completion) { completion.TrySetResult(); return; }
+        if (command.CheckpointId is Guid checkpointId)
+        {
+            RecordedLapCapture? latest;
+            lock (checkpoints) checkpoints.TryRemove(checkpointId, out latest);
+            if (latest is not null) store.SavePendingLapCapture(latest);
+            return;
+        }
+        if (command.Completion is { } completion)
+        {
+            if (lastFailure is { } failure) completion.TrySetException(failure);
+            else completion.TrySetResult();
+            return;
+        }
+        if (command is { Lap: { } recordedLap, Capture: { } checkpoint })
+        {
+            store.SaveRecordedLap(checkpoint, command.NewTrack ?? checkpoint.ReferenceTrack!, command.NewSectors!, recordedLap);
+            recordedLapSaved();
+            return;
+        }
+        if (command.Capture is { } capture) store.SavePendingLapCapture(capture);
+        if (command.NewTrack is { } newTrack) store.SaveTrack(newTrack, command.NewSectors!);
+        if (command.DiscardCaptureId is Guid discarded) store.DeletePendingLapCapture(discarded);
         if (command.Lap is { } lap)
         {
-            store.SaveLap(lap);
+            if (command.Capture is null || store.LoadLapsByIds([lap.Id]).Count == 0) store.SaveLap(lap);
+            if (command.Capture is not null) store.DeletePendingLapCapture(command.Capture.Id);
             log($"Persisted lap {lap.Id}: total={lap.TotalSeconds:0.000}, samples={lap.Samples.Count}.");
             return;
         }
@@ -88,12 +127,14 @@ internal sealed class LapPersistenceWorker
         if (command.DeleteLapId is Guid lapId)
         {
             store.DeleteLap(lapId);
+            recordedLapSaved();
             log($"Deleted lap {lapId}.");
             return;
         }
 
         if (command.DeleteTrackLapsId is not Guid trackId) return;
         store.DeleteTrackLaps(trackId, command.PerformanceClasses, command.PreserveLapIds);
+        recordedLapSaved();
         var scope = command.PerformanceClasses is { Length: > 0 }
             ? $"classes [{string.Join(',', command.PerformanceClasses)}]"
             : "all classes";
@@ -111,6 +152,11 @@ internal readonly record struct LapPersistenceCommand(
     Guid[]? PreserveLapIds)
 {
     public TaskCompletionSource? Completion { get; init; }
+    public RecordedLapCapture? Capture { get; init; }
+    public TrackTemplate? NewTrack { get; init; }
+    public IReadOnlyList<SectorDefinition>? NewSectors { get; init; }
+    public Guid? DiscardCaptureId { get; init; }
+    public Guid? CheckpointId { get; init; }
     public static LapPersistenceCommand Save(LapRecord lap) => new(lap, null, null, null, null);
     public static LapPersistenceCommand Delete(Guid lapId) => new(null, lapId, null, null, null);
     public static LapPersistenceCommand DeleteTrack(

@@ -9,7 +9,7 @@ using LazyForza.Modules.LapAnalysis;
 
 namespace LazyForza.App;
 
-internal sealed class EstateCircuitEnrollmentWindow : Window
+internal sealed class EstateCircuitEnrollmentWindow : AppWindow
 {
     private readonly EstateCircuitModule module;
     private readonly EstateEnrollmentDraftStore draftStore;

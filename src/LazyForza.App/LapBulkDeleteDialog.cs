@@ -5,7 +5,7 @@ using LazyForza.Domain;
 
 namespace LazyForza.App;
 
-internal sealed class LapBulkDeleteDialog : Window
+internal sealed class LapBulkDeleteDialog : AppWindow
 {
     private readonly IReadOnlyList<LapSummary> laps;
     private readonly HashSet<int> selectedPerformanceClasses;

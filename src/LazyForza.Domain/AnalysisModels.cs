@@ -142,6 +142,7 @@ public sealed record TrackTemplate(
     public TrackCatalogKind CatalogKind { get; init; } = TrackCatalogKind.UserCustom;
     public TrackTimingKind TimingKind { get; init; } = TrackTimingKind.GameEvent;
     public string? Category { get; init; }
+    public bool IsRecordOnly { get; init; }
 }
 
 public enum SectorFeatureType

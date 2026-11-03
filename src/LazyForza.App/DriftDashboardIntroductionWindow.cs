@@ -4,7 +4,7 @@ using System.Windows.Media;
 
 namespace LazyForza.App;
 
-internal sealed class DriftDashboardIntroductionWindow : Window
+internal sealed class DriftDashboardIntroductionWindow : AppWindow
 {
     private readonly CheckBox autoCloseDashboard;
 

@@ -15,7 +15,10 @@ public sealed record TrackSummary(
     TrackLayoutKind LayoutKind,
     TrackCatalogKind CatalogKind,
     TrackTimingKind TimingKind,
-    string? Category);
+    string? Category)
+{
+    public bool IsRecordOnly { get; init; }
+}
 
 public sealed record VehicleProfileSummary(
     string Id,
@@ -31,7 +34,7 @@ public sealed record VehicleProfileSummary(
 
 public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStore, IDisposable
 {
-    public const int CurrentSchemaVersion = 15;
+    public const int CurrentSchemaVersion = 16;
     public const int MaxLapsPerTrack = 50;
     public const int MaxEstateStrategySamplesPerTrack = 96;
     public const int MaxEstateStrategySamples = 512;
@@ -86,6 +89,14 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
         "ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value, UpdatedAt=excluded.UpdatedAt;");
 
     public string? GetAppSetting(string key) => database.QueryText($"SELECT Value FROM AppSettings WHERE Key={Quote(key)} LIMIT 1;");
+
+    public void SetAppSettings(IReadOnlyDictionary<string, string> settings)
+    {
+        var updatedAt = Quote(DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        database.ExecuteTransaction(settings.Select(pair =>
+            $"INSERT INTO AppSettings(Key,Value,UpdatedAt) VALUES({Quote(pair.Key)},{Quote(pair.Value)},{updatedAt}) " +
+            "ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value, UpdatedAt=excluded.UpdatedAt;"));
+    }
 
     public void SaveEstateStrategySample(EstateStrategySample sample)
     {
@@ -279,28 +290,33 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
         EstateTrackDefinition? estate = null,
         bool clearExistingLaps = false)
     {
+        lock (lapLibraryGate) database.ExecuteTransaction([BuildTrackSql(track, sectors, estate, clearExistingLaps)]);
+    }
+
+    private static string BuildTrackSql(TrackTemplate track, IReadOnlyList<SectorDefinition> sectors,
+        EstateTrackDefinition? estate = null, bool clearExistingLaps = false)
+    {
         if (track.TimingKind == TrackTimingKind.EstateGeometry && estate is null)
             throw new ArgumentException("地产几何赛道必须同时保存地产定义。", nameof(estate));
         if (estate is not null && estate.TrackId != track.Id)
             throw new ArgumentException("地产定义与赛道 ID 不一致。", nameof(estate));
         var trackId = Quote(track.Id.ToString());
-        var sql = new StringBuilder(32_768)
-            .Append("BEGIN IMMEDIATE;\n");
+        var sql = new StringBuilder(32_768);
         if (clearExistingLaps)
             sql.Append("DELETE FROM Laps WHERE TrackId=").Append(trackId).Append(";\n");
         sql
-            .Append("INSERT INTO TrackTemplates(Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind) VALUES(")
+            .Append("INSERT INTO TrackTemplates(Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind,IsRecordOnly) VALUES(")
             .Append(trackId).Append(',').Append(Quote(track.Name)).Append(',').Append(track.Direction).Append(',')
             .Append(Quote(track.Source)).Append(',').Append(Quote(track.GameBuild)).Append(',')
             .Append(N(track.LengthMeters)).Append(',').Append(N(track.MatchingToleranceMeters)).Append(',')
             .Append(N(track.Confidence)).Append(',').Append(track.CaptureLapCount).Append(',')
             .Append(Quote(track.CreatedAt.ToString("O"))).Append(',').Append(Quote(track.UpdatedAt.ToString("O"))).Append(',')
             .Append(Quote(track.LayoutKind.ToString())).Append(',').Append(Quote(track.CatalogKind.ToString())).Append(',')
-            .Append(Quote(track.Category)).Append(',').Append(Quote(track.TimingKind.ToString())).Append(") ")
+            .Append(Quote(track.Category)).Append(',').Append(Quote(track.TimingKind.ToString())).Append(',').Append(track.IsRecordOnly ? 1 : 0).Append(") ")
             .Append("ON CONFLICT(Id) DO UPDATE SET Name=excluded.Name,Direction=excluded.Direction,Source=excluded.Source,GameBuild=excluded.GameBuild,")
             .Append("LengthMeters=excluded.LengthMeters,ToleranceMeters=excluded.ToleranceMeters,Confidence=excluded.Confidence,")
             .Append("CaptureLapCount=excluded.CaptureLapCount,UpdatedAt=excluded.UpdatedAt,LayoutKind=excluded.LayoutKind,")
-            .Append("CatalogKind=excluded.CatalogKind,Category=excluded.Category,TimingKind=excluded.TimingKind;\n")
+            .Append("CatalogKind=excluded.CatalogKind,Category=excluded.Category,TimingKind=excluded.TimingKind,IsRecordOnly=excluded.IsRecordOnly;\n")
             .Append("DELETE FROM TrackPoints WHERE TrackId=").Append(trackId).Append(";\n")
             .Append("DELETE FROM SectorDefinitions WHERE TrackId=").Append(trackId).Append(";\n")
             .Append("DELETE FROM EstateCheckpoints WHERE TrackId=").Append(trackId).Append(";\n")
@@ -330,7 +346,7 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
             AppendEstateDefinition(sql, estate);
         }
 
-        database.Execute(sql.Append("COMMIT;").ToString());
+        return sql.ToString();
     }
 
     public void SaveLap(LapRecord lap)
@@ -340,12 +356,18 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
 
     private void SaveLapCore(LapRecord lap)
     {
+        database.ExecuteTransaction([BuildLapSql(lap)]);
+        PruneTrackLaps(lap.TrackId);
+    }
+
+    private static string BuildLapSql(LapRecord lap)
+    {
         var performanceClass = PerformanceClassCatalog.Resolve(
             lap.Vehicle.CarClass,
             lap.Vehicle.PerformanceIndex);
         var vehicleKey = Quote($"{lap.Vehicle.CarOrdinal}:{lap.Vehicle.PerformanceIndex}:{lap.Vehicle.RoundedMaxRpm}");
         var playerCode = PlayerIdentitySettings.Normalize(lap.PlayerCode);
-        var sql = "BEGIN IMMEDIATE;\n" +
+        var sql =
             $"INSERT INTO Sessions(Id,Source,StartedAt,RawRecordingPath) VALUES({Quote(lap.SessionId.ToString())},'Replay',{Quote(lap.StartedAt.ToString("O"))},NULL) ON CONFLICT(Id) DO NOTHING;\n" +
             $"INSERT INTO Laps(Id,TrackId,Direction,SectorSchemaVersion,SessionId,VehicleFingerprint,CarClass,PerformanceIndex,StartedAt,TotalSeconds,IsValid,InvalidReason,PlayerCode,TrackRevision,VehicleSnapshot,SessionInfo,Annotation) VALUES(" +
             $"{Quote(lap.Id.ToString())},{Quote(lap.TrackId.ToString())},{lap.Direction},{lap.SectorSchemaVersion},{Quote(lap.SessionId.ToString())},{vehicleKey},{performanceClass},{lap.Vehicle.PerformanceIndex},{Quote(lap.StartedAt.ToString("O"))},{N(lap.TotalSeconds)},{(lap.IsValid ? 1 : 0)},{Quote(lap.InvalidReason)},{Quote(playerCode.Length == 0 ? null : playerCode)},{Quote(lap.TrackRevision)},{Quote(JsonSerializer.Serialize(lap.Vehicle))},{Quote(lap.SessionInfo is null ? null : JsonSerializer.Serialize(lap.SessionInfo))},{Quote(JsonSerializer.Serialize(LapAnnotation.Normalize(lap.Annotation)))});\n";
@@ -362,8 +384,7 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
             sql += $"INSERT INTO LapSamples(LapId,S,ElapsedSeconds,SpeedMps,Rpm,Gear,Accel,Brake,DeltaSeconds,X,Y,Z,Dynamics) VALUES({Quote(lap.Id.ToString())},{N(sample.S)},{N(sample.ElapsedSeconds)},{N(sample.SpeedMps)},{N(sample.Rpm)},{sample.Gear},{N(sample.Accel)},{N(sample.Brake)},{N(sample.DeltaSeconds)},{N(sample.X)},{N(sample.Y)},{N(sample.Z)},{dynamics});\n";
         }
 
-        database.Execute(sql + "COMMIT;");
-        PruneTrackLaps(lap.TrackId);
+        return sql;
     }
 
     public int CountTracks(string? source = null)
@@ -382,7 +403,7 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
     {
         var filter = source is null ? string.Empty : $" WHERE t.Source={Quote(source)}";
         return database.QueryRows(
-        $"SELECT t.Id,t.Name,t.Source,t.LengthMeters,COUNT(l.Id),t.LayoutKind,t.CatalogKind,t.TimingKind,t.Category FROM TrackTemplates t LEFT JOIN Laps l ON l.TrackId=t.Id{filter} GROUP BY t.Id ORDER BY t.CatalogKind,t.TimingKind,t.Category,t.Name;")
+        $"SELECT t.Id,t.Name,t.Source,t.LengthMeters,COUNT(l.Id),t.LayoutKind,t.CatalogKind,t.TimingKind,t.Category,t.IsRecordOnly FROM TrackTemplates t LEFT JOIN Laps l ON l.TrackId=t.Id{filter} GROUP BY t.Id ORDER BY t.CatalogKind,t.TimingKind,t.Category,t.Name;")
         .Select(row => new TrackSummary(
             Guid.Parse(row[0]!),
             row[1] ?? "Unnamed",
@@ -392,18 +413,18 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
             ParseLayoutKind(row[5]),
             ParseCatalogKind(row[6]),
             ParseTimingKind(row[7]),
-            row[8]))
+            row[8]) { IsRecordOnly = row[9] == "1" })
         .ToArray();
     }
 
     public int CountTracks(TrackCatalogKind catalogKind) => int.Parse(
-        database.QueryText($"SELECT COUNT(*) FROM TrackTemplates WHERE CatalogKind={Quote(catalogKind.ToString())};") ?? "0",
+        database.QueryText($"SELECT COUNT(*) FROM TrackTemplates WHERE CatalogKind={Quote(catalogKind.ToString())} AND IsRecordOnly=0;") ?? "0",
         CultureInfo.InvariantCulture);
 
     public (TrackTemplate Track, IReadOnlyList<SectorDefinition> Sectors)? LoadLatestTrack(string? source = null)
     {
         var sourceFilter = source is null ? string.Empty : $" WHERE Source={Quote(source)}";
-        var row = database.QueryRows($"SELECT Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind FROM TrackTemplates{sourceFilter} ORDER BY UpdatedAt DESC LIMIT 1;").SingleOrDefault();
+        var row = database.QueryRows($"SELECT Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind,IsRecordOnly FROM TrackTemplates{sourceFilter} ORDER BY UpdatedAt DESC LIMIT 1;").SingleOrDefault();
         if (row is null) return null;
         var id = Guid.Parse(row[0]!);
         var points = database.QueryRows($"SELECT X,Y,Z,S,TangentX,TangentZ FROM TrackPoints WHERE TrackId={Quote(id.ToString())} ORDER BY PointIndex;")
@@ -424,7 +445,7 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
             LayoutKind = ParseLayoutKind(row[11]),
             CatalogKind = ParseCatalogKind(row[12]),
             Category = row[13],
-            TimingKind = ParseTimingKind(row[14])
+            TimingKind = ParseTimingKind(row[14]), IsRecordOnly = row[15] == "1"
         };
         var sectors = database.QueryRows($"SELECT SectorSchemaVersion,SectorIndex,StartS,EndS,FeatureType,AlgorithmVersion FROM SectorDefinitions WHERE TrackId={Quote(id.ToString())} ORDER BY SectorIndex;")
             .Select(sector => new SectorDefinition(id, int.Parse(sector[0]!, CultureInfo.InvariantCulture), int.Parse(sector[1]!, CultureInfo.InvariantCulture),
@@ -436,7 +457,7 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
 
     public (TrackTemplate Track, IReadOnlyList<SectorDefinition> Sectors)? LoadTrack(Guid trackId)
     {
-        var row = database.QueryRows($"SELECT Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind FROM TrackTemplates WHERE Id={Quote(trackId.ToString())} LIMIT 1;").SingleOrDefault();
+        var row = database.QueryRows($"SELECT Id,Name,Direction,Source,GameBuild,LengthMeters,ToleranceMeters,Confidence,CaptureLapCount,CreatedAt,UpdatedAt,LayoutKind,CatalogKind,Category,TimingKind,IsRecordOnly FROM TrackTemplates WHERE Id={Quote(trackId.ToString())} LIMIT 1;").SingleOrDefault();
         if (row is null) return null;
         var id = Guid.Parse(row[0]!);
         var points = database.QueryRows($"SELECT X,Y,Z,S,TangentX,TangentZ FROM TrackPoints WHERE TrackId={Quote(id.ToString())} ORDER BY PointIndex;")
@@ -457,7 +478,7 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
             LayoutKind = ParseLayoutKind(row[11]),
             CatalogKind = ParseCatalogKind(row[12]),
             Category = row[13],
-            TimingKind = ParseTimingKind(row[14])
+            TimingKind = ParseTimingKind(row[14]), IsRecordOnly = row[15] == "1"
         };
         var sectors = database.QueryRows($"SELECT SectorSchemaVersion,SectorIndex,StartS,EndS,FeatureType,AlgorithmVersion FROM SectorDefinitions WHERE TrackId={Quote(id.ToString())} ORDER BY SectorIndex;")
             .Select(sector => new SectorDefinition(id, int.Parse(sector[0]!, CultureInfo.InvariantCulture), int.Parse(sector[1]!, CultureInfo.InvariantCulture),
@@ -637,8 +658,14 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
             .ToArray();
     }
 
-    public void DeleteLap(Guid lapId) => database.Execute(
-        $"DELETE FROM Laps WHERE Id={Quote(lapId.ToString())};");
+    public void DeleteLap(Guid lapId)
+    {
+        lock (lapLibraryGate)
+        {
+            database.Execute($"DELETE FROM Laps WHERE Id={Quote(lapId.ToString())};");
+            RemoveEmptyRecordedRoutes();
+        }
+    }
 
     public void DeleteTrackLaps(
         Guid trackId,
@@ -652,14 +679,18 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
         var preserveClause = preserveLapIds is { Count: > 0 }
             ? $" AND Id NOT IN ({string.Join(',', preserveLapIds.Select(id => Quote(id.ToString())))})"
             : string.Empty;
-        database.Execute($"DELETE FROM Laps WHERE TrackId={Quote(trackId.ToString())}{classClause}{preserveClause};");
+        lock (lapLibraryGate)
+        {
+            database.Execute($"DELETE FROM Laps WHERE TrackId={Quote(trackId.ToString())}{classClause}{preserveClause};");
+            RemoveEmptyRecordedRoutes();
+        }
     }
 
     public void RenameTrack(Guid trackId, string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         EnsureTrackIsMutable(trackId);
-        database.Execute($"UPDATE TrackTemplates SET Name={Quote(name.Trim())},UpdatedAt={Quote(DateTimeOffset.UtcNow.ToString("O"))} WHERE Id={Quote(trackId.ToString())};");
+        database.Execute($"UPDATE TrackTemplates SET Name={Quote(name.Trim())} WHERE Id={Quote(trackId.ToString())};");
     }
 
     public void UpdateTrackSource(Guid trackId, string source)
@@ -893,6 +924,15 @@ public sealed partial class LazyForzaStore : IModuleSettingsStore, IAnalysisStor
             database.ExecuteTransaction([
                 exists ? "SELECT 1;" : "ALTER TABLE Laps ADD COLUMN Annotation TEXT;",
                 "UPDATE SchemaVersion SET Version=15;"]);
+        }
+
+        if (version < 16)
+        {
+            var exists = database.QueryText("SELECT COUNT(*) FROM pragma_table_info('TrackTemplates') WHERE name='IsRecordOnly';") == "1";
+            database.ExecuteTransaction([
+                exists ? "SELECT 1;" : "ALTER TABLE TrackTemplates ADD COLUMN IsRecordOnly INTEGER NOT NULL DEFAULT 0;",
+                "CREATE TABLE IF NOT EXISTS PendingLapCaptures(Id TEXT PRIMARY KEY,Source TEXT NOT NULL,Payload TEXT NOT NULL);",
+                "UPDATE SchemaVersion SET Version=16;"]);
         }
 
         if (SchemaVersion != CurrentSchemaVersion) throw new InvalidOperationException("Database schema version is newer than this LazyForza build.");
